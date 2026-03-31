@@ -1,0 +1,36 @@
+# Secrets — NEVER commit
+moodwave-backend/firebase-credentials.json
+moodwave-backend/.env
+moodwave-backend/.env.local
+admin-panel/.env
+
+# Dependencies — never commit
+node_modules/
+admin-panel/node_modules/
+admin-panel/dist/
+
+# Claude Code — dev tool, не для репо
+CLAUDE.md
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Flutter build artifacts
+diplom-frontend/build/
+diplom-frontend/.dart_tool/
+diplom-frontend/.flutter-plugins
+diplom-frontend/.flutter-plugins-dependencies
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
