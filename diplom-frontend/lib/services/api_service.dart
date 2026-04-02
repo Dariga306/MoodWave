@@ -79,6 +79,18 @@ class ApiService {
     return resp.data;
   }
 
+  Future<Map<String, dynamic>> loginWithGoogle(String idToken) async {
+    final resp = await _dio.post('/auth/google', data: {'id_token': idToken});
+    await saveTokens(resp.data['access_token'], resp.data['refresh_token']);
+    return resp.data;
+  }
+
+  Future<Map<String, dynamic>> loginWithFirebasePhone(String firebaseToken) async {
+    final resp = await _dio.post('/auth/firebase-phone', data: {'firebase_token': firebaseToken});
+    await saveTokens(resp.data['access_token'], resp.data['refresh_token']);
+    return resp.data;
+  }
+
   Future<Map<String, dynamic>> getMe() async {
     final resp = await _dio.get('/users/me');
     return resp.data;

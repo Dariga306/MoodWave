@@ -71,7 +71,7 @@
   ],
   "item": [
     {
-      "name": "🔐 Auth",
+      "name": "Auth",
       "item": [
         {
           "name": "Register",
@@ -284,6 +284,156 @@
           }
         },
         {
+          "name": "Sign In with Google",
+          "request": {
+            "method": "POST",
+            "description": "Authenticates via Google ID token. Returns tokens + user (creates account on first sign-in).",
+            "url": "{{base_url}}/auth/google",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id_token\": \"<GOOGLE_ID_TOKEN>\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set('access_token', pm.response.json().access_token);",
+                  "  pm.environment.set('refresh_token', pm.response.json().refresh_token);",
+                  "  pm.environment.set('user_id', pm.response.json().user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sign In with Apple",
+          "request": {
+            "method": "POST",
+            "description": "Authenticates via Apple identity token. Returns tokens + user (creates account on first sign-in).",
+            "url": "{{base_url}}/auth/apple",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identity_token\": \"<APPLE_IDENTITY_TOKEN>\",\n  \"full_name\": \"Jane Doe\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set('access_token', pm.response.json().access_token);",
+                  "  pm.environment.set('refresh_token', pm.response.json().refresh_token);",
+                  "  pm.environment.set('user_id', pm.response.json().user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sign In with Phone (Firebase)",
+          "request": {
+            "method": "POST",
+            "description": "Authenticates via Firebase phone auth token. Pass the Firebase ID token obtained after SMS verification.",
+            "url": "{{base_url}}/auth/firebase-phone",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firebase_token\": \"<FIREBASE_ID_TOKEN>\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set('access_token', pm.response.json().access_token);",
+                  "  pm.environment.set('refresh_token', pm.response.json().refresh_token);",
+                  "  pm.environment.set('user_id', pm.response.json().user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[DEV] Get Verification Code",
+          "request": {
+            "method": "GET",
+            "description": "Returns the current verification code for testing. Only works when APP_ENV=development.",
+            "url": {
+              "raw": "{{base_url}}/auth/debug-code?email=test@example.com",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "debug-code"
+              ],
+              "query": [
+                {
+                  "key": "email",
+                  "value": "test@example.com"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set('verification_code', pm.response.json().verification_code);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Check Username",
           "request": {
             "method": "GET",
@@ -309,7 +459,7 @@
       ]
     },
     {
-      "name": "👤 Profile",
+      "name": "Profile",
       "item": [
         {
           "name": "Get Me",
@@ -438,7 +588,20 @@
       ]
     },
     {
-      "name": "🔍 Search",
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "Get Notifications",
+          "request": {
+            "method": "GET",
+            "description": "Returns unread and recent notifications for the current user.",
+            "url": "{{base_url}}/notifications"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Search",
       "item": [
         {
           "name": "Global Search",
@@ -616,7 +779,7 @@
       ]
     },
     {
-      "name": "🎵 Music",
+      "name": "Music",
       "item": [
         {
           "name": "Get Recommendations",
@@ -916,7 +1079,7 @@
       ]
     },
     {
-      "name": "🌤 Weather",
+      "name": "Weather",
       "item": [
         {
           "name": "Current Weather",
@@ -967,8 +1130,31 @@
       ]
     },
     {
-      "name": "💘 Match",
+      "name": "Match",
       "item": [
+        {
+          "name": "Match Candidates",
+          "request": {
+            "method": "GET",
+            "description": "Returns paginated match candidates scored by taste similarity.",
+            "url": {
+              "raw": "{{base_url}}/matches/candidates?limit=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "matches",
+                "candidates"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        },
         {
           "name": "Get Candidates",
           "request": {
@@ -1039,11 +1225,47 @@
             "description": "Returns the raw taste vector used by the match engine.",
             "url": "{{base_url}}/matches/taste-vector"
           }
+        },
+        {
+          "name": "Decide (Like/Skip)",
+          "request": {
+            "method": "POST",
+            "description": "Send a like or skip decision for a candidate.",
+            "url": "{{base_url}}/matches/decide/{{target_user_id}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"like\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 && pm.response.json().match_id) {",
+                  "  pm.environment.set('match_id', pm.response.json().match_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
     {
-      "name": "💬 Chat",
+      "name": "Chat",
       "item": [
         {
           "name": "List Chats",
@@ -1175,7 +1397,7 @@
       ]
     },
     {
-      "name": "👥 Social",
+      "name": "Social",
       "item": [
         {
           "name": "Friends",
@@ -1251,7 +1473,7 @@
       ]
     },
     {
-      "name": "🎧 Rooms",
+      "name": "Rooms",
       "item": [
         {
           "name": "Create Room",
@@ -1370,7 +1592,299 @@
       ]
     },
     {
-      "name": "❤️ System",
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Stats",
+          "request": {
+            "method": "GET",
+            "description": "Returns aggregate platform statistics (users, matches, tracks, rooms).",
+            "url": "{{base_url}}/admin/stats"
+          }
+        },
+        {
+          "name": "System Info",
+          "request": {
+            "method": "GET",
+            "description": "Returns server environment, uptime, and service health.",
+            "url": "{{base_url}}/admin/system"
+          }
+        },
+        {
+          "name": "Clear Cache",
+          "request": {
+            "method": "POST",
+            "description": "Clears all Redis caches (admin only).",
+            "url": "{{base_url}}/admin/system/clear-cache"
+          }
+        },
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "description": "Returns paginated list of all users with status.",
+            "url": {
+              "raw": "{{base_url}}/admin/users?limit=50&offset=0",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get User",
+          "request": {
+            "method": "GET",
+            "description": "Returns full profile and history for a specific user.",
+            "url": "{{base_url}}/admin/users/{{target_user_id}}"
+          }
+        },
+        {
+          "name": "Delete User",
+          "request": {
+            "method": "DELETE",
+            "description": "Permanently deletes a user account.",
+            "url": "{{base_url}}/admin/users/{{target_user_id}}"
+          }
+        },
+        {
+          "name": "Set Admin Role",
+          "request": {
+            "method": "PUT",
+            "description": "Grants or revokes admin role.",
+            "url": "{{base_url}}/admin/users/{{target_user_id}}/admin",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_admin\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Block User (Admin)",
+          "request": {
+            "method": "PUT",
+            "description": "Blocks or unblocks a user.",
+            "url": "{{base_url}}/admin/users/{{target_user_id}}/block",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_blocked\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "User History",
+          "request": {
+            "method": "GET",
+            "description": "Returns listening history for a specific user.",
+            "url": {
+              "raw": "{{base_url}}/admin/users/{{target_user_id}}/history?limit=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{target_user_id}}",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Analytics",
+          "request": {
+            "method": "GET",
+            "description": "Returns platform-wide analytics (DAU, top tracks, genres).",
+            "url": "{{base_url}}/admin/analytics"
+          }
+        },
+        {
+          "name": "List Matches",
+          "request": {
+            "method": "GET",
+            "description": "Returns all matches with user pairs and status.",
+            "url": "{{base_url}}/admin/matches"
+          }
+        },
+        {
+          "name": "Delete Match",
+          "request": {
+            "method": "DELETE",
+            "description": "Deletes a specific match by ID.",
+            "url": "{{base_url}}/admin/matches/{{match_id}}"
+          }
+        },
+        {
+          "name": "List Rooms",
+          "request": {
+            "method": "GET",
+            "description": "Returns all rooms with participant counts.",
+            "url": "{{base_url}}/admin/rooms"
+          }
+        },
+        {
+          "name": "Delete Room (Admin)",
+          "request": {
+            "method": "DELETE",
+            "description": "Force-closes a listening room.",
+            "url": "{{base_url}}/admin/rooms/{{room_id}}"
+          }
+        },
+        {
+          "name": "List Playlists (Admin)",
+          "request": {
+            "method": "GET",
+            "description": "Returns all playlists with owner info.",
+            "url": "{{base_url}}/admin/playlists"
+          }
+        },
+        {
+          "name": "Playlist Tracks (Admin)",
+          "request": {
+            "method": "GET",
+            "description": "Returns tracks for a specific playlist.",
+            "url": {
+              "raw": "{{base_url}}/admin/playlists/{{playlist_id}}/tracks",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "playlists",
+                "{{playlist_id}}",
+                "tracks"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "Delete Playlist (Admin)",
+          "request": {
+            "method": "DELETE",
+            "description": "Deletes a playlist.",
+            "url": "{{base_url}}/admin/playlists/{{playlist_id}}"
+          }
+        },
+        {
+          "name": "List Tracks",
+          "request": {
+            "method": "GET",
+            "description": "Returns most-played tracks across the platform.",
+            "url": "{{base_url}}/admin/tracks"
+          }
+        },
+        {
+          "name": "Delete Track",
+          "request": {
+            "method": "DELETE",
+            "description": "Removes a track from the platform history.",
+            "url": "{{base_url}}/admin/tracks/{{spotify_track_id}}"
+          }
+        },
+        {
+          "name": "List Reports",
+          "request": {
+            "method": "GET",
+            "description": "Returns open user moderation reports.",
+            "url": "{{base_url}}/admin/reports"
+          }
+        },
+        {
+          "name": "Delete Report",
+          "request": {
+            "method": "DELETE",
+            "description": "Resolves and removes a moderation report.",
+            "url": "{{base_url}}/admin/reports/{{report_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Debug",
+      "item": [
+        {
+          "name": "Seed Demo Match",
+          "request": {
+            "method": "POST",
+            "description": "Creates a demo match for the current user. Development only.",
+            "url": "{{base_url}}/debug/seed-demo-match",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 && pm.response.json().match_id) {",
+                  "  pm.environment.set('match_id', pm.response.json().match_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "System",
       "item": [
         {
           "name": "Health",

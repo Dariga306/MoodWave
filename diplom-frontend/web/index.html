@@ -42,5 +42,24 @@
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script src="flutter_bootstrap.js" async></script>
+
+  <!-- Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDoetN0rxAbriHE8B4N_W7Mra_caZE5iPY",
+      authDomain: "moodwave-a4adb-98e29.firebaseapp.com",
+      projectId: "moodwave-a4adb-98e29",
+      storageBucket: "moodwave-a4adb-98e29.firebasestorage.app",
+      messagingSenderId: "13338581238",
+      appId: "1:13338581238:web:6a0a4178e76cdceaf1f4d7"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    window.firebaseAuth = auth;
+  </script>
 </body>
 </html>

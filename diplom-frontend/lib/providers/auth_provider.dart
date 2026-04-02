@@ -72,6 +72,36 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> loginWithGoogle(String idToken) async {
+    _error = null;
+    try {
+      final data = await _api.loginWithGoogle(idToken);
+      _user = data['user'];
+      _status = AuthStatus.authenticated;
+      notifyListeners();
+      return true;
+    } on Exception catch (e) {
+      _error = _parseError(e);
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> loginWithFirebasePhone(String firebaseToken) async {
+    _error = null;
+    try {
+      final data = await _api.loginWithFirebasePhone(firebaseToken);
+      _user = data['user'];
+      _status = AuthStatus.authenticated;
+      notifyListeners();
+      return true;
+    } on Exception catch (e) {
+      _error = _parseError(e);
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<void> logout() async {
     await _api.clearTokens();
     _user = null;

@@ -955,3 +955,146 @@ async def debug_get_code(
         "is_verified": user.is_verified,
         "code_expires": user.verification_code_expires.isoformat() if user.verification_code_expires else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# OAuth helpers
+# ---------------------------------------------------------------------------
+
+import re as _re
+import secrets as _secrets
+
+
+async def _get_or_create_oauth_user(
+    db: AsyncSession,
+    *,
+    email: str,
+    display_name: str,
+    avatar_url: Optional[str] = None,
+    phone: Optional[str] = None,
+) -> User:
+    """Find existing user by email/phone or create a new verified one."""
+    if email:
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalar_one_or_none()
+    elif phone:
+        result = await db.execute(select(User).where(User.phone == phone))
+        user = result.scalar_one_or_none()
+    else:
+        user = None
+
+    if user:
+        if user.deactivated_at:
+            user.deactivated_at = None
+            user.delete_at = None
+            user.deletion_type = None
+            await db.commit()
+            await db.refresh(user)
+        return user
+
+    # Generate unique username
+    base = _re.sub(r"[^a-z0-9]", "", (email or "").split("@")[0].lower()) or "user"
+    if len(base) < 3:
+        base = base + "user"
+    username = base
+    suffix = 0
+    while True:
+        existing = await db.scalar(select(User).where(User.username == username))
+        if not existing:
+            break
+        suffix += 1
+        username = f"{base}{suffix}"
+
+    # Phone-only users get a placeholder email
+    final_email = email or f"phone_{phone}@moodwave.internal"
+
+    user = User(
+        email=final_email,
+        username=username,
+        hashed_password=hash_password(_secrets.token_hex(32)),
+        display_name=display_name or username,
+        avatar_url=avatar_url,
+        phone=phone,
+        is_verified=True,
+        is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+def _build_token_response(user: User) -> TokenResponse:
+    access_token = create_access_token({"sub": str(user.id)})
+    refresh_token_val = create_refresh_token({"sub": str(user.id)})
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token_val,
+        user=UserResponse.model_validate(user),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Google OAuth (via Firebase token)
+# ---------------------------------------------------------------------------
+
+class GoogleAuthRequest(BaseModel):
+    id_token: str  # Firebase ID token after Google sign-in
+
+
+@router.post("/auth/google", response_model=TokenResponse, summary="Sign in with Google")
+async def google_auth(
+    body: GoogleAuthRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        from firebase_admin import auth as _fb_auth
+        from app.services.firebase_service import init_firebase
+        if not init_firebase():
+            raise HTTPException(status_code=503, detail="Firebase not configured")
+        decoded = _fb_auth.verify_id_token(body.id_token)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Google/Firebase token verification failed: %s", exc)
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    email = decoded.get("email", "")
+    name = decoded.get("name", "")
+    avatar = decoded.get("picture")
+
+    user = await _get_or_create_oauth_user(db, email=email, display_name=name, avatar_url=avatar)
+    return _build_token_response(user)
+
+
+# ---------------------------------------------------------------------------
+# Firebase Phone Auth
+# ---------------------------------------------------------------------------
+
+class FirebasePhoneRequest(BaseModel):
+    firebase_token: str
+
+
+@router.post("/auth/firebase-phone", response_model=TokenResponse, summary="Sign in with phone (Firebase)")
+async def firebase_phone_auth(
+    body: FirebasePhoneRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        from firebase_admin import auth as _fb_auth
+        from app.services.firebase_service import init_firebase
+        if not init_firebase():
+            raise HTTPException(status_code=503, detail="Firebase not configured")
+        decoded = _fb_auth.verify_id_token(body.firebase_token)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Firebase token verification failed: %s", exc)
+        raise HTTPException(status_code=400, detail="Invalid Firebase token")
+
+    phone = decoded.get("phone_number")
+    if not phone:
+        raise HTTPException(status_code=400, detail="Token has no phone number")
+
+    user = await _get_or_create_oauth_user(db, email="", display_name="", phone=phone)
+    return _build_token_response(user)

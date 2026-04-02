@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     MAIL_PORT: int = 587
     MAIL_SERVER: str = "smtp.gmail.com"
 
+    # OAuth
+    GOOGLE_CLIENT_ID: str = ""
+
     # App
     APP_ENV: str = "development"
 
