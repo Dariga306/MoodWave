@@ -48,6 +48,11 @@ class User(Base):
     reset_token: Mapped[Optional[str]] = mapped_column(String(512))
     reset_token_expires: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
+    # Spotify OAuth tokens
+    spotify_access_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    spotify_refresh_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    spotify_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Account deactivation / scheduled deletion
     deactivated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     delete_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

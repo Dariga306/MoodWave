@@ -1,19 +1,6 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
@@ -33,14 +20,6 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
-
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
   <script src="flutter_bootstrap.js" async></script>
 
   <!-- Firebase -->
@@ -60,6 +39,158 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     window.firebaseAuth = auth;
+  </script>
+
+  <!-- Spotify Web Playback SDK -->
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script>
+    // Called automatically by the Spotify SDK when it's ready
+    window.onSpotifyWebPlaybackSDKReady = function () {
+      window.spotifySDKLoaded = true;
+      console.log('[Spotify] SDK ready');
+      // If init was called before SDK loaded, run it now
+      if (window._pendingSpotifyToken) {
+        window.spotifyBridge.init(window._pendingSpotifyToken);
+        window._pendingSpotifyToken = null;
+      }
+    };
+
+    window.spotifyBridge = {
+      player: null,
+      deviceId: null,
+      ready: false,
+      lastState: null,
+      _currentToken: null,
+
+      init: function (token) {
+        // If SDK not yet loaded, queue the init
+        if (!window.spotifySDKLoaded) {
+          window._pendingSpotifyToken = token;
+          return;
+        }
+        // Disconnect previous player if any
+        if (window.spotifyBridge.player) {
+          window.spotifyBridge.player.disconnect();
+          window.spotifyBridge.player = null;
+          window.spotifyBridge.deviceId = null;
+          window.spotifyBridge.ready = false;
+        }
+
+        window.spotifyBridge._currentToken = token;
+
+        var player = new Spotify.Player({
+          name: 'MoodWave',
+          getOAuthToken: function (cb) { cb(token); },
+          volume: 0.8
+        });
+
+        player.addListener('ready', function (data) {
+          window.spotifyBridge.deviceId = data.device_id;
+          window.spotifyBridge.ready = true;
+          console.log('[Spotify] Ready, device:', data.device_id);
+        });
+
+        player.addListener('not_ready', function () {
+          window.spotifyBridge.ready = false;
+        });
+
+        player.addListener('player_state_changed', function (state) {
+          window.spotifyBridge.lastState = state;
+        });
+
+        player.addListener('initialization_error', function (e) {
+          console.error('[Spotify] Init error:', e.message);
+        });
+        player.addListener('authentication_error', function (e) {
+          console.error('[Spotify] Auth error:', e.message);
+          window.spotifyBridge.ready = false;
+        });
+        player.addListener('account_error', function (e) {
+          console.error('[Spotify] Account error (Premium required):', e.message);
+        });
+
+        player.connect();
+        window.spotifyBridge.player = player;
+      },
+
+      // Search Spotify for the best match and play it
+      playByQuery: async function (query, token) {
+        var deviceId = window.spotifyBridge.deviceId;
+        if (!deviceId) { console.warn('[Spotify] No device ID yet'); return false; }
+
+        try {
+          var searchResp = await fetch(
+            'https://api.spotify.com/v1/search?q=' + encodeURIComponent(query) + '&type=track&limit=1',
+            { headers: { 'Authorization': 'Bearer ' + token } }
+          );
+          var searchData = await searchResp.json();
+          var items = searchData && searchData.tracks && searchData.tracks.items;
+          if (!items || items.length === 0) { console.warn('[Spotify] No results for:', query); return false; }
+          var uri = items[0].uri;
+
+          await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + deviceId, {
+            method: 'PUT',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uris: [uri] })
+          });
+          return true;
+        } catch (e) {
+          console.error('[Spotify] playByQuery error:', e);
+          return false;
+        }
+      },
+
+      // Play a track by its Spotify URI directly
+      playUri: async function (uri, token) {
+        var deviceId = window.spotifyBridge.deviceId;
+        if (!deviceId) return false;
+        try {
+          await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + deviceId, {
+            method: 'PUT',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uris: [uri] })
+          });
+          return true;
+        } catch (e) {
+          return false;
+        }
+      },
+
+      pause: function () {
+        if (window.spotifyBridge.player) window.spotifyBridge.player.pause();
+      },
+
+      resume: function () {
+        if (window.spotifyBridge.player) window.spotifyBridge.player.resume();
+      },
+
+      seek: function (posMs) {
+        if (window.spotifyBridge.player) window.spotifyBridge.player.seek(posMs);
+      },
+
+      setVolume: function (vol) {
+        if (window.spotifyBridge.player) window.spotifyBridge.player.setVolume(vol);
+      },
+
+      nextTrack: function () {
+        if (window.spotifyBridge.player) window.spotifyBridge.player.nextTrack();
+      },
+
+      previousTrack: function () {
+        if (window.spotifyBridge.player) window.spotifyBridge.player.previousTrack();
+      },
+
+      // Returns a plain-object snapshot of current state (synchronous)
+      getState: function () {
+        var s = window.spotifyBridge.lastState;
+        if (!s) return null;
+        return {
+          paused: s.paused,
+          position: s.position,
+          duration: s.duration
+        };
+      }
+    };
   </script>
 </body>
 </html>

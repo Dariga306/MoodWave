@@ -94,9 +94,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
     setState(() => _loading = false);
 
     if (ok) {
+      final devCode = context.read<AuthProvider>().devCode;
       Navigator.of(context).pushReplacement(MaterialPageRoute(
           builder: (_) => EmailVerificationScreen(
                 email: _emailCtrl.text.trim(),
+                devCode: devCode,
               )));
     } else {
       showErrorSnackBar(

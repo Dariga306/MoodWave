@@ -1,21 +1,33 @@
-"""Music service — iTunes Search API (primary) with Spotify metadata where available."""
+"""Music service — Spotify Search API (primary) or iTunes Search (fallback)."""
 import logging
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.music import TrackCache
 from app.services import itunes
 
 logger = logging.getLogger(__name__)
 
 
+def _use_spotify() -> bool:
+    """True when Spotify Client Credentials are configured."""
+    return bool(settings.SPOTIFY_CLIENT_ID and settings.SPOTIFY_CLIENT_SECRET)
+
+
 async def search_and_cache(query: str, limit: int, db: AsyncSession) -> list[dict]:
-    tracks = await itunes.search_tracks(query, limit)
+    if _use_spotify():
+        from app.services import spotify_service
+        tracks = await spotify_service.search_tracks(query, limit)
+    else:
+        tracks = await itunes.search_tracks(query, limit)
+
     for track_data in tracks:
         cache_payload = dict(track_data)
         genre = cache_payload.pop("genre", None)
+        cache_payload.pop("spotify_uri", None)  # not a DB column
         existing = await db.scalar(
             select(TrackCache).where(TrackCache.spotify_id == track_data["spotify_id"])
         )
@@ -32,14 +44,23 @@ async def search_and_cache(query: str, limit: int, db: AsyncSession) -> list[dic
 
 
 async def search_artists(query: str, limit: int = 10) -> list[dict]:
+    if _use_spotify():
+        from app.services import spotify_service
+        return await spotify_service.search_artists(query, limit)
     return await itunes.search_artists(query, limit)
 
 
 async def get_charts(genre: Optional[str] = None, limit: int = 20) -> list[dict]:
+    if _use_spotify():
+        from app.services import spotify_service
+        return await spotify_service.get_charts(genre, limit)
     return await itunes.get_charts(genre, limit)
 
 
 async def get_charts_by_city(city: str, limit: int = 20) -> list[dict]:
+    if _use_spotify():
+        from app.services import spotify_service
+        return await spotify_service.get_charts_by_city(city, limit)
     return await itunes.get_charts_by_city(city, limit)
 
 
@@ -51,6 +72,16 @@ async def get_recommendations_from_spotify(
     mood_label: Optional[str] = None,
     limit: int = 20,
 ) -> list[dict]:
+    if _use_spotify():
+        from app.services import spotify_service
+        return await spotify_service.get_recommendations(
+            seed_genres=seed_genres,
+            seed_tracks=seed_tracks,
+            mood_label=mood_label,
+            target_energy=target_energy,
+            target_valence=target_valence,
+            limit=limit,
+        )
     return await itunes.get_recommendations(
         mood_label=mood_label,
         seed_genres=seed_genres,

@@ -1,41 +1,36 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import 'main/main_screen.dart';
 
+// Popular cities shown before typing
 const List<String> _popularCities = [
-  // Kazakhstan
-  'Astana', 'Almaty', 'Shymkent', 'Karaganda', 'Aktobe',
-  'Pavlodar', 'Semey', 'Kostanay', 'Atyrau', 'Oral',
-  'Turkistan', 'Taraz', 'Kyzylorda', 'Aktau', 'Temirtau',
-  'Zhezkazgan', 'Balkhash',
-  // CIS
-  'Moscow', 'Saint Petersburg', 'Novosibirsk', 'Yekaterinburg',
-  'Bishkek', 'Tashkent', 'Baku', 'Tbilisi', 'Minsk', 'Kyiv',
-  // World
-  'London', 'Berlin', 'Paris', 'New York', 'Tokyo', 'Dubai',
-  'Istanbul', 'Seoul',
+  'New York', 'London', 'Paris', 'Tokyo', 'Dubai', 'Berlin',
+  'Sydney', 'Toronto', 'Seoul', 'Beijing', 'Mumbai', 'Istanbul',
+  'Barcelona', 'Amsterdam', 'Vienna', 'Prague', 'Warsaw', 'Kyiv',
+  'Moscow', 'Saint Petersburg', 'Almaty', 'Astana', 'Tashkent',
+  'Bishkek', 'Baku', 'Tbilisi', 'Yerevan', 'Minsk', 'Riga',
+  'Vilnius', 'Tallinn', 'Helsinki', 'Stockholm', 'Oslo', 'Copenhagen',
+  'Lisbon', 'Madrid', 'Rome', 'Milan', 'Athens', 'Budapest',
+  'Bucharest', 'Sofia', 'Belgrade', 'Zagreb', 'Sarajevo',
+  'Singapore', 'Bangkok', 'Jakarta', 'Kuala Lumpur', 'Manila',
+  'Ho Chi Minh City', 'Hanoi', 'Dhaka', 'Karachi', 'Lahore',
+  'Cairo', 'Lagos', 'Nairobi', 'Casablanca', 'Johannesburg',
+  'São Paulo', 'Buenos Aires', 'Rio de Janeiro', 'Bogotá', 'Lima',
+  'Santiago', 'Mexico City', 'Los Angeles', 'Chicago', 'Houston',
 ];
 
-// Normalize common Russian city name inputs to English
-String _normalizeCity(String city) {
-  const map = {
-    'астана': 'Astana', 'алматы': 'Almaty', 'шымкент': 'Shymkent',
-    'москва': 'Moscow', 'санкт-петербург': 'Saint Petersburg',
-    'санкт петербург': 'Saint Petersburg', 'питер': 'Saint Petersburg',
-    'новосибирск': 'Novosibirsk', 'екатеринбург': 'Yekaterinburg',
-    'бишкек': 'Bishkek', 'ташкент': 'Tashkent', 'баку': 'Baku',
-    'тбилиси': 'Tbilisi', 'минск': 'Minsk', 'киев': 'Kyiv',
-    'киiв': 'Kyiv', 'лондон': 'London', 'берлин': 'Berlin',
-    'париж': 'Paris', 'токио': 'Tokyo', 'дубай': 'Dubai',
-    'стамбул': 'Istanbul', 'сеул': 'Seoul',
-  };
-  final key = city.trim().toLowerCase();
-  return map[key] ?? city.trim().split(' ').map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}').join(' ');
-}
+String _capitalize(String s) => s.trim().isEmpty
+    ? s
+    : s.trim().split(RegExp(r'\s+')).map((w) =>
+        w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
 
 class CitySelectScreen extends StatefulWidget {
   const CitySelectScreen({super.key});
@@ -46,210 +41,361 @@ class CitySelectScreen extends StatefulWidget {
 
 class _CitySelectScreenState extends State<CitySelectScreen> {
   final _ctrl = TextEditingController();
-  String? _selected;
+  final _focus = FocusNode();
   bool _loading = false;
-  String _searchQuery = '';
+  bool _dropdownVisible = false;
+  bool _searchLoading = false;
+  List<String> _networkCities = [];
+  Timer? _debounce;
 
-  List<String> get _filteredCities {
-    if (_searchQuery.isEmpty) return _popularCities;
-    final q = _searchQuery.toLowerCase();
-    return _popularCities.where((c) => c.toLowerCase().contains(q)).toList();
-  }
-
-  bool get _showCustomOption {
-    if (_searchQuery.length < 2) return false;
-    return _filteredCities.isEmpty ||
-        !_filteredCities.any((c) => c.toLowerCase() == _searchQuery.toLowerCase());
+  @override
+  void initState() {
+    super.initState();
+    // Do NOT close dropdown on focus loss — controlled manually.
+    // This prevents the dropdown from closing before tap fires on web.
   }
 
   @override
   void dispose() {
     _ctrl.dispose();
+    _focus.dispose();
+    _debounce?.cancel();
     super.dispose();
   }
 
+  List<String> get _suggestions {
+    final q = _ctrl.text.trim().toLowerCase();
+    if (q.isEmpty) return _popularCities.take(12).toList();
+    if (_networkCities.isNotEmpty) return _networkCities;
+    return _popularCities
+        .where((c) => c.toLowerCase().contains(q))
+        .take(8)
+        .toList();
+  }
+
+  void _onChanged(String value) {
+    setState(() => _networkCities = []);
+    _debounce?.cancel();
+    final q = value.trim();
+    if (q.length < 2) return;
+    _debounce = Timer(const Duration(milliseconds: 400), () => _fetchCities(q));
+  }
+
+  Future<void> _fetchCities(String q) async {
+    if (!mounted) return;
+    setState(() => _searchLoading = true);
+    try {
+      final uri = Uri.parse(
+        'https://nominatim.openstreetmap.org/search'
+        '?q=${Uri.encodeComponent(q)}'
+        '&format=json'
+        '&addressdetails=1'
+        '&limit=12'
+        '&featuretype=city'
+        '&accept-language=en',
+      );
+      final resp = await http.get(uri, headers: {
+        'User-Agent': 'MoodWave/1.0 (diplom project)',
+        'Accept': 'application/json',
+      }).timeout(const Duration(seconds: 8));
+
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as List;
+        final cities = <String>{};
+        for (final item in data) {
+          final addr = item['address'] as Map<String, dynamic>?;
+          final name = addr?['city'] as String? ??
+              addr?['town'] as String? ??
+              addr?['village'] as String? ??
+              addr?['hamlet'] as String? ??
+              item['display_name']?.toString().split(',').first.trim();
+          if (name != null && name.isNotEmpty) cities.add(name);
+        }
+        if (cities.isEmpty) {
+          // fallback: just use display_name first segment
+          for (final item in data) {
+            final dn = item['display_name']?.toString();
+            if (dn != null) cities.add(dn.split(',').first.trim());
+          }
+        }
+        setState(() => _networkCities = cities.toList());
+      }
+    } catch (_) {
+      // silently fall back to local suggestions
+    } finally {
+      if (mounted) setState(() => _searchLoading = false);
+    }
+  }
+
+  void _pick(String city) {
+    _ctrl.text = city;
+    _focus.unfocus();
+    setState(() {
+      _dropdownVisible = false;
+      _networkCities = [];
+    });
+  }
+
+  String _friendlyError(dynamic e) {
+    if (e is DioException) {
+      final code = e.response?.statusCode;
+      if (code == 401) return 'Session expired. Please sign in again.';
+      if (code == 422) return 'Please enter a valid city name.';
+      if (code != null && code >= 500) return 'Server is unavailable. Try again later.';
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.unknown) return 'No internet connection. Check your network.';
+      if (e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) return 'Request timed out. Try again.';
+    }
+    return 'Something went wrong. Please try again.';
+  }
+
   Future<void> _continue() async {
-    final raw = _selected ?? (_ctrl.text.trim().isNotEmpty ? _ctrl.text.trim() : null);
-    if (raw == null || raw.isEmpty) {
+    final raw = _ctrl.text.trim();
+    if (raw.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Please select or enter your city', style: GoogleFonts.outfit()),
+        content: Text('Enter your city', style: GoogleFonts.outfit()),
         backgroundColor: const Color(0xFF3d0000),
         behavior: SnackBarBehavior.floating,
       ));
       return;
     }
-    final city = _normalizeCity(raw);
+    final city = _capitalize(raw);
     setState(() => _loading = true);
     try {
       await ApiService().updateMe({'city': city});
-      if (mounted) context.read<AuthProvider>().updateUser({'city': city});
-    } catch (_) {}
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const MainScreen()));
-  }
-
-  void _selectCity(String city) {
-    setState(() {
-      _selected = city;
-      _ctrl.text = city;
-      _searchQuery = city;
-    });
+      if (!mounted) return;
+      context.read<AuthProvider>().updateUser({'city': city});
+      await context.read<AuthProvider>().completeOnboarding();
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const MainScreen()));
+    } catch (e) {
+      if (!mounted) return;
+      final msg = _friendlyError(e);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Row(children: [
+          const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 18),
+          const SizedBox(width: 10),
+          Expanded(child: Text(msg, style: GoogleFonts.outfit(fontSize: 13, color: Colors.white))),
+        ]),
+        backgroundColor: const Color(0xFF4a1010),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        margin: const EdgeInsets.all(16),
+        duration: const Duration(seconds: 4),
+      ));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final showDropdown = _dropdownVisible &&
+        (_suggestions.isNotEmpty || _searchLoading);
+
     return Scaffold(
       backgroundColor: AppColors.bg,
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF0d1a3d), Color(0xFF08080f)],
+      body: GestureDetector(
+        onTap: () {
+          _focus.unfocus();
+          setState(() => _dropdownVisible = false);
+        },
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF0d1a3d), Color(0xFF08080f)],
+            ),
           ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(28, 20, 28, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Step dots
-                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      _dot(done: true), const SizedBox(width: 6),
-                      _dot(done: true), const SizedBox(width: 6),
-                      _dot(done: true), const SizedBox(width: 6),
-                      _dot(active: true),
-                    ]),
-                    const SizedBox(height: 20),
-                    Text('Your city', style: GoogleFonts.outfit(
-                        fontSize: 26, fontWeight: FontWeight.w800, color: AppColors.text)),
-                    const SizedBox(height: 4),
-                    Text('For weather moods & local charts',
-                        style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
-                    const SizedBox(height: 16),
-                    // Search field
-                    Container(
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.border),
+          child: SafeArea(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(28, 20, 28, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        _dot(done: true), const SizedBox(width: 6),
+                        _dot(done: true), const SizedBox(width: 6),
+                        _dot(done: true), const SizedBox(width: 6),
+                        _dot(active: true),
+                      ]),
+                      const SizedBox(height: 20),
+                      Text('Your city',
+                          style: GoogleFonts.outfit(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.text)),
+                      const SizedBox(height: 4),
+                      Text('For weather moods & local charts',
+                          style: GoogleFonts.outfit(
+                              fontSize: 14, color: AppColors.text2)),
+                      const SizedBox(height: 20),
+                      // Search field
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                              color: _focus.hasFocus
+                                  ? AppColors.purple.withOpacity(0.6)
+                                  : AppColors.border),
+                        ),
+                        child: Row(children: [
+                          const SizedBox(width: 14),
+                          _searchLoading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: AppColors.text3))
+                              : const Icon(Icons.search_rounded,
+                                  size: 20, color: AppColors.text3),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: TextField(
+                              controller: _ctrl,
+                              focusNode: _focus,
+                              onChanged: _onChanged,
+                              onTap: () => setState(() => _dropdownVisible = true),
+                              style: GoogleFonts.outfit(
+                                  fontSize: 16, color: AppColors.text),
+                              decoration: InputDecoration(
+                                hintText: 'Search any city in the world...',
+                                hintStyle: GoogleFonts.outfit(
+                                    fontSize: 16, color: AppColors.text3),
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                              ),
+                            ),
+                          ),
+                          if (_ctrl.text.isNotEmpty)
+                            GestureDetector(
+                              onTap: () {
+                                _ctrl.clear();
+                                setState(() => _networkCities = []);
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: Icon(Icons.close_rounded,
+                                    size: 18, color: AppColors.text3),
+                              ),
+                            ),
+                        ]),
                       ),
-                      child: Row(children: [
-                        const SizedBox(width: 14),
-                        const Icon(Icons.location_city_rounded, size: 18, color: AppColors.text3),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: _ctrl,
-                            onChanged: (v) => setState(() {
-                              _searchQuery = v.trim();
-                              if (_selected != null && _selected != v.trim()) {
-                                _selected = null;
-                              }
-                            }),
-                            style: GoogleFonts.outfit(fontSize: 15, color: AppColors.text),
-                            decoration: InputDecoration(
-                              hintText: 'Search city...',
-                              hintStyle: GoogleFonts.outfit(fontSize: 15, color: AppColors.text3),
-                              border: InputBorder.none,
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 15),
+                      // Dropdown suggestions
+                      if (showDropdown)
+                        Container(
+                          margin: const EdgeInsets.only(top: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface2,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.border),
+                            boxShadow: [
+                              BoxShadow(
+                                  color: Colors.black.withOpacity(0.3),
+                                  blurRadius: 20,
+                                  offset: const Offset(0, 8))
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 280),
+                              child: _searchLoading && _suggestions.isEmpty
+                                  ? const Padding(
+                                      padding: EdgeInsets.all(16),
+                                      child: Center(
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: AppColors.purpleLight),
+                                      ),
+                                    )
+                                  : ListView.builder(
+                                      shrinkWrap: true,
+                                      padding: EdgeInsets.zero,
+                                      itemCount: _suggestions.length,
+                                      itemBuilder: (_, i) {
+                                        final city = _suggestions[i];
+                                        return GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTapDown: (_) => _pick(city),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 16, vertical: 13),
+                                            child: Row(children: [
+                                              Icon(Icons.location_on_rounded,
+                                                  size: 16,
+                                                  color: AppColors.purpleLight),
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: Text(city,
+                                                    style: GoogleFonts.outfit(
+                                                        fontSize: 15,
+                                                        color: AppColors.text)),
+                                              ),
+                                            ]),
+                                          ),
+                                        );
+                                      },
+                                    ),
                             ),
                           ),
                         ),
-                      ]),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: SingleChildScrollView(
-                    child: Wrap(
-                      spacing: 8, runSpacing: 8,
-                      children: [
-                        ..._filteredCities.map((city) {
-                          final sel = _selected == city;
-                          return GestureDetector(
-                            onTap: () => _selectCity(city),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                              decoration: BoxDecoration(
-                                gradient: sel ? AppColors.gradMixed : null,
-                                color: sel ? null : AppColors.surface,
-                                borderRadius: BorderRadius.circular(100),
-                                border: Border.all(
-                                  color: sel ? Colors.transparent : AppColors.border),
-                              ),
-                              child: Text(city, style: GoogleFonts.outfit(
-                                  fontSize: 14, fontWeight: FontWeight.w600,
-                                  color: sel ? Colors.white : AppColors.text2)),
-                            ),
-                          );
-                        }),
-                        if (_showCustomOption)
-                          GestureDetector(
-                            onTap: () => _selectCity(_normalizeCity(_searchQuery)),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: AppColors.surface,
-                                borderRadius: BorderRadius.circular(100),
-                                border: Border.all(
-                                  color: AppColors.purple.withOpacity(0.4)),
-                              ),
-                              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                Icon(Icons.add_rounded, size: 14, color: AppColors.purpleLight),
-                                const SizedBox(width: 4),
-                                Text('Use: ${_normalizeCity(_searchQuery)}',
-                                    style: GoogleFonts.outfit(
-                                        fontSize: 14, fontWeight: FontWeight.w600,
-                                        color: AppColors.purpleLight)),
-                              ]),
-                            ),
-                          ),
-                      ],
+                const Spacer(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(28, 0, 28, 32),
+                  child: GestureDetector(
+                    onTap: _loading ? null : _continue,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        gradient: _ctrl.text.trim().isNotEmpty
+                            ? AppColors.primaryBtn
+                            : const LinearGradient(
+                                colors: [Color(0xFF2a2a3d), Color(0xFF2a2a3d)]),
+                        borderRadius: BorderRadius.circular(18),
+                        boxShadow: _ctrl.text.trim().isNotEmpty
+                            ? [
+                                BoxShadow(
+                                    color: AppColors.purpleDark.withOpacity(0.4),
+                                    blurRadius: 30,
+                                    offset: const Offset(0, 12))
+                              ]
+                            : [],
+                      ),
+                      child: _loading
+                          ? const Center(
+                              child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white)))
+                          : Text("Let's go →",
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.outfit(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: _ctrl.text.trim().isNotEmpty
+                                      ? Colors.white
+                                      : AppColors.text3)),
                     ),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(28, 16, 28, 24),
-                child: Builder(builder: (context) {
-                  final hasCity = _selected != null || _ctrl.text.trim().isNotEmpty;
-                  return GestureDetector(
-                    onTap: (_loading || !hasCity) ? null : _continue,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: double.infinity, padding: const EdgeInsets.all(18),
-                      decoration: BoxDecoration(
-                        gradient: hasCity ? AppColors.primaryBtn
-                            : const LinearGradient(colors: [Color(0xFF2a2a3d), Color(0xFF2a2a3d)]),
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: hasCity ? [BoxShadow(
-                            color: AppColors.purpleDark.withOpacity(0.4),
-                            blurRadius: 30, offset: const Offset(0, 12))] : [],
-                      ),
-                      child: _loading
-                          ? const Center(child: SizedBox(width: 20, height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)))
-                          : Text("Let's go →", textAlign: TextAlign.center,
-                              style: GoogleFonts.outfit(
-                                  fontSize: 16, fontWeight: FontWeight.w700,
-                                  color: hasCity ? Colors.white : AppColors.text3)),
-                    ),
-                  );
-                }),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -258,10 +404,15 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
 
   Widget _dot({bool done = false, bool active = false}) {
     final w = done ? 20.0 : active ? 14.0 : 7.0;
-    final c = done ? AppColors.purple : active ? AppColors.purpleLight : AppColors.surface3;
+    final c = done
+        ? AppColors.purple
+        : active
+            ? AppColors.purpleLight
+            : AppColors.surface3;
     return Container(
-      width: w, height: 7,
-      decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(100)),
-    );
+        width: w,
+        height: 7,
+        decoration:
+            BoxDecoration(color: c, borderRadius: BorderRadius.circular(100)));
   }
 }

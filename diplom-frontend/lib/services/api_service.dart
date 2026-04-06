@@ -17,6 +17,7 @@ class ApiService {
 
   late final Dio _dio;
   final _storage = const FlutterSecureStorage();
+  String? _cachedToken; // in-memory cache to avoid web storage race conditions
 
   ApiService._internal() {
     _dio = Dio(BaseOptions(
@@ -40,12 +41,21 @@ class ApiService {
     ));
   }
 
-  Future<String?> getToken() => _storage.read(key: 'access_token');
+  Future<String?> getToken() async {
+    if (_cachedToken != null) return _cachedToken;
+    final stored = await _storage.read(key: 'access_token');
+    _cachedToken = stored;
+    return stored;
+  }
+
   Future<void> saveTokens(String access, String refresh) async {
+    _cachedToken = access;
     await _storage.write(key: 'access_token', value: access);
     await _storage.write(key: 'refresh_token', value: refresh);
   }
+
   Future<void> clearTokens() async {
+    _cachedToken = null;
     await _storage.delete(key: 'access_token');
     await _storage.delete(key: 'refresh_token');
   }
@@ -81,12 +91,6 @@ class ApiService {
 
   Future<Map<String, dynamic>> loginWithGoogle(String idToken) async {
     final resp = await _dio.post('/auth/google', data: {'id_token': idToken});
-    await saveTokens(resp.data['access_token'], resp.data['refresh_token']);
-    return resp.data;
-  }
-
-  Future<Map<String, dynamic>> loginWithFirebasePhone(String firebaseToken) async {
-    final resp = await _dio.post('/auth/firebase-phone', data: {'firebase_token': firebaseToken});
     await saveTokens(resp.data['access_token'], resp.data['refresh_token']);
     return resp.data;
   }
@@ -244,12 +248,14 @@ class ApiService {
     await _dio.post('/auth/verify-email', data: {'email': email, 'code': code});
   }
 
-  Future<void> resendVerification(String email) async {
-    await _dio.post('/auth/resend-verification', data: {'email': email});
+  Future<String?> resendVerification(String email) async {
+    final resp = await _dio.post('/auth/resend-verification', data: {'email': email});
+    return resp.data['dev_code'] as String?;
   }
 
-  Future<void> forgotPassword(String email) async {
-    await _dio.post('/auth/forgot-password', data: {'email': email});
+  Future<String?> forgotPassword(String email) async {
+    final resp = await _dio.post('/auth/forgot-password', data: {'email': email});
+    return resp.data['dev_code'] as String?;
   }
 
   Future<String> verifyResetCode(String email, String code) async {
@@ -297,6 +303,29 @@ class ApiService {
   Future<Map<String, dynamic>> getNotifications() async {
     final resp = await _dio.get('/notifications');
     return resp.data as Map<String, dynamic>;
+  }
+
+  // Spotify
+  Future<String?> getSpotifyAuthUrl() async {
+    try {
+      final resp = await _dio.get('/auth/spotify');
+      return resp.data['url'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> getSpotifyToken() async {
+    try {
+      final resp = await _dio.get('/spotify/token');
+      return resp.data['access_token'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> disconnectSpotify() async {
+    await _dio.delete('/spotify/disconnect');
   }
 
   // Debug (dev only)

@@ -1,9 +1,12 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
+import '../services/spotify_player_service.dart';
 import '../theme/app_colors.dart';
 import '../utils/error_helper.dart';
 import '../utils/show_snackbar.dart';
@@ -21,6 +24,37 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _crossfade = true;
   bool _activity = false;
+  bool _spotifyConnected = false;
+  bool _spotifyLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSpotify();
+  }
+
+  Future<void> _checkSpotify() async {
+    final token = await ApiService().getSpotifyToken();
+    if (mounted) setState(() => _spotifyConnected = token != null);
+  }
+
+  Future<void> _connectSpotify() async {
+    setState(() => _spotifyLoading = true);
+    try {
+      final url = await ApiService().getSpotifyAuthUrl();
+      if (url == null) {
+        if (mounted) showErrorSnackBar(context, 'Could not get Spotify URL');
+        return;
+      }
+      if (kIsWeb) {
+        SpotifyPlayerService.openUrl(url);
+      } else {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      }
+    } finally {
+      if (mounted) setState(() => _spotifyLoading = false);
+    }
+  }
 
   void _openEditProfile() {
     final user = context.read<AuthProvider>().user;
@@ -353,6 +387,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const Icon(Icons.chevron_right_rounded,
                           color: AppColors.text3, size: 16),
                     ])),
+                GestureDetector(
+                  onTap: _spotifyConnected ? null : _connectSpotify,
+                  child: _SettingRow(
+                    emoji: '🟢',
+                    bg: const Color(0xFF1DB954).withOpacity(0.15),
+                    name: 'Connect Spotify Premium',
+                    sub: 'Required for full track playback',
+                    trailing: _spotifyLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : _spotifyConnected
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1DB954).withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(100),
+                                  border: Border.all(
+                                      color: const Color(0xFF1DB954).withOpacity(0.3)),
+                                ),
+                                child: Text('Connected',
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: const Color(0xFF1DB954))),
+                              )
+                            : Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: AppColors.purple.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(100),
+                                  border: Border.all(
+                                      color: AppColors.purple.withOpacity(0.2)),
+                                ),
+                                child: Text('Connect',
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.purpleLight)),
+                              ),
+                  ),
+                ),
                 _SettingRow(
                     emoji: '🔀',
                     bg: AppColors.pink.withOpacity(0.15),

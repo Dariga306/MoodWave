@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -6,10 +7,10 @@ import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import '../providers/auth_provider.dart';
 import '../theme/app_colors.dart';
 import '../utils/show_snackbar.dart';
+import 'genre_select_screen.dart';
 import 'main/main_screen.dart';
 import 'signup_screen.dart';
 import 'forgot_password_screen.dart';
-import 'phone_auth_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -44,8 +45,10 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
     setState(() => _loading = false);
     if (ok) {
-      Navigator.of(context)
-          .pushReplacement(MaterialPageRoute(builder: (_) => const MainScreen()));
+      final user = context.read<AuthProvider>().user;
+      final hasCity = (user?['city'] as String?)?.isNotEmpty == true;
+      Navigator.of(context).pushReplacement(MaterialPageRoute(
+          builder: (_) => hasCity ? const MainScreen() : const GenreSelectScreen()));
     } else {
       showErrorSnackBar(
           context, context.read<AuthProvider>().error ?? 'Login failed');
@@ -55,31 +58,38 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _signInWithGoogle() async {
     setState(() => _googleLoading = true);
     try {
-      // Sign in with Google → get Firebase credential
-      final googleUser = await GoogleSignIn().signIn();
-      if (googleUser == null) {
-        setState(() => _googleLoading = false);
-        return;
-      }
-      final googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
+      UserCredential userCred;
 
-      // Sign in to Firebase directly
-      final userCred = await FirebaseAuth.instance.signInWithCredential(credential);
+      if (kIsWeb) {
+        // Web: Firebase popup — no google_sign_in needed
+        final provider = GoogleAuthProvider();
+        userCred = await FirebaseAuth.instance.signInWithPopup(provider);
+      } else {
+        // Mobile: google_sign_in → Firebase credential
+        final googleUser = await GoogleSignIn().signIn();
+        if (googleUser == null) {
+          setState(() => _googleLoading = false);
+          return;
+        }
+        final googleAuth = await googleUser.authentication;
+        final credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
+        userCred = await FirebaseAuth.instance.signInWithCredential(credential);
+      }
+
       final firebaseToken = await userCred.user?.getIdToken();
       if (firebaseToken == null) throw Exception('No token');
 
       if (!mounted) return;
-      // Send Firebase token to our backend
       final ok = await context.read<AuthProvider>().loginWithGoogle(firebaseToken);
       if (!mounted) return;
       setState(() => _googleLoading = false);
       if (ok) {
-        Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const MainScreen()));
+        final needsOnboarding = context.read<AuthProvider>().status == AuthStatus.unauthenticated;
+        Navigator.of(context).pushReplacement(MaterialPageRoute(
+            builder: (_) => needsOnboarding ? const GenreSelectScreen() : const MainScreen()));
       } else {
         showErrorSnackBar(
             context, context.read<AuthProvider>().error ?? 'Google sign in failed');
@@ -160,17 +170,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         const Icon(Icons.g_mobiledata, size: 22, color: Colors.white),
                   ),
                   label: 'Continue with Google',
-                ),
-                const SizedBox(height: 12),
-
-                // Phone button
-                _SocialButton(
-                  loading: false,
-                  disabled: _anyLoading,
-                  onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const PhoneAuthScreen())),
-                  icon: const Icon(Icons.phone_outlined, size: 20, color: Colors.white),
-                  label: 'Continue with Phone',
                 ),
                 const SizedBox(height: 24),
 

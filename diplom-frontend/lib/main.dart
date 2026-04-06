@@ -7,6 +7,9 @@ import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'screens/splash_screen.dart';
 
+final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
@@ -36,6 +39,7 @@ class MoodWaveApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      scaffoldMessengerKey: rootScaffoldMessengerKey,
       title: 'MoodWave',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(

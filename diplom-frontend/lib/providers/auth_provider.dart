@@ -14,6 +14,8 @@ class AuthProvider extends ChangeNotifier {
   AuthStatus get status => _status;
   Map<String, dynamic>? get user => _user;
   String? get error => _error;
+  String? _devCode;
+  String? get devCode => _devCode;
 
   Future<void> checkAuth() async {
     final token = await _api.getToken();
@@ -62,7 +64,8 @@ class AuthProvider extends ChangeNotifier {
         displayName: displayName,
       );
       _user = data['user'];
-      _status = AuthStatus.authenticated;
+      _devCode = data['dev_code'] as String?;
+      _status = AuthStatus.unauthenticated; // stays unauth until onboarding done
       notifyListeners();
       return true;
     } on Exception catch (e) {
@@ -77,22 +80,9 @@ class AuthProvider extends ChangeNotifier {
     try {
       final data = await _api.loginWithGoogle(idToken);
       _user = data['user'];
-      _status = AuthStatus.authenticated;
-      notifyListeners();
-      return true;
-    } on Exception catch (e) {
-      _error = _parseError(e);
-      notifyListeners();
-      return false;
-    }
-  }
-
-  Future<bool> loginWithFirebasePhone(String firebaseToken) async {
-    _error = null;
-    try {
-      final data = await _api.loginWithFirebasePhone(firebaseToken);
-      _user = data['user'];
-      _status = AuthStatus.authenticated;
+      // New Google users won't have a city — send them through onboarding
+      final hasCity = (_user?['city'] as String?)?.isNotEmpty == true;
+      _status = hasCity ? AuthStatus.authenticated : AuthStatus.unauthenticated;
       notifyListeners();
       return true;
     } on Exception catch (e) {
@@ -106,6 +96,11 @@ class AuthProvider extends ChangeNotifier {
     await _api.clearTokens();
     _user = null;
     _status = AuthStatus.unauthenticated;
+    notifyListeners();
+  }
+
+  Future<void> completeOnboarding() async {
+    _status = AuthStatus.authenticated;
     notifyListeners();
   }
 

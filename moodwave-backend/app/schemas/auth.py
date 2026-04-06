@@ -117,3 +117,5 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: UserResponse
+    dev_code: str | None = None
+    needs_onboarding: Optional[bool] = None

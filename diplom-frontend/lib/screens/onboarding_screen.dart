@@ -154,8 +154,8 @@ class _OnboardPage extends StatelessWidget {
     return Container(
       color: AppColors.bg,
       child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(28, 60, 28, 200),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(28, 40, 28, 120),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

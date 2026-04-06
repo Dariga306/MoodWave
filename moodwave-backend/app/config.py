@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     # OAuth
     GOOGLE_CLIENT_ID: str = ""
 
+    # Resend (email API)
+    RESEND_API_KEY: str = ""
+
+    # Spotify OAuth redirect
+    SPOTIFY_REDIRECT_URI: str = "http://127.0.0.1:8000/auth/spotify/callback"
+    FRONTEND_URL: str = "http://127.0.0.1:5001"
+
     # App
     APP_ENV: str = "development"
 

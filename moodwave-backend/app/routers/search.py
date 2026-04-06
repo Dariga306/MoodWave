@@ -47,16 +47,22 @@ async def global_search(
     redis = request.app.state.redis
     query = q.strip()
 
-    if len(query) < 2:
+    if len(query) == 0:
         trending = await get_trending_searches(redis)
         return {"tracks": [], "users": [], "playlists": [], "trending": trending}
 
     await track_search_query(query, redis)
 
     requested_type = type.strip().lower() or "all"
-    want_tracks = requested_type in ("all", "tracks")
-    want_users = requested_type in ("all", "users")
-    want_playlists = requested_type in ("all", "playlists")
+    # For single-character queries only search tracks to avoid noise
+    if len(query) == 1:
+        want_tracks = True
+        want_users = False
+        want_playlists = False
+    else:
+        want_tracks = requested_type in ("all", "tracks")
+        want_users = requested_type in ("all", "users")
+        want_playlists = requested_type in ("all", "playlists")
 
     # Gather all searches in parallel
     blocked_ids = await get_blocked_ids_for_user(db, current_user.id) if want_users else []

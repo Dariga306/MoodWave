@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import '../../widgets/bottom_nav_bar.dart';
 import 'home_tab.dart';
 import 'search_tab.dart';
-import 'match_tab.dart';
-import 'friends_tab.dart';
-import 'profile_tab.dart';
+import 'social_tab.dart';
+import 'library_tab.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -18,9 +17,8 @@ class _MainScreenState extends State<MainScreen> {
   final _tabs = const [
     HomeTab(),
     SearchTab(),
-    MatchTab(),
-    FriendsTab(),
-    ProfileTab(),
+    SocialTab(),
+    LibraryTab(),
   ];
 
   @override

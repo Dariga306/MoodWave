@@ -16,20 +16,19 @@ class BottomNavBar extends StatelessWidget {
         filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
           height: 84,
-          decoration: BoxDecoration(
-            color: const Color(0xFF08080F).withOpacity(0.92),
-            border: const Border(top: BorderSide(color: AppColors.border)),
+          decoration: const BoxDecoration(
+            color: Color(0xEB08080F),
+            border: Border(top: BorderSide(color: AppColors.border)),
           ),
           child: Padding(
             padding: const EdgeInsets.only(bottom: 20, left: 8, right: 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _NavItem(icon: Icons.home_rounded, label: 'Home', active: currentIndex == 0, onTap: () => onTap(0)),
-                _NavItem(icon: Icons.search_rounded, label: 'Search', active: currentIndex == 1, onTap: () => onTap(1)),
-                _NavItem(icon: Icons.favorite_rounded, label: 'Match', active: currentIndex == 2, onTap: () => onTap(2)),
-                _NavItem(icon: Icons.people_rounded, label: 'Friends', active: currentIndex == 3, onTap: () => onTap(3)),
-                _NavItem(icon: Icons.person_rounded, label: 'Profile', active: currentIndex == 4, onTap: () => onTap(4)),
+                _NavItem(icon: Icons.home_rounded,    label: 'Home',    active: currentIndex == 0, onTap: () => onTap(0)),
+                _NavItem(icon: Icons.search_rounded,  label: 'Search',  active: currentIndex == 1, onTap: () => onTap(1)),
+                _NavItem(icon: Icons.people_rounded,  label: 'Social',  active: currentIndex == 2, onTap: () => onTap(2)),
+                _NavItem(icon: Icons.library_music_rounded, label: 'Library', active: currentIndex == 3, onTap: () => onTap(3)),
               ],
             ),
           ),
@@ -53,7 +52,7 @@ class _NavItem extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -70,9 +69,7 @@ class _NavItem extends StatelessWidget {
               Container(
                 width: 4, height: 4,
                 decoration: const BoxDecoration(
-                  color: AppColors.purple,
-                  shape: BoxShape.circle,
-                ),
+                    color: AppColors.purple, shape: BoxShape.circle),
               ),
             ],
           ],

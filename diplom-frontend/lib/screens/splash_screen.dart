@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../main.dart' show rootScaffoldMessengerKey;
 import '../providers/auth_provider.dart';
+import '../services/spotify_player_service.dart';
 import '../theme/app_colors.dart';
 import 'main/main_screen.dart';
 import 'onboarding_screen.dart';
@@ -32,16 +34,37 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _init() async {
+    final spotifyJustConnected = SpotifyPlayerService.wasJustConnected();
     await Future.delayed(const Duration(milliseconds: 1600));
     if (!mounted) return;
     await context.read<AuthProvider>().checkAuth();
     if (!mounted) return;
-    final status = context.read<AuthProvider>().status;
-    Navigator.of(context).pushReplacement(MaterialPageRoute(
-      builder: (_) => status == AuthStatus.authenticated
-          ? const MainScreen()
-          : const OnboardingScreen(),
-    ));
+    final auth = context.read<AuthProvider>();
+    final status = auth.status;
+    final user = auth.user;
+    final hasCity = user != null &&
+        user['city'] != null &&
+        (user['city'] as String).isNotEmpty;
+    final dest = (status == AuthStatus.authenticated && hasCity)
+        ? const MainScreen()
+        : const OnboardingScreen();
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => dest));
+
+    if (spotifyJustConnected) {
+      rootScaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Row(children: [
+            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 16),
+            const SizedBox(width: 8),
+            Text('Spotify подключён! Полное воспроизведение доступно.',
+                style: GoogleFonts.outfit(color: Colors.white)),
+          ]),
+          backgroundColor: const Color(0xFF1DB954),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
   }
 
   @override

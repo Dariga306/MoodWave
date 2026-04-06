@@ -1,9 +1,55 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+
 import '../theme/app_colors.dart';
 
-class LyricsScreen extends StatelessWidget {
-  const LyricsScreen({super.key});
+class LyricsScreen extends StatefulWidget {
+  final String? artist;
+  final String? title;
+  const LyricsScreen({super.key, this.artist, this.title});
+
+  @override
+  State<LyricsScreen> createState() => _LyricsScreenState();
+}
+
+class _LyricsScreenState extends State<LyricsScreen> {
+  String? _lyrics;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchLyrics();
+  }
+
+  Future<void> _fetchLyrics() async {
+    final artist = widget.artist;
+    final title = widget.title;
+    if (artist == null || title == null || artist.isEmpty || title.isEmpty) {
+      setState(() { _loading = false; _error = 'No track info'; });
+      return;
+    }
+    try {
+      final a = Uri.encodeComponent(artist);
+      final t = Uri.encodeComponent(title);
+      final resp = await http
+          .get(Uri.parse('https://api.lyrics.ovh/v1/$a/$t'))
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final raw = data['lyrics'] as String? ?? '';
+        setState(() { _lyrics = raw.trim(); _loading = false; });
+      } else {
+        setState(() { _loading = false; _error = 'Lyrics not found'; });
+      }
+    } catch (_) {
+      setState(() { _loading = false; _error = 'Could not load lyrics'; });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -12,7 +58,8 @@ class LyricsScreen extends StatelessWidget {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
             colors: [Color(0xFF1a0240), Color(0xFF0d0d20), Color(0xFF001230)],
             stops: [0.0, 0.4, 1.0],
           ),
@@ -46,90 +93,52 @@ class LyricsScreen extends StatelessWidget {
                             ),
                             child: const Icon(Icons.arrow_back_rounded, size: 18, color: Colors.white)),
                         ),
-                        Text('LYRICS', style: GoogleFonts.outfit(
-                            fontSize: 12, fontWeight: FontWeight.w700,
-                            color: const Color(0x80C8B4FF), letterSpacing: 0.1)),
-                        Container(width: 40, height: 40,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.07),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white.withOpacity(0.1)),
-                          ),
-                          child: const Icon(Icons.more_horiz_rounded, size: 18, color: Colors.white)),
+                        Column(children: [
+                          Text('LYRICS', style: GoogleFonts.outfit(
+                              fontSize: 12, fontWeight: FontWeight.w700,
+                              color: const Color(0x80C8B4FF), letterSpacing: 0.1)),
+                          if (widget.title != null)
+                            Text(widget.title!, style: GoogleFonts.outfit(
+                                fontSize: 11, color: AppColors.text3),
+                              overflow: TextOverflow.ellipsis),
+                        ]),
+                        const SizedBox(width: 40),
                       ],
                     ),
                   ),
-                  // Mini player
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.07),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: Colors.white.withOpacity(0.1)),
-                      ),
-                      child: Row(children: [
-                        Container(width: 50, height: 50,
-                          decoration: BoxDecoration(
-                            gradient: AppColors.gradMixed,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Center(child: Text('🌨', style: TextStyle(fontSize: 24)))),
-                        const SizedBox(width: 14),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('Sweater Weather', style: GoogleFonts.outfit(
-                              fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
-                          Text('The Neighbourhood', style: GoogleFonts.outfit(
-                              fontSize: 13, color: const Color(0xB3C8B4FF))),
-                          const SizedBox(height: 6),
-                          Container(height: 2, decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(100),
-                          ), child: FractionallySizedBox(
-                            widthFactor: 0.38, alignment: Alignment.centerLeft,
-                            child: Container(decoration: BoxDecoration(
-                              gradient: const LinearGradient(colors: [AppColors.purple, AppColors.pink]),
-                              borderRadius: BorderRadius.circular(100),
-                            )),
-                          )),
-                        ])),
-                        const SizedBox(width: 14),
-                        Container(width: 38, height: 38,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.12), shape: BoxShape.circle),
-                          child: const Icon(Icons.pause_rounded, color: Colors.white, size: 18)),
-                      ]),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  // Lyrics
+
+                  // Content
                   Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _LyricLine('All I am is a man', state: _LineState.past),
-                          _LyricLine('I want the world in my hands', state: _LineState.past),
-                          _LyricLine('I hate the beach', state: _LineState.past),
-                          _LyricLine('But I stand in California with my toes in the sand', state: _LineState.past),
-                          const SizedBox(height: 16),
-                          _LyricLine('Use the sleeves of my sweater', state: _LineState.active),
-                          _LyricLine("Let's have an adventure", state: _LineState.upcoming),
-                          _LyricLine("Head in the clouds but my gravity's centered", state: _LineState.upcoming),
-                          _LyricLine('Touch my neck and I\'ll touch yours', state: _LineState.upcoming),
-                          const SizedBox(height: 16),
-                          _LyricLine('You in those little high waisted shorts', state: _LineState.upcoming),
-                          _LyricLine('Oh yeah oh yeah, oh yeah oh yeah', state: _LineState.upcoming),
-                          const SizedBox(height: 32),
-                        ],
-                      ),
-                    ),
+                    child: _loading
+                        ? const Center(child: CircularProgressIndicator(color: AppColors.purple, strokeWidth: 2))
+                        : _error != null
+                            ? Center(child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.music_off_rounded, size: 48, color: AppColors.text3),
+                                  const SizedBox(height: 12),
+                                  Text(_error!, style: GoogleFonts.outfit(fontSize: 16, color: AppColors.text2)),
+                                  const SizedBox(height: 6),
+                                  Text('Try a different track', style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3)),
+                                ],
+                              ))
+                            : SingleChildScrollView(
+                                padding: const EdgeInsets.fromLTRB(28, 8, 28, 32),
+                                child: Text(
+                                  _lyrics ?? '',
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 17,
+                                    height: 1.8,
+                                    color: Colors.white.withOpacity(0.9),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
                   ),
+
                   Padding(
                     padding: const EdgeInsets.all(16),
-                    child: Text('Lyrics · Genius · Auto-scrolling',
+                    child: Text('Lyrics · lyrics.ovh',
                         style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
                   ),
                 ],
@@ -138,30 +147,6 @@ class LyricsScreen extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-enum _LineState { past, active, upcoming }
-
-class _LyricLine extends StatelessWidget {
-  final String text;
-  final _LineState state;
-  const _LyricLine(this.text, {required this.state});
-  @override
-  Widget build(BuildContext context) {
-    double fontSize = state == _LineState.active ? 26 : state == _LineState.past ? 20 : 18;
-    FontWeight fw = state == _LineState.active ? FontWeight.w800
-        : state == _LineState.past ? FontWeight.w700 : FontWeight.w500;
-    Color color = state == _LineState.active ? Colors.white
-        : state == _LineState.past ? const Color(0x66A08CC8) : const Color(0x40A08CC8);
-    List<Shadow>? shadows = state == _LineState.active
-        ? [BoxShadow(color: AppColors.purple.withOpacity(0.5), blurRadius: 20) as Shadow] : null;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Text(text, style: GoogleFonts.outfit(
-          fontSize: fontSize, fontWeight: fw, color: color,
-          height: 1.5, shadows: shadows)),
     );
   }
 }

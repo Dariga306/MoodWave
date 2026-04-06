@@ -92,7 +92,7 @@ async def search_tracks(
     current_user: User = Depends(get_current_user),
 ):
     query = q.strip()
-    if len(query) < 2:
+    if len(query) < 1:
         return []
 
     redis = request.app.state.redis

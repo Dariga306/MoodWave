@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/api_service.dart';
@@ -53,17 +54,51 @@ class _SearchTabState extends State<SearchTab> {
       return;
     }
     setState(() { _hasQuery = true; _searching = true; });
-    _debounce = Timer(const Duration(milliseconds: 400), () => _search(q.trim()));
+    _debounce = Timer(const Duration(milliseconds: 300), () => _search(q.trim()));
+  }
+
+  bool _hasCyrillic(String s) => s.runes.any((r) => r >= 0x0400 && r <= 0x04FF);
+
+  String _transliterate(String input) {
+    const map = {
+      'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
+      'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+      'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+      'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
+      'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+    };
+    return input.toLowerCase().split('').map((c) => map[c] ?? c).join('');
   }
 
   Future<void> _search(String q) async {
+    final isCyrillic = _hasCyrillic(q);
+    final transliterated = isCyrillic ? _transliterate(q) : q;
     try {
-      final results = await Future.wait([
-        ApiService().searchTracks(q, limit: 10).catchError((_) => <dynamic>[]),
-        ApiService().globalSearch(q).catchError((_) => <String, dynamic>{}),
-      ]);
+      // For Cyrillic: search both original and transliterated in parallel, merge
+      final futures = <Future>[
+        ApiService().searchTracks(transliterated, limit: 10).catchError((_) => <dynamic>[]),
+        ApiService().globalSearch(transliterated).catchError((_) => <String, dynamic>{}),
+        if (isCyrillic)
+          ApiService().searchTracks(q, limit: 10).catchError((_) => <dynamic>[]),
+      ];
+      final results = await Future.wait(futures);
       if (!mounted) return;
-      final tracks = (results[0] as List?) ?? [];
+
+      List<dynamic> tracks = (results[0] as List?) ?? [];
+      if (isCyrillic) {
+        final cyrillicTracks = (results[2] as List?) ?? [];
+        final seen = <String>{};
+        final merged = <dynamic>[];
+        for (final t in [...tracks, ...cyrillicTracks]) {
+          final id = (t as Map)['track_id']?.toString() ??
+              t['id']?.toString() ??
+              t['title']?.toString() ??
+              '';
+          if (seen.add(id)) merged.add(t);
+        }
+        tracks = merged.take(10).toList();
+      }
+
       final global = results[1] as Map<String, dynamic>? ?? {};
       final artists = (global['artists'] as List?) ?? [];
       setState(() {
@@ -99,7 +134,15 @@ class _SearchTabState extends State<SearchTab> {
                               fontSize: 26, fontWeight: FontWeight.w800,
                               color: AppColors.text, letterSpacing: -0.02 * 26)),
                       const SizedBox(height: 16),
-                      // Real search bar
+                      // Real search bar — Cyrillic hint
+                      if (_hasCyrillic(_ctrl.text) && _ctrl.text.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text(
+                            'Searching as: ${_transliterate(_ctrl.text)}',
+                            style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3),
+                          ),
+                        ),
                       Container(
                         decoration: BoxDecoration(
                           color: AppColors.surface,
@@ -301,8 +344,10 @@ class _TrackResult extends StatelessWidget {
               borderRadius: BorderRadius.circular(10)),
             child: coverUrl != null
                 ? ClipRRect(borderRadius: BorderRadius.circular(10),
-                    child: Image.network(coverUrl, fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Center(child: Text('🎵'))))
+                    child: CachedNetworkImage(
+                        imageUrl: coverUrl, fit: BoxFit.cover,
+                        placeholder: (_, __) => const SizedBox(),
+                        errorWidget: (_, __, ___) => const Center(child: Text('🎵'))))
                 : const Center(child: Text('🎵', style: TextStyle(fontSize: 20))),
           ),
           const SizedBox(width: 12),
@@ -340,8 +385,10 @@ class _ArtistResult extends StatelessWidget {
             gradient: AppColors.gradPurple,
             shape: BoxShape.circle),
           child: imageUrl != null
-              ? ClipOval(child: Image.network(imageUrl, fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const Center(child: Text('🎤'))))
+              ? ClipOval(child: CachedNetworkImage(
+                  imageUrl: imageUrl, fit: BoxFit.cover,
+                  placeholder: (_, __) => const SizedBox(),
+                  errorWidget: (_, __, ___) => const Center(child: Text('🎤'))))
               : const Center(child: Text('🎤', style: TextStyle(fontSize: 20))),
         ),
         const SizedBox(width: 12),

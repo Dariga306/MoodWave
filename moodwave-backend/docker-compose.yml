@@ -35,6 +35,7 @@ services:
     volumes:
       - ./app:/app/app
       - ./alembic:/app/alembic
+      - ./firebase-credentials.json:/app/firebase-credentials.json
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:

@@ -11,7 +11,8 @@ import 'genre_select_screen.dart';
 
 class EmailVerificationScreen extends StatefulWidget {
   final String email;
-  const EmailVerificationScreen({super.key, required this.email});
+  final String? devCode;
+  const EmailVerificationScreen({super.key, required this.email, this.devCode});
 
   @override
   State<EmailVerificationScreen> createState() =>
@@ -78,10 +79,13 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     }
   }
 
+  String? _latestDevCode;
+
   Future<void> _resend() async {
     try {
-      await ApiService().resendVerification(widget.email);
+      final code = await ApiService().resendVerification(widget.email);
       if (!mounted) return;
+      if (code != null) setState(() => _latestDevCode = code);
       showSuccessSnackBar(context, 'Code sent again');
       _startCountdown();
     } on DioException catch (e) {
@@ -108,6 +112,48 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
             child: Column(
               children: [
                 const SizedBox(height: 16),
+                // Dev fallback banner — shown when email delivery failed
+                Builder(builder: (context) {
+                  final shown = _latestDevCode ?? widget.devCode;
+                  if (shown == null) return const SizedBox.shrink();
+                  return Column(children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1a1a2e),
+                        border: Border.all(color: AppColors.purpleLight.withOpacity(0.5)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Email not delivered — use this code:',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 12, color: AppColors.text2)),
+                          const SizedBox(height: 4),
+                          GestureDetector(
+                            onTap: () {
+                              for (int i = 0; i < 6 && i < shown.length; i++) {
+                                _ctrls[i].text = shown[i];
+                              }
+                            },
+                            child: Text(shown,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 8,
+                                    color: AppColors.purpleLight)),
+                          ),
+                          Text('Tap the code to fill automatically',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 11, color: AppColors.text3)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ]);
+                }),
                 // Step dots
                 Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                   _dot(done: true),

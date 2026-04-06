@@ -27,6 +27,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       List.generate(6, (_) => TextEditingController());
   final List<FocusNode> _codeFocus = List.generate(6, (_) => FocusNode());
   String _email = '';
+  String? _devCode;
 
   // Step 3
   final _newPwCtrl = TextEditingController();
@@ -53,10 +54,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     }
     setState(() => _loading = true);
     try {
-      await ApiService().forgotPassword(email);
+      final devCode = await ApiService().forgotPassword(email);
       if (!mounted) return;
       setState(() {
         _email = email;
+        _devCode = devCode;
         _step = 2;
       });
     } on DioException catch (e) {
@@ -191,14 +193,16 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                           ? _StepCode(
                               key: const ValueKey(2),
                               email: _email,
+                              devCode: _devCode,
                               codeCtrl: _codeCtrl,
                               codeFocus: _codeFocus,
                               loading: _loading,
                               onVerify: _verifyCode,
                               onResend: () async {
                                 try {
-                                  await ApiService().forgotPassword(_email);
+                                  final code = await ApiService().forgotPassword(_email);
                                   if (mounted) {
+                                    if (code != null) setState(() => _devCode = code);
                                     showSuccessSnackBar(context, 'Code resent!');
                                   }
                                 } catch (_) {}
@@ -353,6 +357,7 @@ class _StepEmail extends StatelessWidget {
 
 class _StepCode extends StatelessWidget {
   final String email;
+  final String? devCode;
   final List<TextEditingController> codeCtrl;
   final List<FocusNode> codeFocus;
   final bool loading;
@@ -361,6 +366,7 @@ class _StepCode extends StatelessWidget {
   const _StepCode({
     super.key,
     required this.email,
+    this.devCode,
     required this.codeCtrl,
     required this.codeFocus,
     required this.loading,
@@ -407,7 +413,38 @@ class _StepCode extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 24),
+          // Dev code banner when email delivery failed
+          if (devCode != null) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1a1a2e),
+                border: Border.all(color: AppColors.purpleLight.withOpacity(0.5)),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Email not delivered — use this code:',
+                    style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text2)),
+                const SizedBox(height: 4),
+                GestureDetector(
+                  onTap: () {
+                    for (int i = 0; i < 6 && i < devCode!.length; i++) {
+                      codeCtrl[i].text = devCode![i];
+                    }
+                  },
+                  child: Text(devCode!,
+                      style: GoogleFonts.outfit(
+                          fontSize: 28, fontWeight: FontWeight.w800,
+                          letterSpacing: 8, color: AppColors.purpleLight)),
+                ),
+                Text('Tap the code to fill automatically',
+                    style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
+              ]),
+            ),
+            const SizedBox(height: 16),
+          ],
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: List.generate(

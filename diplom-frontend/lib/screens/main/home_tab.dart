@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -279,15 +280,27 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   Widget _buildStaticCharts(BuildContext context) {
+    const staticTracks = [
+      {'title': 'Sweater Weather', 'artist': 'The Neighbourhood'},
+      {'title': 'Midnight Rain', 'artist': 'Taylor Swift'},
+      {'title': 'Snowfall', 'artist': 'NIKI'},
+    ];
     return Column(children: [
       GestureDetector(
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PlayerScreen())),
+        onTap: () => Navigator.push(context, MaterialPageRoute(
+            builder: (_) => PlayerScreen(track: staticTracks[0]))),
         child: const _TopItem(rank: '1', rankColor: Color(0xFFf59e0b),
             title: 'Sweater Weather', artist: 'The Neighbourhood', isHot: true)),
-      const _TopItem(rank: '2', rankColor: Color(0xFF94a3b8),
-          title: 'Midnight Rain', artist: 'Taylor Swift'),
-      const _TopItem(rank: '3', rankColor: Color(0xFFc2774a),
-          title: 'Snowfall', artist: 'NIKI'),
+      GestureDetector(
+        onTap: () => Navigator.push(context, MaterialPageRoute(
+            builder: (_) => PlayerScreen(track: staticTracks[1]))),
+        child: const _TopItem(rank: '2', rankColor: Color(0xFF94a3b8),
+            title: 'Midnight Rain', artist: 'Taylor Swift')),
+      GestureDetector(
+        onTap: () => Navigator.push(context, MaterialPageRoute(
+            builder: (_) => PlayerScreen(track: staticTracks[2]))),
+        child: const _TopItem(rank: '3', rankColor: Color(0xFFc2774a),
+            title: 'Snowfall', artist: 'NIKI')),
     ]);
   }
 
@@ -340,8 +353,10 @@ class _TrackCard extends StatelessWidget {
               child: coverUrl != null
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(16),
-                      child: Image.network(coverUrl, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Center(
+                      child: CachedNetworkImage(
+                          imageUrl: coverUrl, fit: BoxFit.cover,
+                          placeholder: (_, __) => const SizedBox(),
+                          errorWidget: (_, __, ___) => const Center(
                               child: Text('🎵', style: TextStyle(fontSize: 40)))))
                   : const Center(child: Text('🎵', style: TextStyle(fontSize: 40))),
             ),
@@ -473,8 +488,10 @@ class _MoodTracksSheetState extends State<_MoodTracksSheet> {
                                       borderRadius: BorderRadius.circular(12)),
                                   child: coverUrl != null
                                       ? ClipRRect(borderRadius: BorderRadius.circular(12),
-                                          child: Image.network(coverUrl, fit: BoxFit.cover,
-                                              errorBuilder: (_, __, ___) => const Center(child: Text('🎵'))))
+                                          child: CachedNetworkImage(
+                                              imageUrl: coverUrl, fit: BoxFit.cover,
+                                              placeholder: (_, __) => const SizedBox(),
+                                              errorWidget: (_, __, ___) => const Center(child: Text('🎵'))))
                                       : const Center(child: Text('🎵', style: TextStyle(fontSize: 22)))),
                               const SizedBox(width: 14),
                               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -518,8 +535,10 @@ class _TopItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(12)),
         child: coverUrl != null
             ? ClipRRect(borderRadius: BorderRadius.circular(12),
-                child: Image.network(coverUrl!, fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const Center(child: Text('🎵'))))
+                child: CachedNetworkImage(
+                    imageUrl: coverUrl!, fit: BoxFit.cover,
+                    placeholder: (_, __) => const SizedBox(),
+                    errorWidget: (_, __, ___) => const Center(child: Text('🎵'))))
             : const Center(child: Text('🎵', style: TextStyle(fontSize: 22)))),
       const SizedBox(width: 14),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

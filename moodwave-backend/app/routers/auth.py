@@ -244,16 +244,13 @@ async def register(
     await db.commit()
     await db.refresh(user)
 
-    background_tasks.add_task(
-        send_verification_email, user.email, code, user.first_name or ""
-    )
-    logger.info("====== VERIFICATION CODE for %s: %s ======", user.email, code)
-    print(f"====== VERIFICATION CODE for {user.email}: {code} ======", flush=True)
+    email_sent = await send_verification_email(user.email, code, user.first_name or "")
 
     return TokenResponse(
         access_token=create_access_token(user.id),
         refresh_token=create_refresh_token(user.id),
         user=_serialize_user(user, [], []),
+        dev_code=None,
     )
 
 
@@ -420,9 +417,7 @@ async def resend_verification(
     user.verification_resend_window = window_start
     await db.commit()
 
-    background_tasks.add_task(send_verification_email, user.email, code, user.first_name or "")
-    logger.info("====== VERIFICATION CODE for %s: %s ======", user.email, code)
-    print(f"====== VERIFICATION CODE for {user.email}: {code} ======", flush=True)
+    await send_verification_email(user.email, code, user.first_name or "")
     return {"message": "Code sent"}
 
 
@@ -443,13 +438,12 @@ async def forgot_password(
     db: AsyncSession = Depends(get_db),
 ):
     user = await db.scalar(select(User).where(User.email == body.email))
-    # Always return 200 to avoid email enumeration
     if user and user.is_active:
         code = generate_code()
         user.reset_code = code
         user.reset_code_expires = datetime.utcnow() + timedelta(minutes=CODE_TTL_MINUTES)
         await db.commit()
-        background_tasks.add_task(send_reset_email, user.email, code, user.first_name or "")
+        await send_reset_email(user.email, code, user.first_name or "")
 
     return {"message": "If this email exists, a code was sent", "method": "email"}
 
@@ -932,32 +926,6 @@ async def get_taste_vector_me(
 
 
 # ---------------------------------------------------------------------------
-# Debug — only available in development
-# ---------------------------------------------------------------------------
-
-@router.get(
-    "/auth/debug-code",
-    summary="[DEV] Get current verification code",
-    description="Returns the current verification code for testing. Only works when APP_ENV=development.",
-)
-async def debug_get_code(
-    email: str = Query(),
-    db: AsyncSession = Depends(get_db),
-):
-    if os.getenv("APP_ENV", "development") != "development":
-        raise HTTPException(status_code=404, detail="Not found")
-    user = await db.scalar(select(User).where(User.email == email))
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return {
-        "email": user.email,
-        "verification_code": user.verification_code,
-        "is_verified": user.is_verified,
-        "code_expires": user.verification_code_expires.isoformat() if user.verification_code_expires else None,
-    }
-
-
-# ---------------------------------------------------------------------------
 # OAuth helpers
 # ---------------------------------------------------------------------------
 
@@ -972,8 +940,9 @@ async def _get_or_create_oauth_user(
     display_name: str,
     avatar_url: Optional[str] = None,
     phone: Optional[str] = None,
-) -> User:
-    """Find existing user by email/phone or create a new verified one."""
+) -> tuple[User, bool]:
+    """Find existing user by email/phone or create a new verified one.
+    Returns (user, is_new_user)."""
     if email:
         result = await db.execute(select(User).where(User.email == email))
         user = result.scalar_one_or_none()
@@ -990,7 +959,7 @@ async def _get_or_create_oauth_user(
             user.deletion_type = None
             await db.commit()
             await db.refresh(user)
-        return user
+        return user, False
 
     # Generate unique username
     base = _re.sub(r"[^a-z0-9]", "", (email or "").split("@")[0].lower()) or "user"
@@ -1021,16 +990,19 @@ async def _get_or_create_oauth_user(
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    return user
+    return user, True
 
 
-def _build_token_response(user: User) -> TokenResponse:
+async def _build_token_response(user: User, db: AsyncSession, is_new: bool = False) -> TokenResponse:
     access_token = create_access_token({"sub": str(user.id)})
     refresh_token_val = create_refresh_token({"sub": str(user.id)})
+    genres = (await db.execute(select(UserGenre).where(UserGenre.user_id == user.id))).scalars().all()
+    moods = (await db.execute(select(UserMood).where(UserMood.user_id == user.id))).scalars().all()
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token_val,
-        user=UserResponse.model_validate(user),
+        user=_serialize_user(user, genres, moods),
+        needs_onboarding=True if is_new else None,
     )
 
 
@@ -1063,38 +1035,5 @@ async def google_auth(
     name = decoded.get("name", "")
     avatar = decoded.get("picture")
 
-    user = await _get_or_create_oauth_user(db, email=email, display_name=name, avatar_url=avatar)
-    return _build_token_response(user)
-
-
-# ---------------------------------------------------------------------------
-# Firebase Phone Auth
-# ---------------------------------------------------------------------------
-
-class FirebasePhoneRequest(BaseModel):
-    firebase_token: str
-
-
-@router.post("/auth/firebase-phone", response_model=TokenResponse, summary="Sign in with phone (Firebase)")
-async def firebase_phone_auth(
-    body: FirebasePhoneRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    try:
-        from firebase_admin import auth as _fb_auth
-        from app.services.firebase_service import init_firebase
-        if not init_firebase():
-            raise HTTPException(status_code=503, detail="Firebase not configured")
-        decoded = _fb_auth.verify_id_token(body.firebase_token)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.warning("Firebase token verification failed: %s", exc)
-        raise HTTPException(status_code=400, detail="Invalid Firebase token")
-
-    phone = decoded.get("phone_number")
-    if not phone:
-        raise HTTPException(status_code=400, detail="Token has no phone number")
-
-    user = await _get_or_create_oauth_user(db, email="", display_name="", phone=phone)
-    return _build_token_response(user)
+    user, is_new = await _get_or_create_oauth_user(db, email=email, display_name=name, avatar_url=avatar)
+    return await _build_token_response(user, db, is_new=is_new)
