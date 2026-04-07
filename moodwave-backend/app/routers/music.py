@@ -184,6 +184,35 @@ async def get_recommendations(
     return tracks
 
 
+@router.get(
+    "/{spotify_id}/youtube",
+    summary="Get YouTube video ID for a track",
+    description="Returns the YouTube video ID so the Flutter client can play the full track via YouTube.",
+)
+async def get_youtube_id(
+    spotify_id: str,
+    title: str = Query(default=""),
+    artist: str = Query(default=""),
+    request: Request = None,
+    current_user: User = Depends(get_current_user),
+):
+    from app.services.youtube_service import search_video_id
+
+    redis = request.app.state.redis
+    cache_key = f"yt:{spotify_id}"
+
+    cached = await redis.get(cache_key)
+    if cached:
+        return {"video_id": cached, "track_id": spotify_id}
+
+    video_id = await search_video_id(title, artist)
+
+    if video_id:
+        await redis.setex(cache_key, 86400, video_id)  # cache 24 h
+
+    return {"video_id": video_id, "track_id": spotify_id}
+
+
 @router.post(
     "/{spotify_id}/play",
     status_code=200,

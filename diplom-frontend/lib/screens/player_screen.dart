@@ -7,9 +7,9 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:youtube_player_iframe/youtube_player_iframe.dart' as yt;
 
 import '../services/api_service.dart';
-import '../services/spotify_player_service.dart';
 import '../theme/app_colors.dart';
 import 'modals.dart';
 import 'queue_screen.dart';
@@ -56,13 +56,14 @@ class _PlayerScreenState extends State<PlayerScreen>
   // ── animation ──────────────────────────────────────────────────────────────
   late final AnimationController _floatController;
 
-  // ── spotify ─────────────────────────────────────────────────────────────────
-  String? _spotifyToken;
-  bool _spotifyLoading = true;
-  bool _spotifyPlaying = false;
-  int _spotifyPosition = 0; // ms
-  int _spotifyDuration = 0; // ms
-  Timer? _pollTimer;
+  // ── youtube ─────────────────────────────────────────────────────────────────
+  yt.YoutubePlayerController? _ytController;
+  StreamSubscription? _ytStateSubscription;
+  StreamSubscription<Duration>? _ytPositionSubscription;
+  bool _ytLoading = true;
+  bool _ytPlaying = false;
+  Duration _ytPosition = Duration.zero;
+  Duration _ytDuration = Duration.zero;
 
   // ── just_audio fallback ─────────────────────────────────────────────────────
   final _player = AudioPlayer();
@@ -75,7 +76,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _showLyrics = false;
   bool _lyricsLoading = false;
   List<_LrcLine> _lrcLines = [];
-  bool _lyricsSynced = false; // true when LRC timestamps available
+  bool _lyricsSynced = false;
   int _currentLyricIdx = -1;
   final _lyricsScroll = ScrollController();
   static const double _lineHeight = 52.0;
@@ -84,17 +85,14 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _isLiked = false;
 
   // ── derived ─────────────────────────────────────────────────────────────────
-  bool get _usingSpotify =>
-      _spotifyToken != null && SpotifyPlayerService.isReady;
+  bool get _usingYoutube =>
+      _ytController != null && !_ytLoading;
 
-  bool get _isPlaying =>
-      _usingSpotify ? _spotifyPlaying : _previewPlaying;
+  bool get _isPlaying => _usingYoutube ? _ytPlaying : _previewPlaying;
 
-  Duration get _position =>
-      _usingSpotify ? Duration(milliseconds: _spotifyPosition) : _previewPosition;
+  Duration get _position => _usingYoutube ? _ytPosition : _previewPosition;
 
-  Duration get _duration =>
-      _usingSpotify ? Duration(milliseconds: _spotifyDuration) : _previewDuration;
+  Duration get _duration => _usingYoutube ? _ytDuration : _previewDuration;
 
   // ── lifecycle ────────────────────────────────────────────────────────────────
 
@@ -105,101 +103,100 @@ class _PlayerScreenState extends State<PlayerScreen>
       vsync: this,
       duration: const Duration(seconds: 4),
     )..repeat(reverse: true);
-    _initSpotify();
+    _initPlayer();
     _fetchLyrics();
   }
 
   @override
   void dispose() {
     _floatController.dispose();
-    _pollTimer?.cancel();
+    _ytStateSubscription?.cancel();
+    _ytPositionSubscription?.cancel();
+    _ytController?.close();
     _player.dispose();
     _lyricsScroll.dispose();
     super.dispose();
   }
 
-  // ── Spotify ──────────────────────────────────────────────────────────────────
+  // ── YouTube ───────────────────────────────────────────────────────────────────
 
-  Future<void> _initSpotify() async {
-    if (!kIsWeb) {
-      setState(() => _spotifyLoading = false);
-      _initPreview();
-      return;
+  Future<void> _initPlayer() async {
+    final title =
+        (widget.track?['title'] ?? widget.track?['trackName'] ?? '') as String;
+    final artist = (widget.track?['artist'] ?? widget.track?['artistName'] ?? '')
+        as String;
+    final trackId =
+        (widget.track?['spotify_id'] ?? widget.track?['deezer_id'] ??
+                widget.track?['trackId'] ?? '')
+            .toString();
+
+    if (title.isNotEmpty) {
+      try {
+        final videoId = await ApiService().getYouTubeId(
+          trackId: trackId,
+          title: title,
+          artist: artist,
+        );
+        if (videoId != null && videoId.isNotEmpty) {
+          final ctrl = yt.YoutubePlayerController.fromVideoId(
+            videoId: videoId,
+            autoPlay: true,
+            params: const yt.YoutubePlayerParams(
+              showFullscreenButton: false,
+              showControls: false,
+              mute: false,
+            ),
+          );
+          // Track play state and duration
+          _ytStateSubscription = ctrl.listen((value) {
+            if (!mounted) return;
+            setState(() {
+              _ytPlaying = value.playerState == yt.PlayerState.playing;
+              if (value.metaData.duration > Duration.zero) {
+                _ytDuration = value.metaData.duration;
+              }
+            });
+          });
+          // Track position separately via stream
+          _ytPositionSubscription = ctrl
+              .getCurrentPositionStream(
+                  period: const Duration(milliseconds: 500))
+              .listen((pos) {
+            if (!mounted) return;
+            setState(() => _ytPosition = pos);
+            _updateLyricIdx(pos);
+          });
+          if (mounted) {
+            setState(() {
+              _ytController = ctrl;
+              _ytLoading = false;
+            });
+          }
+          if (trackId.isNotEmpty) {
+            ApiService().playTrack(trackId).catchError((_) {});
+          }
+          return;
+        }
+      } catch (_) {}
     }
 
-    final token = await ApiService().getSpotifyToken();
-    if (token == null) {
-      setState(() => _spotifyLoading = false);
-      _initPreview();
-      return;
-    }
-
-    setState(() => _spotifyToken = token);
-    await SpotifyPlayerService.init(token);
-
-    if (!mounted) return;
-    setState(() => _spotifyLoading = false);
-
-    if (SpotifyPlayerService.isReady) {
-      _startPolling();
-      _playWithSpotify();
-    } else {
-      _initPreview();
-    }
-  }
-
-  void _startPolling() {
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (!mounted) return;
-      final s = SpotifyPlayerService.getState();
-      if (s != null) {
-        final newPos = s['position'] as int? ?? 0;
-        setState(() {
-          _spotifyPlaying = !(s['paused'] as bool? ?? true);
-          _spotifyPosition = newPos;
-          _spotifyDuration = s['duration'] as int? ?? 0;
-        });
-        _updateLyricIdx(Duration(milliseconds: newPos));
-      }
-    });
-  }
-
-  Future<void> _playWithSpotify() async {
-    final track = widget.track;
-    if (track == null) return;
-
-    bool ok = false;
-
-    // Prefer direct URI playback when spotify_uri is available
-    final spotifyUri = track['spotify_uri'] as String?;
-    if (spotifyUri != null && spotifyUri.startsWith('spotify:track:')) {
-      ok = await SpotifyPlayerService.playUri(spotifyUri, _spotifyToken!);
-    }
-
-    // Fall back to search by title+artist
-    if (!ok) {
-      final title = track['title'] ?? track['trackName'] ?? '';
-      final artist = track['artist'] ?? track['artistName'] ?? '';
-      final query = '$title $artist'.trim();
-      if (query.isNotEmpty) {
-        ok = await SpotifyPlayerService.playByQuery(query, _spotifyToken!);
-      }
-    }
-
-    if (!ok && mounted) _initPreview();
-
-    final trackId = track['spotify_id'] ?? track['trackId']?.toString();
-    if (trackId != null) ApiService().playTrack(trackId).catchError((_) {});
+    // Fallback to 30s preview
+    if (mounted) setState(() => _ytLoading = false);
+    _initPreview();
   }
 
   // ── Preview fallback ─────────────────────────────────────────────────────────
 
   Future<void> _initPreview() async {
-    String? url = (widget.track?['preview_url'] ?? widget.track?['previewUrl']) as String?;
+    String? url =
+        (widget.track?['preview_url'] ?? widget.track?['previewUrl']) as String?;
 
     if (url == null) {
-      final title = (widget.track?['title'] ?? widget.track?['trackName'] ?? '') as String;
-      final artist = (widget.track?['artist'] ?? widget.track?['artistName'] ?? '') as String;
+      final title = (widget.track?['title'] ?? widget.track?['trackName'] ?? '')
+          as String;
+      final artist =
+          (widget.track?['artist'] ?? widget.track?['artistName'] ?? '')
+              as String;
       if (title.isNotEmpty) {
         try {
           final q = Uri.encodeComponent('$title $artist');
@@ -211,7 +208,10 @@ class _PlayerScreenState extends State<PlayerScreen>
             if (results != null) {
               for (final item in results) {
                 final c = item['previewUrl'] as String?;
-                if (c != null && c.isNotEmpty) { url = c; break; }
+                if (c != null && c.isNotEmpty) {
+                  url = c;
+                  break;
+                }
               }
             }
           }
@@ -246,8 +246,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   // ── Lyrics ───────────────────────────────────────────────────────────────────
 
   Future<void> _fetchLyrics() async {
-    final title = (widget.track?['title'] ?? widget.track?['trackName'] ?? '') as String;
-    final artist = (widget.track?['artist'] ?? widget.track?['artistName'] ?? '') as String;
+    final title =
+        (widget.track?['title'] ?? widget.track?['trackName'] ?? '') as String;
+    final artist =
+        (widget.track?['artist'] ?? widget.track?['artistName'] ?? '') as String;
     if (title.isEmpty) return;
     if (mounted) setState(() => _lyricsLoading = true);
 
@@ -256,25 +258,40 @@ class _PlayerScreenState extends State<PlayerScreen>
       final t = Uri.encodeComponent(title);
       final a = Uri.encodeComponent(artist);
       final resp = await http
-          .get(Uri.parse('https://lrclib.net/api/get?track_name=$t&artist_name=$a'))
+          .get(Uri.parse(
+              'https://lrclib.net/api/get?track_name=$t&artist_name=$a'))
           .timeout(const Duration(seconds: 8));
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body) as Map<String, dynamic>;
         final synced = data['syncedLyrics'] as String?;
         final plain = data['plainLyrics'] as String?;
         if (synced != null && synced.isNotEmpty) {
-          final lines = _parseLrc(synced).where((l) => l.text.isNotEmpty).toList();
+          final lines =
+              _parseLrc(synced).where((l) => l.text.isNotEmpty).toList();
           if (lines.isNotEmpty) {
-            if (mounted) setState(() { _lrcLines = lines; _lyricsSynced = true; _lyricsLoading = false; });
+            if (mounted) {
+              setState(() {
+                _lrcLines = lines;
+                _lyricsSynced = true;
+                _lyricsLoading = false;
+              });
+            }
             return;
           }
         }
         if (plain != null && plain.isNotEmpty) {
-          final lines = plain.split('\n')
+          final lines = plain
+              .split('\n')
               .where((l) => l.trim().isNotEmpty)
               .map((l) => _LrcLine(time: Duration.zero, text: l.trim()))
               .toList();
-          if (mounted) setState(() { _lrcLines = lines; _lyricsSynced = false; _lyricsLoading = false; });
+          if (mounted) {
+            setState(() {
+              _lrcLines = lines;
+              _lyricsSynced = false;
+              _lyricsLoading = false;
+            });
+          }
           return;
         }
       }
@@ -292,11 +309,18 @@ class _PlayerScreenState extends State<PlayerScreen>
           final data = jsonDecode(resp.body) as Map<String, dynamic>;
           final raw = data['lyrics'] as String?;
           if (raw != null && raw.isNotEmpty) {
-            final lines = raw.split('\n')
+            final lines = raw
+                .split('\n')
                 .where((l) => l.trim().isNotEmpty)
                 .map((l) => _LrcLine(time: Duration.zero, text: l.trim()))
                 .toList();
-            if (mounted) setState(() { _lrcLines = lines; _lyricsSynced = false; _lyricsLoading = false; });
+            if (mounted) {
+              setState(() {
+                _lrcLines = lines;
+                _lyricsSynced = false;
+                _lyricsLoading = false;
+              });
+            }
             return;
           }
         }
@@ -333,8 +357,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   // ── Controls ─────────────────────────────────────────────────────────────────
 
   void _togglePlayPause() {
-    if (_usingSpotify) {
-      _spotifyPlaying ? SpotifyPlayerService.pause() : SpotifyPlayerService.resume();
+    if (_usingYoutube) {
+      _ytPlaying ? _ytController!.pauseVideo() : _ytController!.playVideo();
     } else {
       _previewPlaying ? _player.pause() : _player.play();
     }
@@ -343,17 +367,14 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _seek(double frac) {
     final total = _duration.inMilliseconds;
     if (total == 0) return;
-    final target = (total * frac).round();
-    if (_usingSpotify) {
-      SpotifyPlayerService.seek(target);
+    if (_usingYoutube) {
+      _ytController!.seekTo(
+        seconds: (frac * _duration.inSeconds).toDouble(),
+        allowSeekAhead: true,
+      );
     } else {
-      _player.seek(Duration(milliseconds: target));
+      _player.seek(Duration(milliseconds: (total * frac).round()));
     }
-  }
-
-  Future<void> _connectSpotify() async {
-    final url = await ApiService().getSpotifyAuthUrl();
-    if (url != null) SpotifyPlayerService.openUrl(url);
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────────
@@ -381,12 +402,20 @@ class _PlayerScreenState extends State<PlayerScreen>
         ),
         child: Stack(
           children: [
-            Positioned(top: 60, left: -40,
+            Positioned(
+                top: 60,
+                left: -40,
                 child: _orb(200, AppColors.purple.withOpacity(0.3))),
-            Positioned(top: 120, right: -20,
+            Positioned(
+                top: 120,
+                right: -20,
                 child: _orb(180, AppColors.pink.withOpacity(0.25))),
-            Positioned(bottom: 100, left: 0, right: 0,
-                child: Center(child: _orb(300, AppColors.blue.withOpacity(0.15)))),
+            Positioned(
+                bottom: 100,
+                left: 0,
+                right: 0,
+                child:
+                    Center(child: _orb(300, AppColors.blue.withOpacity(0.15)))),
             SafeArea(
               child: SingleChildScrollView(
                 child: Padding(
@@ -401,8 +430,13 @@ class _PlayerScreenState extends State<PlayerScreen>
                       _titleRow(),
                       const SizedBox(height: 10),
                       _statusBadge(),
-                      if (!_usingSpotify && !_spotifyLoading)
-                        _spotifyConnectBanner(),
+                      // Hidden YouTube player — audio plays, no visible UI
+                      if (_ytController != null)
+                        SizedBox(
+                          height: 1,
+                          width: 1,
+                          child: yt.YoutubePlayer(controller: _ytController!),
+                        ),
                       const SizedBox(height: 6),
                       _progressBar(),
                       const SizedBox(height: 28),
@@ -424,7 +458,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   // ── sub-widgets ───────────────────────────────────────────────────────────────
 
   Widget _orb(double size, Color color) => Container(
-        width: size, height: size,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
             shape: BoxShape.circle,
             gradient: RadialGradient(colors: [color, Colors.transparent])),
@@ -436,23 +471,26 @@ class _PlayerScreenState extends State<PlayerScreen>
           GestureDetector(
             onTap: () => Navigator.of(context).pop(),
             child: Container(
-              width: 40, height: 40,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
                   color: AppColors.glass,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: AppColors.border)),
-              child: const Icon(Icons.arrow_back_rounded, size: 18, color: Colors.white),
+              child: const Icon(Icons.arrow_back_rounded,
+                  size: 18, color: Colors.white),
             ),
           ),
           Text('Now Playing',
               style: GoogleFonts.outfit(
-                  fontSize: 12, fontWeight: FontWeight.w600,
-                  color: AppColors.text3, letterSpacing: 0.1)),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.text3,
+                  letterSpacing: 0.1)),
           const SizedBox(width: 40),
         ],
       );
 
-  // Cover art or lyrics view (toggle on tap)
   Widget _coverOrLyrics() {
     return GestureDetector(
       onTap: () {
@@ -466,31 +504,44 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Widget _coverArtBox() {
-    final coverUrl = widget.track?['cover_url'] ?? widget.track?['artworkUrl100'];
+    final coverUrl =
+        widget.track?['cover_url'] ?? widget.track?['artworkUrl100'];
     return AnimatedBuilder(
       key: const ValueKey('cover'),
       animation: _floatController,
       builder: (_, __) => Transform.translate(
         offset: Offset(0, -8 * _floatController.value),
         child: Container(
-          width: 280, height: 280,
+          width: 280,
+          height: 280,
           decoration: BoxDecoration(
             gradient: AppColors.gradMixed,
             borderRadius: BorderRadius.circular(30),
             boxShadow: [
-              BoxShadow(color: AppColors.purpleDark.withOpacity(0.4), blurRadius: 60),
-              BoxShadow(color: AppColors.pink.withOpacity(0.2), blurRadius: 120),
-              BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 60, offset: const Offset(0, 30)),
+              BoxShadow(
+                  color: AppColors.purpleDark.withOpacity(0.4), blurRadius: 60),
+              BoxShadow(
+                  color: AppColors.pink.withOpacity(0.2), blurRadius: 120),
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.5),
+                  blurRadius: 60,
+                  offset: const Offset(0, 30)),
             ],
           ),
           child: coverUrl != null
               ? ClipRRect(
                   borderRadius: BorderRadius.circular(30),
                   child: CachedNetworkImage(
-                      imageUrl: coverUrl, fit: BoxFit.cover,
-                      placeholder: (_, __) => const Center(child: Text('🌊', style: TextStyle(fontSize: 100))),
-                      errorWidget: (_, __, ___) => const Center(child: Text('🎵', style: TextStyle(fontSize: 100)))))
-              : const Center(child: Text('🌊', style: TextStyle(fontSize: 100))),
+                      imageUrl: coverUrl,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => const Center(
+                          child: Text('🌊',
+                              style: TextStyle(fontSize: 100))),
+                      errorWidget: (_, __, ___) => const Center(
+                          child: Text('🎵',
+                              style: TextStyle(fontSize: 100)))))
+              : const Center(
+                  child: Text('🌊', style: TextStyle(fontSize: 100))),
         ),
       ),
     );
@@ -499,7 +550,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   Widget _lyricsBox() {
     return Container(
       key: const ValueKey('lyrics'),
-      width: 280, height: 280,
+      width: 280,
+      height: 280,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topCenter,
@@ -509,7 +561,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         borderRadius: BorderRadius.circular(30),
         border: Border.all(color: AppColors.purpleDark.withOpacity(0.4)),
         boxShadow: [
-          BoxShadow(color: AppColors.purpleDark.withOpacity(0.5), blurRadius: 40),
+          BoxShadow(
+              color: AppColors.purpleDark.withOpacity(0.5), blurRadius: 40),
         ],
       ),
       clipBehavior: Clip.hardEdge,
@@ -524,27 +577,35 @@ class _PlayerScreenState extends State<PlayerScreen>
                     const Text('🎵', style: TextStyle(fontSize: 36)),
                     const SizedBox(height: 10),
                     Text('No lyrics found',
-                        style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+                        style: GoogleFonts.outfit(
+                            fontSize: 14, color: AppColors.text2)),
                     const SizedBox(height: 4),
                     Text('tap to go back',
-                        style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
+                        style: GoogleFonts.outfit(
+                            fontSize: 11, color: AppColors.text3)),
                   ],
                 )
               : Stack(
                   children: [
                     ListView.builder(
                       controller: _lyricsScroll,
-                      padding: const EdgeInsets.symmetric(vertical: 100, horizontal: 12),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 100, horizontal: 12),
                       itemCount: _lrcLines.length,
                       itemBuilder: (_, i) {
-                        final isCurrent = _lyricsSynced && i == _currentLyricIdx;
+                        final isCurrent =
+                            _lyricsSynced && i == _currentLyricIdx;
                         final isNear = _lyricsSynced &&
-                            (i == _currentLyricIdx - 1 || i == _currentLyricIdx + 1);
+                            (i == _currentLyricIdx - 1 ||
+                                i == _currentLyricIdx + 1);
                         return AnimatedDefaultTextStyle(
                           duration: const Duration(milliseconds: 300),
                           style: GoogleFonts.outfit(
-                            fontSize: isCurrent ? 16 : (isNear ? 13 : 12),
-                            fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w400,
+                            fontSize:
+                                isCurrent ? 16 : (isNear ? 13 : 12),
+                            fontWeight: isCurrent
+                                ? FontWeight.w700
+                                : FontWeight.w400,
                             color: isCurrent
                                 ? Colors.white
                                 : isNear
@@ -553,7 +614,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                             height: 1.5,
                           ),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 6),
                             child: Text(
                               _lrcLines[i].text,
                               textAlign: TextAlign.center,
@@ -562,23 +624,40 @@ class _PlayerScreenState extends State<PlayerScreen>
                         );
                       },
                     ),
-                    // Top & bottom fade
-                    Positioned(top: 0, left: 0, right: 0,
-                      child: Container(height: 48,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                            colors: [const Color(0xFF1a0240), const Color(0x001a0240)])))),
-                    Positioned(bottom: 0, left: 0, right: 0,
-                      child: Container(height: 48,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter, end: Alignment.topCenter,
-                            colors: [const Color(0xFF0a0a1e), const Color(0x000a0a1e)])))),
-                    // Tap hint
-                    Positioned(bottom: 8, right: 12,
-                      child: Text('tap to close',
-                          style: GoogleFonts.outfit(fontSize: 10, color: AppColors.text3))),
+                    Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                            height: 48,
+                            decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                  const Color(0xFF1a0240),
+                                  const Color(0x001a0240)
+                                ])))),
+                    Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                            height: 48,
+                            decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                    begin: Alignment.bottomCenter,
+                                    end: Alignment.topCenter,
+                                    colors: [
+                                  const Color(0xFF0a0a1e),
+                                  const Color(0x000a0a1e)
+                                ])))),
+                    Positioned(
+                        bottom: 8,
+                        right: 12,
+                        child: Text('tap to close',
+                            style: GoogleFonts.outfit(
+                                fontSize: 10, color: AppColors.text3))),
                   ],
                 ),
     );
@@ -593,13 +672,20 @@ class _PlayerScreenState extends State<PlayerScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                    widget.track?['title'] ?? widget.track?['trackName'] ?? 'Unknown',
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    widget.track?['title'] ??
+                        widget.track?['trackName'] ??
+                        'Unknown',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.outfit(
-                        fontSize: 24, fontWeight: FontWeight.w800,
-                        color: Colors.white, letterSpacing: -0.5)),
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        letterSpacing: -0.5)),
                 Text(
-                    widget.track?['artist'] ?? widget.track?['artistName'] ?? '',
+                    widget.track?['artist'] ??
+                        widget.track?['artistName'] ??
+                        '',
                     style: GoogleFonts.outfit(
                         fontSize: 15, color: const Color(0xB3C8B4FF))),
               ],
@@ -608,13 +694,16 @@ class _PlayerScreenState extends State<PlayerScreen>
           GestureDetector(
             onTap: () => setState(() => _isLiked = !_isLiked),
             child: Container(
-              width: 44, height: 44,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                   color: AppColors.glass,
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: AppColors.border)),
               child: Icon(
-                  _isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                  _isLiked
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
                   color: _isLiked ? AppColors.pink : AppColors.text2,
                   size: 22),
             ),
@@ -623,16 +712,19 @@ class _PlayerScreenState extends State<PlayerScreen>
       );
 
   Widget _statusBadge() {
-    if (_spotifyLoading) {
-      return _badge(Icons.refresh, 'Connecting…', AppColors.purple);
+    if (_ytLoading) {
+      return _badge(Icons.refresh, 'Loading…', AppColors.purple);
     }
-    if (_usingSpotify) {
-      return _badge(Icons.music_note_rounded, 'Spotify Premium', const Color(0xFF1DB954));
+    if (_usingYoutube) {
+      return _badge(Icons.play_circle_outline_rounded,
+          'Full track · YouTube', AppColors.purpleLight);
     }
     if (_noPreview) {
-      return _badge(Icons.music_off_rounded, 'Preview unavailable', AppColors.text3);
+      return _badge(
+          Icons.music_off_rounded, 'Preview unavailable', AppColors.text3);
     }
-    return _badge(Icons.headphones_rounded, '30-second preview', AppColors.text3);
+    return _badge(
+        Icons.headphones_rounded, '30-second preview', AppColors.text3);
   }
 
   Widget _badge(IconData icon, String label, Color color) => Padding(
@@ -642,45 +734,16 @@ class _PlayerScreenState extends State<PlayerScreen>
           children: [
             Icon(icon, size: 14, color: color),
             const SizedBox(width: 6),
-            Text(label, style: GoogleFonts.outfit(fontSize: 12, color: color)),
+            Text(label,
+                style: GoogleFonts.outfit(fontSize: 12, color: color)),
           ],
-        ),
-      );
-
-  // Spotify connect banner shown below status badge
-  Widget _spotifyConnectBanner() => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: GestureDetector(
-          onTap: _connectSpotify,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF1a4a2a), Color(0xFF0f2e1a)],
-              ),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFF1DB954).withOpacity(0.4)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.music_note_rounded, color: Color(0xFF1DB954), size: 16),
-                const SizedBox(width: 8),
-                Text('Connect Spotify Premium for full tracks',
-                    style: GoogleFonts.outfit(
-                        fontSize: 13, fontWeight: FontWeight.w600,
-                        color: const Color(0xFF1DB954))),
-                const SizedBox(width: 6),
-                const Icon(Icons.arrow_forward_rounded, color: Color(0xFF1DB954), size: 14),
-              ],
-            ),
-          ),
         ),
       );
 
   Widget _progressBar() {
     final frac = _duration.inMilliseconds > 0
-        ? (_position.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0)
+        ? (_position.inMilliseconds / _duration.inMilliseconds)
+            .clamp(0.0, 1.0)
         : 0.0;
     return Column(
       children: [
@@ -719,9 +782,11 @@ class _PlayerScreenState extends State<PlayerScreen>
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(_fmt(_position),
-                style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+                style:
+                    GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
             Text(_fmt(_duration),
-                style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+                style:
+                    GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
           ],
         ),
       ],
@@ -737,37 +802,49 @@ class _PlayerScreenState extends State<PlayerScreen>
               icon: const Icon(Icons.shuffle_rounded,
                   size: 22, color: AppColors.purpleLight)),
           IconButton(
-              onPressed: _usingSpotify ? SpotifyPlayerService.previousTrack : null,
-              icon: Icon(Icons.skip_previous_rounded,
-                  size: 32, color: _usingSpotify ? AppColors.text2 : AppColors.text3)),
+              onPressed: null,
+              icon: const Icon(Icons.skip_previous_rounded,
+                  size: 32, color: AppColors.text3)),
           GestureDetector(
-            onTap: _spotifyLoading ? null : _togglePlayPause,
+            onTap: _ytLoading ? null : _togglePlayPause,
             child: Container(
-              width: 72, height: 72,
+              width: 72,
+              height: 72,
               decoration: BoxDecoration(
                   gradient: AppColors.primaryBtn,
                   shape: BoxShape.circle,
                   boxShadow: [
-                    BoxShadow(color: AppColors.purpleDark.withOpacity(0.5), blurRadius: 30),
-                    BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 20, offset: const Offset(0, 8)),
+                    BoxShadow(
+                        color: AppColors.purpleDark.withOpacity(0.5),
+                        blurRadius: 30),
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.4),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8)),
                   ]),
-              child: _spotifyLoading
+              child: _ytLoading
                   ? const Center(
                       child: SizedBox(
-                          width: 24, height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)))
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white)))
                   : Icon(
-                      _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                      color: Colors.white, size: 34),
+                      _isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      color: Colors.white,
+                      size: 34),
             ),
           ),
           IconButton(
-              onPressed: _usingSpotify ? SpotifyPlayerService.nextTrack : null,
-              icon: Icon(Icons.skip_next_rounded,
-                  size: 32, color: _usingSpotify ? AppColors.text2 : AppColors.text3)),
+              onPressed: null,
+              icon: const Icon(Icons.skip_next_rounded,
+                  size: 32, color: AppColors.text3)),
           IconButton(
               onPressed: () {},
-              icon: const Icon(Icons.repeat_rounded, size: 22, color: AppColors.text3)),
+              icon: const Icon(Icons.repeat_rounded,
+                  size: 22, color: AppColors.text3)),
         ],
       );
 
@@ -794,7 +871,8 @@ class _PlayerScreenState extends State<PlayerScreen>
             GestureDetector(
               onTap: () => Navigator.push(context,
                   MaterialPageRoute(builder: (_) => const QueueScreen())),
-              child: const _ExtraBtn(icon: Icons.queue_music_rounded, label: 'Queue'),
+              child:
+                  const _ExtraBtn(icon: Icons.queue_music_rounded, label: 'Queue'),
             ),
             GestureDetector(
               onTap: () => showShareTrack(context),
@@ -802,7 +880,8 @@ class _PlayerScreenState extends State<PlayerScreen>
             ),
             GestureDetector(
               onTap: () => showAddToPlaylist(context),
-              child: const _ExtraBtn(icon: Icons.playlist_play_rounded, label: 'Playlist'),
+              child: const _ExtraBtn(
+                  icon: Icons.playlist_play_rounded, label: 'Playlist'),
             ),
           ],
         ),
@@ -815,13 +894,16 @@ class _ExtraBtn extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool active;
-  const _ExtraBtn({required this.icon, required this.label, this.active = false});
+  const _ExtraBtn(
+      {required this.icon, required this.label, this.active = false});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Icon(icon, size: 22, color: active ? AppColors.purpleLight : AppColors.text3),
+        Icon(icon,
+            size: 22,
+            color: active ? AppColors.purpleLight : AppColors.text3),
         const SizedBox(height: 4),
         Text(label,
             style: GoogleFonts.outfit(

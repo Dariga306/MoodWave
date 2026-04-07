@@ -113,6 +113,22 @@ class ApiService {
   }
 
   // Music
+  Future<String?> getYouTubeId({
+    required String trackId,
+    required String title,
+    required String artist,
+  }) async {
+    try {
+      final resp = await _dio.get(
+        '/tracks/$trackId/youtube',
+        queryParameters: {'title': title, 'artist': artist},
+      );
+      return resp.data['video_id'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<List<dynamic>> searchTracks(String q, {int limit = 20}) async {
     final resp = await _dio.get('/tracks/search', queryParameters: {'q': q, 'limit': limit});
     return resp.data as List;
