@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Optional
@@ -14,11 +15,14 @@ from app.models.music import ListeningHistory, TrackCache
 from app.models.user import TasteVector, User, UserGenre
 from app.schemas.music import TrackResponse
 from app.services import cache as cache_svc
+from app.services import deezer as deezer_service
 from app.services import spotify as music_service
 from app.services.matching import ACTION_WEIGHTS, update_taste_vector_for_user
 from app.services.search_service import track_search_query
 
 router = APIRouter()
+artist_router = APIRouter(prefix="/artists")
+album_router = APIRouter(prefix="/albums")
 
 TRACK_SEARCH_CACHE_TTL = 300
 RECOMMENDATIONS_CACHE_TTL = 3600
@@ -76,6 +80,48 @@ async def _ensure_track_cached(
         db.add(track)
         await db.flush()
     return track
+
+
+@router.get(
+    "/me/recent",
+    summary="Get recently played tracks",
+    description="Returns the user's last N uniquely played tracks with cover art.",
+)
+async def get_recent_tracks(
+    limit: int = Query(default=10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from sqlalchemy import desc, func as sa_func
+    subq = (
+        select(
+            ListeningHistory.spotify_track_id,
+            sa_func.max(ListeningHistory.created_at).label("last_played"),
+        )
+        .where(ListeningHistory.user_id == current_user.id)
+        .group_by(ListeningHistory.spotify_track_id)
+        .order_by(desc("last_played"))
+        .limit(limit)
+        .subquery()
+    )
+    rows = (
+        await db.execute(
+            select(TrackCache, subq.c.last_played)
+            .join(subq, TrackCache.spotify_id == subq.c.spotify_track_id)
+            .order_by(desc(subq.c.last_played))
+        )
+    ).all()
+    return [
+        {
+            "spotify_id": track.spotify_id,
+            "title": track.title,
+            "artist": track.artist,
+            "cover_url": track.cover_url,
+            "duration_ms": track.duration_ms,
+            "played_at": played_at.isoformat() if played_at else None,
+        }
+        for track, played_at in rows
+    ]
 
 
 @router.get(
@@ -353,3 +399,65 @@ async def skip_track(
     )
     await cache_svc.invalidate_recommendations(request.app.state.redis, current_user.id)
     return {"message": "ok", "action": action}
+
+
+@artist_router.get(
+    "/search",
+    summary="Search artist profile",
+    description="Looks up the closest Deezer artist match and returns the artist plus top tracks.",
+)
+async def search_artist_profile(
+    q: str = Query(default=""),
+    current_user: User = Depends(get_current_user),
+):
+    query = q.strip()
+    if len(query) < 1:
+        return {"artist": None, "top_tracks": []}
+
+    artist = await deezer_service.search_artist(query)
+    if not artist:
+        return {"artist": None, "top_tracks": []}
+
+    top_tracks = await deezer_service.get_artist_top_tracks(int(artist["id"]))
+    return {"artist": artist, "top_tracks": top_tracks}
+
+
+@artist_router.get(
+    "/{deezer_id}/profile",
+    summary="Get artist profile",
+    description="Returns Deezer artist metadata, top tracks, albums, and related artists.",
+)
+async def get_artist_profile(
+    deezer_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    artist, top_tracks, albums, related_artists = await asyncio.gather(
+        deezer_service.get_artist(deezer_id),
+        deezer_service.get_artist_top_tracks(deezer_id),
+        deezer_service.get_artist_albums(deezer_id),
+        deezer_service.get_related_artists(deezer_id),
+    )
+    if not artist:
+        raise HTTPException(status_code=404, detail="Artist not found")
+
+    return {
+        "artist": artist,
+        "top_tracks": top_tracks,
+        "albums": albums,
+        "related_artists": related_artists,
+    }
+
+
+@album_router.get(
+    "/{deezer_album_id}",
+    summary="Get album detail",
+    description="Returns album metadata and full track list from Deezer.",
+)
+async def get_album_detail(
+    deezer_album_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    album = await deezer_service.get_album_detail(deezer_album_id)
+    if not album:
+        raise HTTPException(status_code=404, detail="Album not found")
+    return album

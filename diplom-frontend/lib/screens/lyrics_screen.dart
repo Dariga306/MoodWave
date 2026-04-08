@@ -1,150 +1,287 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 
-import '../theme/app_colors.dart';
+class SyncedLine {
+  final int timeMs;
+  final String text;
+
+  const SyncedLine({
+    required this.timeMs,
+    required this.text,
+  });
+}
 
 class LyricsScreen extends StatefulWidget {
-  final String? artist;
-  final String? title;
-  const LyricsScreen({super.key, this.artist, this.title});
+  final String artist;
+  final String title;
+  final List<String> lyricsLines;
+  final Duration currentPosition;
+  final List<int> syncedLineTimesMs;
+
+  const LyricsScreen({
+    super.key,
+    required this.artist,
+    required this.title,
+    required this.lyricsLines,
+    required this.currentPosition,
+    this.syncedLineTimesMs = const [],
+  });
 
   @override
   State<LyricsScreen> createState() => _LyricsScreenState();
 }
 
 class _LyricsScreenState extends State<LyricsScreen> {
-  String? _lyrics;
+  final ScrollController _scrollController = ScrollController();
+
+  Timer? _timer;
+  List<String> _lyricsLines = [];
+  List<SyncedLine> _syncedLines = [];
   bool _loading = true;
-  String? _error;
+  int _activeIndex = -1;
+  int _basePositionMs = 0;
+  DateTime _openedAt = DateTime.now();
 
   @override
   void initState() {
     super.initState();
+    _basePositionMs = widget.currentPosition.inMilliseconds;
+    _openedAt = DateTime.now();
+    _seedInitialLyrics();
+  }
+
+  @override
+  void didUpdateWidget(covariant LyricsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentPosition != widget.currentPosition) {
+      _basePositionMs = widget.currentPosition.inMilliseconds;
+      _openedAt = DateTime.now();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _seedInitialLyrics() {
+    if (widget.lyricsLines.isNotEmpty) {
+      _lyricsLines = List<String>.from(widget.lyricsLines);
+      if (widget.syncedLineTimesMs.length == widget.lyricsLines.length) {
+        _syncedLines = List.generate(
+          widget.lyricsLines.length,
+          (index) => SyncedLine(
+            timeMs: widget.syncedLineTimesMs[index],
+            text: widget.lyricsLines[index],
+          ),
+        );
+      }
+      _loading = false;
+      _startTicker();
+      return;
+    }
     _fetchLyrics();
   }
 
   Future<void> _fetchLyrics() async {
-    final artist = widget.artist;
-    final title = widget.title;
-    if (artist == null || title == null || artist.isEmpty || title.isEmpty) {
-      setState(() { _loading = false; _error = 'No track info'; });
-      return;
-    }
+    setState(() => _loading = true);
+
     try {
-      final a = Uri.encodeComponent(artist);
-      final t = Uri.encodeComponent(title);
-      final resp = await http
-          .get(Uri.parse('https://api.lyrics.ovh/v1/$a/$t'))
+      final title = Uri.encodeComponent(widget.title);
+      final artist = Uri.encodeComponent(widget.artist);
+      final response = await http
+          .get(
+            Uri.parse(
+              'https://lrclib.net/api/search?track_name=$title&artist_name=$artist',
+            ),
+          )
           .timeout(const Duration(seconds: 10));
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        final raw = data['lyrics'] as String? ?? '';
-        setState(() { _lyrics = raw.trim(); _loading = false; });
-      } else {
-        setState(() { _loading = false; _error = 'Lyrics not found'; });
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as List<dynamic>;
+        for (final item in data) {
+          final map = item as Map<String, dynamic>;
+          final syncedLyrics = map['syncedLyrics'] as String?;
+          if (syncedLyrics != null && syncedLyrics.isNotEmpty) {
+            final lines = _parseSyncedLyrics(syncedLyrics);
+            if (lines.isNotEmpty) {
+              if (!mounted) return;
+              setState(() {
+                _syncedLines = lines;
+                _lyricsLines = lines.map((line) => line.text).toList();
+                _loading = false;
+              });
+              _startTicker();
+              return;
+            }
+          }
+        }
       }
-    } catch (_) {
-      setState(() { _loading = false; _error = 'Could not load lyrics'; });
+    } catch (_) {}
+
+    try {
+      final title = Uri.encodeComponent(widget.title);
+      final artist = Uri.encodeComponent(widget.artist);
+      final response = await http
+          .get(Uri.parse('https://api.lyrics.ovh/v1/$artist/$title'))
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final raw = data['lyrics'] as String? ?? '';
+        final lines = raw
+            .split('\n')
+            .map((line) => line.trim())
+            .where((line) => line.isNotEmpty)
+            .toList();
+        if (!mounted) return;
+        setState(() {
+          _lyricsLines = lines;
+          _syncedLines = [];
+          _activeIndex = -1;
+          _loading = false;
+        });
+        return;
+      }
+    } catch (_) {}
+
+    if (!mounted) return;
+    setState(() => _loading = false);
+  }
+
+  List<SyncedLine> _parseSyncedLyrics(String raw) {
+    final regex = RegExp(r'^\[(\d{2}):(\d{2})\.(\d{2})\]\s*(.*)$');
+    final lines = <SyncedLine>[];
+
+    for (final entry in raw.split('\n')) {
+      final match = regex.firstMatch(entry.trim());
+      if (match == null) continue;
+
+      final minutes = int.parse(match.group(1)!);
+      final seconds = int.parse(match.group(2)!);
+      final hundredths = int.parse(match.group(3)!);
+      final text = match.group(4)!.trim();
+      if (text.isEmpty) continue;
+
+      lines.add(
+        SyncedLine(
+          timeMs: (minutes * 60000) + (seconds * 1000) + (hundredths * 10),
+          text: text,
+        ),
+      );
     }
+
+    return lines;
+  }
+
+  void _startTicker() {
+    _timer?.cancel();
+    if (_syncedLines.isEmpty) return;
+
+    _updateActiveIndex();
+    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      _updateActiveIndex();
+    });
+  }
+
+  void _updateActiveIndex() {
+    if (_syncedLines.isEmpty) return;
+
+    final elapsed = DateTime.now().difference(_openedAt).inMilliseconds;
+    final positionMs = _basePositionMs + elapsed;
+    int nextIndex = 0;
+    for (int i = 0; i < _syncedLines.length; i++) {
+      if (_syncedLines[i].timeMs <= positionMs) {
+        nextIndex = i;
+      } else {
+        break;
+      }
+    }
+
+    if (nextIndex != _activeIndex && mounted) {
+      setState(() => _activeIndex = nextIndex);
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _scrollToActiveLine());
+    }
+  }
+
+  void _scrollToActiveLine() {
+    if (!_scrollController.hasClients || _activeIndex < 0) return;
+    _scrollController.animateTo(
+      _activeIndex * 58.0,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOut,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: const BackButton(color: Colors.white),
+      ),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF1a0240), Color(0xFF0d0d20), Color(0xFF001230)],
-            stops: [0.0, 0.4, 1.0],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF0D0D20), Color(0xFF1A0240)],
           ),
         ),
-        child: Stack(
-          children: [
-            Positioned(top: 80, left: -40,
-              child: Container(width: 200, height: 200,
-                decoration: BoxDecoration(shape: BoxShape.circle,
-                  gradient: RadialGradient(colors: [AppColors.purple.withOpacity(0.2), Colors.transparent])))),
-            Positioned(bottom: 100, right: -20,
-              child: Container(width: 180, height: 180,
-                decoration: BoxDecoration(shape: BoxShape.circle,
-                  gradient: RadialGradient(colors: [AppColors.pink.withOpacity(0.15), Colors.transparent])))),
-            SafeArea(
-              child: Column(
-                children: [
-                  // Top bar
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        GestureDetector(
-                          onTap: () => Navigator.of(context).pop(),
-                          child: Container(width: 40, height: 40,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.07),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.white.withOpacity(0.1)),
-                            ),
-                            child: const Icon(Icons.arrow_back_rounded, size: 18, color: Colors.white)),
+        child: SafeArea(
+          child: _loading
+              ? const Center(
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
+                )
+              : _lyricsLines.isEmpty
+                  ? Center(
+                      child: Text(
+                        'Lyrics not found',
+                        style: GoogleFonts.outfit(
+                          fontSize: 16,
+                          color: Colors.white60,
                         ),
-                        Column(children: [
-                          Text('LYRICS', style: GoogleFonts.outfit(
-                              fontSize: 12, fontWeight: FontWeight.w700,
-                              color: const Color(0x80C8B4FF), letterSpacing: 0.1)),
-                          if (widget.title != null)
-                            Text(widget.title!, style: GoogleFonts.outfit(
-                                fontSize: 11, color: AppColors.text3),
-                              overflow: TextOverflow.ellipsis),
-                        ]),
-                        const SizedBox(width: 40),
-                      ],
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.symmetric(vertical: 100),
+                      itemCount: _lyricsLines.length,
+                      itemBuilder: (context, index) {
+                        final isActive =
+                            _syncedLines.isNotEmpty && index == _activeIndex;
+                        return AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 8,
+                          ),
+                          child: Text(
+                            _lyricsLines[index],
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.outfit(
+                              fontSize: isActive ? 22 : 16,
+                              fontWeight:
+                                  isActive ? FontWeight.w700 : FontWeight.w400,
+                              color: isActive
+                                  ? Colors.white
+                                  : Colors.white.withOpacity(0.35),
+                              height: 1.6,
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  ),
-
-                  // Content
-                  Expanded(
-                    child: _loading
-                        ? const Center(child: CircularProgressIndicator(color: AppColors.purple, strokeWidth: 2))
-                        : _error != null
-                            ? Center(child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.music_off_rounded, size: 48, color: AppColors.text3),
-                                  const SizedBox(height: 12),
-                                  Text(_error!, style: GoogleFonts.outfit(fontSize: 16, color: AppColors.text2)),
-                                  const SizedBox(height: 6),
-                                  Text('Try a different track', style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3)),
-                                ],
-                              ))
-                            : SingleChildScrollView(
-                                padding: const EdgeInsets.fromLTRB(28, 8, 28, 32),
-                                child: Text(
-                                  _lyrics ?? '',
-                                  style: GoogleFonts.outfit(
-                                    fontSize: 17,
-                                    height: 1.8,
-                                    color: Colors.white.withOpacity(0.9),
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                  ),
-
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text('Lyrics · lyrics.ovh',
-                        style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
-                  ),
-                ],
-              ),
-            ),
-          ],
         ),
       ),
     );

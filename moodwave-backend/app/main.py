@@ -137,7 +137,26 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5001",
+        "http://127.0.0.1:5001",
+        "http://localhost:5004",
+        "http://127.0.0.1:5004",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_origin_regex=(
+        r"https?://("
+        r"localhost|"
+        r"127\.0\.0\.1|"
+        r"0\.0\.0\.0|"
+        r"10\.\d+\.\d+\.\d+|"
+        r"192\.168\.\d+\.\d+|"
+        r"172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+"
+        r")(:\d+)?$"
+    ),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -145,6 +164,8 @@ app.add_middleware(
 
 app.include_router(auth.router, tags=["auth"])
 app.include_router(music.router, prefix="/tracks", tags=["music"])
+app.include_router(music.artist_router, tags=["artists"])
+app.include_router(music.album_router, prefix="/albums", tags=["albums"])
 app.include_router(weather.router, prefix="/weather", tags=["weather"])
 app.include_router(match.router, prefix="/matches", tags=["match"])
 app.include_router(chat.router, prefix="/chats", tags=["chat"])

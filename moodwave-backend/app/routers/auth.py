@@ -43,6 +43,7 @@ from app.services import cache as cache_svc
 from app.services.email_service import (
     send_verification_email, send_reset_email,
     send_account_deletion_email, send_reactivation_email,
+    send_login_email,
 )
 from app.services.security import are_friends, get_blocked_ids_for_user
 from app.utils.code_generator import generate_code, is_code_expired
@@ -250,7 +251,7 @@ async def register(
         access_token=create_access_token(user.id),
         refresh_token=create_refresh_token(user.id),
         user=_serialize_user(user, [], []),
-        dev_code=None,
+        dev_code=None if email_sent else code,
     )
 
 
@@ -295,6 +296,13 @@ async def login(
 
     genres = (await db.execute(select(UserGenre).where(UserGenre.user_id == user.id))).scalars().all()
     moods = (await db.execute(select(UserMood).where(UserMood.user_id == user.id))).scalars().all()
+    background_tasks.add_task(
+        send_login_email,
+        user.email,
+        user.first_name or "",
+        request.client.host if request.client else "",
+        request.headers.get("user-agent", ""),
+    )
     return TokenResponse(
         access_token=create_access_token(user.id),
         refresh_token=create_refresh_token(user.id),
@@ -417,8 +425,8 @@ async def resend_verification(
     user.verification_resend_window = window_start
     await db.commit()
 
-    await send_verification_email(user.email, code, user.first_name or "")
-    return {"message": "Code sent"}
+    email_sent = await send_verification_email(user.email, code, user.first_name or "")
+    return {"message": "Code sent", "dev_code": None if email_sent else code}
 
 
 # ---------------------------------------------------------------------------
@@ -443,9 +451,14 @@ async def forgot_password(
         user.reset_code = code
         user.reset_code_expires = datetime.utcnow() + timedelta(minutes=CODE_TTL_MINUTES)
         await db.commit()
-        await send_reset_email(user.email, code, user.first_name or "")
+        email_sent = await send_reset_email(user.email, code, user.first_name or "")
+        return {
+            "message": "If this email exists, a code was sent",
+            "method": "email",
+            "dev_code": None if email_sent else code,
+        }
 
-    return {"message": "If this email exists, a code was sent", "method": "email"}
+    return {"message": "If this email exists, a code was sent", "method": "email", "dev_code": None}
 
 
 @router.post(
@@ -994,8 +1007,8 @@ async def _get_or_create_oauth_user(
 
 
 async def _build_token_response(user: User, db: AsyncSession, is_new: bool = False) -> TokenResponse:
-    access_token = create_access_token({"sub": str(user.id)})
-    refresh_token_val = create_refresh_token({"sub": str(user.id)})
+    access_token = create_access_token(user.id)
+    refresh_token_val = create_refresh_token(user.id)
     genres = (await db.execute(select(UserGenre).where(UserGenre.user_id == user.id))).scalars().all()
     moods = (await db.execute(select(UserMood).where(UserMood.user_id == user.id))).scalars().all()
     return TokenResponse(

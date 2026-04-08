@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.dependencies import get_current_user
@@ -35,6 +36,56 @@ WEATHER_PLAYLISTS = {
         ("Grey Sky Blues", "Soulful songs for overcast hours", "37i9dQZF1DX7qK8ma5wgG1"),
     ],
 }
+
+
+@router.get(
+    "/cities/search",
+    summary="Search cities",
+    description="Proxies city search through the backend so the Flutter web app avoids browser CORS issues.",
+)
+async def search_cities(
+    q: str = Query(..., min_length=2),
+):
+    uri = (
+        "https://nominatim.openstreetmap.org/search"
+        f"?q={httpx.QueryParams({'q': q})['q']}"
+        "&format=json"
+        "&addressdetails=1"
+        "&limit=12"
+        "&featuretype=city"
+        "&accept-language=en"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+            response = await client.get(
+                uri,
+                headers={
+                    "User-Agent": "MoodWave/1.0 (diplom project)",
+                    "Accept": "application/json",
+                },
+            )
+            response.raise_for_status()
+    except Exception:
+        raise HTTPException(status_code=503, detail="City search unavailable")
+
+    data = response.json()
+    cities: list[str] = []
+    seen: set[str] = set()
+
+    for item in data:
+        addr = item.get("address") or {}
+        name = (
+            addr.get("city")
+            or addr.get("town")
+            or addr.get("village")
+            or addr.get("hamlet")
+            or str(item.get("display_name", "")).split(",")[0].strip()
+        )
+        if name and name not in seen:
+            seen.add(name)
+            cities.append(name)
+
+    return {"cities": cities}
 
 
 def _playlist_payloads(condition: str) -> list[dict]:

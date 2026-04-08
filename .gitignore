@@ -1,36 +1,46 @@
-# Secrets — NEVER commit
+# ── Secrets — NEVER commit ──────────────────────────────────────────
 moodwave-backend/firebase-credentials.json
 moodwave-backend/.env
 moodwave-backend/.env.local
 admin-panel/.env
+*.env
+*.env.local
 
-# Dependencies — never commit
-node_modules/
-admin-panel/node_modules/
-admin-panel/dist/
-
-# Claude Code — dev tool, не для репо
-CLAUDE.md
-.claude/
-
-# Python
+# ── Python ───────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 .venv/
 venv/
+*.egg-info/
+dist/
+.eggs/
+*.log
 
-# Flutter build artifacts
+# ── Flutter ──────────────────────────────────────────────────────────
 diplom-frontend/build/
 diplom-frontend/.dart_tool/
 diplom-frontend/.flutter-plugins
 diplom-frontend/.flutter-plugins-dependencies
+diplom-frontend/.packages
 
-# IDE
+# ── Node / Admin panel ───────────────────────────────────────────────
+node_modules/
+admin-panel/node_modules/
+admin-panel/dist/
+
+# ── IDE ──────────────────────────────────────────────────────────────
 .idea/
 .vscode/
 *.iml
+*.suo
+*.user
 
-# OS
+# ── OS ───────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# ── Dev tools ────────────────────────────────────────────────────────
+.claude/

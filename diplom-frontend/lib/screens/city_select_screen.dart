@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
@@ -12,25 +10,86 @@ import 'main/main_screen.dart';
 
 // Popular cities shown before typing
 const List<String> _popularCities = [
-  'New York', 'London', 'Paris', 'Tokyo', 'Dubai', 'Berlin',
-  'Sydney', 'Toronto', 'Seoul', 'Beijing', 'Mumbai', 'Istanbul',
-  'Barcelona', 'Amsterdam', 'Vienna', 'Prague', 'Warsaw', 'Kyiv',
-  'Moscow', 'Saint Petersburg', 'Almaty', 'Astana', 'Tashkent',
-  'Bishkek', 'Baku', 'Tbilisi', 'Yerevan', 'Minsk', 'Riga',
-  'Vilnius', 'Tallinn', 'Helsinki', 'Stockholm', 'Oslo', 'Copenhagen',
-  'Lisbon', 'Madrid', 'Rome', 'Milan', 'Athens', 'Budapest',
-  'Bucharest', 'Sofia', 'Belgrade', 'Zagreb', 'Sarajevo',
-  'Singapore', 'Bangkok', 'Jakarta', 'Kuala Lumpur', 'Manila',
-  'Ho Chi Minh City', 'Hanoi', 'Dhaka', 'Karachi', 'Lahore',
-  'Cairo', 'Lagos', 'Nairobi', 'Casablanca', 'Johannesburg',
-  'São Paulo', 'Buenos Aires', 'Rio de Janeiro', 'Bogotá', 'Lima',
-  'Santiago', 'Mexico City', 'Los Angeles', 'Chicago', 'Houston',
+  'New York',
+  'London',
+  'Paris',
+  'Tokyo',
+  'Dubai',
+  'Berlin',
+  'Sydney',
+  'Toronto',
+  'Seoul',
+  'Beijing',
+  'Mumbai',
+  'Istanbul',
+  'Barcelona',
+  'Amsterdam',
+  'Vienna',
+  'Prague',
+  'Warsaw',
+  'Kyiv',
+  'Moscow',
+  'Saint Petersburg',
+  'Almaty',
+  'Astana',
+  'Tashkent',
+  'Bishkek',
+  'Baku',
+  'Tbilisi',
+  'Yerevan',
+  'Minsk',
+  'Riga',
+  'Vilnius',
+  'Tallinn',
+  'Helsinki',
+  'Stockholm',
+  'Oslo',
+  'Copenhagen',
+  'Lisbon',
+  'Madrid',
+  'Rome',
+  'Milan',
+  'Athens',
+  'Budapest',
+  'Bucharest',
+  'Sofia',
+  'Belgrade',
+  'Zagreb',
+  'Sarajevo',
+  'Singapore',
+  'Bangkok',
+  'Jakarta',
+  'Kuala Lumpur',
+  'Manila',
+  'Ho Chi Minh City',
+  'Hanoi',
+  'Dhaka',
+  'Karachi',
+  'Lahore',
+  'Cairo',
+  'Lagos',
+  'Nairobi',
+  'Casablanca',
+  'Johannesburg',
+  'São Paulo',
+  'Buenos Aires',
+  'Rio de Janeiro',
+  'Bogotá',
+  'Lima',
+  'Santiago',
+  'Mexico City',
+  'Los Angeles',
+  'Chicago',
+  'Houston',
 ];
 
 String _capitalize(String s) => s.trim().isEmpty
     ? s
-    : s.trim().split(RegExp(r'\s+')).map((w) =>
-        w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
+    : s
+        .trim()
+        .split(RegExp(r'\s+'))
+        .map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}')
+        .join(' ');
 
 class CitySelectScreen extends StatefulWidget {
   const CitySelectScreen({super.key});
@@ -46,6 +105,8 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
   bool _dropdownVisible = false;
   bool _searchLoading = false;
   List<String> _networkCities = [];
+  String _selected = '';
+  String _searchQuery = '';
   Timer? _debounce;
 
   @override
@@ -64,7 +125,7 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
   }
 
   List<String> get _suggestions {
-    final q = _ctrl.text.trim().toLowerCase();
+    final q = _searchQuery.trim().toLowerCase();
     if (q.isEmpty) return _popularCities.take(12).toList();
     if (_networkCities.isNotEmpty) return _networkCities;
     return _popularCities
@@ -74,7 +135,10 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
   }
 
   void _onChanged(String value) {
-    setState(() => _networkCities = []);
+    setState(() {
+      _networkCities = [];
+      _searchQuery = value;
+    });
     _debounce?.cancel();
     final q = value.trim();
     if (q.length < 2) return;
@@ -85,42 +149,9 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
     if (!mounted) return;
     setState(() => _searchLoading = true);
     try {
-      final uri = Uri.parse(
-        'https://nominatim.openstreetmap.org/search'
-        '?q=${Uri.encodeComponent(q)}'
-        '&format=json'
-        '&addressdetails=1'
-        '&limit=12'
-        '&featuretype=city'
-        '&accept-language=en',
-      );
-      final resp = await http.get(uri, headers: {
-        'User-Agent': 'MoodWave/1.0 (diplom project)',
-        'Accept': 'application/json',
-      }).timeout(const Duration(seconds: 8));
-
+      final cities = await ApiService().searchCities(q);
       if (!mounted) return;
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body) as List;
-        final cities = <String>{};
-        for (final item in data) {
-          final addr = item['address'] as Map<String, dynamic>?;
-          final name = addr?['city'] as String? ??
-              addr?['town'] as String? ??
-              addr?['village'] as String? ??
-              addr?['hamlet'] as String? ??
-              item['display_name']?.toString().split(',').first.trim();
-          if (name != null && name.isNotEmpty) cities.add(name);
-        }
-        if (cities.isEmpty) {
-          // fallback: just use display_name first segment
-          for (final item in data) {
-            final dn = item['display_name']?.toString();
-            if (dn != null) cities.add(dn.split(',').first.trim());
-          }
-        }
-        setState(() => _networkCities = cities.toList());
-      }
+      setState(() => _networkCities = cities);
     } catch (_) {
       // silently fall back to local suggestions
     } finally {
@@ -128,25 +159,20 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
     }
   }
 
-  void _pick(String city) {
-    _ctrl.text = city;
-    _focus.unfocus();
-    setState(() {
-      _dropdownVisible = false;
-      _networkCities = [];
-    });
-  }
-
   String _friendlyError(dynamic e) {
     if (e is DioException) {
       final code = e.response?.statusCode;
       if (code == 401) return 'Session expired. Please sign in again.';
+      if (code == 403) return 'Please verify your email before continuing.';
       if (code == 422) return 'Please enter a valid city name.';
-      if (code != null && code >= 500) return 'Server is unavailable. Try again later.';
+      if (code != null && code >= 500)
+        return 'Server is unavailable. Try again later.';
       if (e.type == DioExceptionType.connectionError ||
-          e.type == DioExceptionType.unknown) return 'No internet connection. Check your network.';
+          e.type == DioExceptionType.unknown)
+        return 'No internet connection. Please try again.';
       if (e.type == DioExceptionType.receiveTimeout ||
-          e.type == DioExceptionType.sendTimeout) return 'Request timed out. Try again.';
+          e.type == DioExceptionType.sendTimeout)
+        return 'Request timed out. Try again.';
     }
     return 'Something went wrong. Please try again.';
   }
@@ -163,38 +189,27 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
     }
     final city = _capitalize(raw);
     setState(() => _loading = true);
+
+    // Save city locally immediately so it's never lost
+    context.read<AuthProvider>().updateUser({'city': city});
+
     try {
       await ApiService().updateMe({'city': city});
-      if (!mounted) return;
-      context.read<AuthProvider>().updateUser({'city': city});
-      await context.read<AuthProvider>().completeOnboarding();
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const MainScreen()));
-    } catch (e) {
-      if (!mounted) return;
-      final msg = _friendlyError(e);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Row(children: [
-          const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 18),
-          const SizedBox(width: 10),
-          Expanded(child: Text(msg, style: GoogleFonts.outfit(fontSize: 13, color: Colors.white))),
-        ]),
-        backgroundColor: const Color(0xFF4a1010),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        margin: const EdgeInsets.all(16),
-        duration: const Duration(seconds: 4),
-      ));
-    } finally {
-      if (mounted) setState(() => _loading = false);
+    } catch (_) {
+      // Backend unavailable — city already saved locally, continue silently
     }
+
+    if (!mounted) return;
+    await context.read<AuthProvider>().completeOnboarding();
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const MainScreen()));
   }
 
   @override
   Widget build(BuildContext context) {
-    final showDropdown = _dropdownVisible &&
-        (_suggestions.isNotEmpty || _searchLoading);
+    final showDropdown =
+        _dropdownVisible && (_suggestions.isNotEmpty || _searchLoading);
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -219,12 +234,17 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        _dot(done: true), const SizedBox(width: 6),
-                        _dot(done: true), const SizedBox(width: 6),
-                        _dot(done: true), const SizedBox(width: 6),
-                        _dot(active: true),
-                      ]),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _dot(done: true),
+                            const SizedBox(width: 6),
+                            _dot(done: true),
+                            const SizedBox(width: 6),
+                            _dot(done: true),
+                            const SizedBox(width: 6),
+                            _dot(active: true),
+                          ]),
                       const SizedBox(height: 20),
                       Text('Your city',
                           style: GoogleFonts.outfit(
@@ -262,7 +282,8 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
                               controller: _ctrl,
                               focusNode: _focus,
                               onChanged: _onChanged,
-                              onTap: () => setState(() => _dropdownVisible = true),
+                              onTap: () =>
+                                  setState(() => _dropdownVisible = true),
                               style: GoogleFonts.outfit(
                                   fontSize: 16, color: AppColors.text),
                               decoration: InputDecoration(
@@ -323,26 +344,34 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
                                       padding: EdgeInsets.zero,
                                       itemCount: _suggestions.length,
                                       itemBuilder: (_, i) {
-                                        final city = _suggestions[i];
-                                        return GestureDetector(
-                                          behavior: HitTestBehavior.opaque,
-                                          onTapDown: (_) => _pick(city),
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 16, vertical: 13),
-                                            child: Row(children: [
-                                              Icon(Icons.location_on_rounded,
-                                                  size: 16,
-                                                  color: AppColors.purpleLight),
-                                              const SizedBox(width: 10),
-                                              Expanded(
-                                                child: Text(city,
-                                                    style: GoogleFonts.outfit(
-                                                        fontSize: 15,
-                                                        color: AppColors.text)),
-                                              ),
-                                            ]),
+                                        final cityName = _suggestions[i];
+                                        return ListTile(
+                                          leading: const Icon(
+                                            Icons.location_on_rounded,
+                                            color: Color(0xFF7C3AED),
+                                            size: 18,
                                           ),
+                                          title: Text(
+                                            cityName,
+                                            style: GoogleFonts.outfit(
+                                              fontSize: 15,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          onTap: () {
+                                            setState(() {
+                                              _selected = cityName;
+                                              _ctrl.text = cityName;
+                                              _searchQuery = cityName;
+                                              _dropdownVisible = false;
+                                              _networkCities = [];
+                                            });
+                                            FocusScope.of(context).unfocus();
+                                          },
+                                          tileColor: _selected == cityName
+                                              ? const Color(0xFF7C3AED)
+                                                  .withOpacity(0.15)
+                                              : Colors.transparent,
                                         );
                                       },
                                     ),
@@ -370,7 +399,8 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
                         boxShadow: _ctrl.text.trim().isNotEmpty
                             ? [
                                 BoxShadow(
-                                    color: AppColors.purpleDark.withOpacity(0.4),
+                                    color:
+                                        AppColors.purpleDark.withOpacity(0.4),
                                     blurRadius: 30,
                                     offset: const Offset(0, 12))
                               ]
@@ -403,7 +433,11 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
   }
 
   Widget _dot({bool done = false, bool active = false}) {
-    final w = done ? 20.0 : active ? 14.0 : 7.0;
+    final w = done
+        ? 20.0
+        : active
+            ? 14.0
+            : 7.0;
     final c = done
         ? AppColors.purple
         : active

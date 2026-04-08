@@ -41,6 +41,10 @@ class Settings(BaseSettings):
 
     # Resend (email API)
     RESEND_API_KEY: str = ""
+    # Verified custom-domain sender for Resend, e.g. "noreply@yourdomain.com".
+    # Leave empty to use Resend's sandbox sender (onboarding@resend.dev),
+    # which only delivers to the email verified in your Resend dashboard.
+    RESEND_FROM_EMAIL: str = ""
 
     # YouTube Data API
     YOUTUBE_API_KEY: str = ""

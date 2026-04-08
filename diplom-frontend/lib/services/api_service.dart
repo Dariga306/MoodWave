@@ -2,10 +2,39 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart'
     show kIsWeb, kDebugMode, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'web_token_store_stub.dart'
+    if (dart.library.html) 'web_token_store_web.dart';
 
 class ApiService {
+  static const String _configuredBaseUrl =
+      String.fromEnvironment('API_BASE_URL');
+
   static String get baseUrl {
-    if (kIsWeb) return 'http://localhost:8000';
+    if (_configuredBaseUrl.isNotEmpty) {
+      return _configuredBaseUrl;
+    }
+    if (kIsWeb) {
+      final host = Uri.base.host.toLowerCase();
+      const localApi = 'http://127.0.0.1:8000';
+      final isLoopback = host.isEmpty ||
+          host == 'localhost' ||
+          host == '127.0.0.1' ||
+          host == '0.0.0.0' ||
+          host == '::1' ||
+          host == '[::1]';
+      if (isLoopback) {
+        return localApi;
+      }
+
+      final isPrivateLan = RegExp(
+        r'^(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)$',
+      ).hasMatch(host);
+      if (isPrivateLan) {
+        return 'http://$host:8000';
+      }
+
+      return localApi;
+    }
     if (defaultTargetPlatform == TargetPlatform.android && kDebugMode) {
       return 'http://10.0.2.2:8000';
     }
@@ -43,6 +72,13 @@ class ApiService {
 
   Future<String?> getToken() async {
     if (_cachedToken != null) return _cachedToken;
+    if (kIsWeb) {
+      final webToken = await readWebToken('access_token');
+      if (webToken != null && webToken.isNotEmpty) {
+        _cachedToken = webToken;
+        return webToken;
+      }
+    }
     final stored = await _storage.read(key: 'access_token');
     _cachedToken = stored;
     return stored;
@@ -50,12 +86,20 @@ class ApiService {
 
   Future<void> saveTokens(String access, String refresh) async {
     _cachedToken = access;
+    if (kIsWeb) {
+      await writeWebToken('access_token', access);
+      await writeWebToken('refresh_token', refresh);
+    }
     await _storage.write(key: 'access_token', value: access);
     await _storage.write(key: 'refresh_token', value: refresh);
   }
 
   Future<void> clearTokens() async {
     _cachedToken = null;
+    if (kIsWeb) {
+      await deleteWebToken('access_token');
+      await deleteWebToken('refresh_token');
+    }
     await _storage.delete(key: 'access_token');
     await _storage.delete(key: 'refresh_token');
   }
@@ -130,11 +174,37 @@ class ApiService {
   }
 
   Future<List<dynamic>> searchTracks(String q, {int limit = 20}) async {
-    final resp = await _dio.get('/tracks/search', queryParameters: {'q': q, 'limit': limit});
+    final resp = await _dio
+        .get('/tracks/search', queryParameters: {'q': q, 'limit': limit});
     return resp.data as List;
   }
 
-  Future<List<dynamic>> getRecommendations({String? mood, String? weather}) async {
+  Future<Map<String, dynamic>> searchArtist(String q) async {
+    final resp = await _dio.get('/artists/search', queryParameters: {'q': q});
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<Map<String, dynamic>> getArtistProfile(String artistId) async {
+    final resp = await _dio.get('/artists/$artistId/profile');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<Map<String, dynamic>> getAlbumDetail(int albumId) async {
+    final resp = await _dio.get('/albums/$albumId');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<List<dynamic>> getRecentlyPlayed({int limit = 10}) async {
+    try {
+      final resp = await _dio.get('/tracks/me/recent', queryParameters: {'limit': limit});
+      return resp.data as List? ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> getRecommendations(
+      {String? mood, String? weather}) async {
     final resp = await _dio.get('/tracks/recommendations', queryParameters: {
       if (mood != null) 'mood': mood,
       if (weather != null) 'weather': weather,
@@ -155,8 +225,10 @@ class ApiService {
   }
 
   // Search
-  Future<Map<String, dynamic>> globalSearch(String q, {String type = 'all'}) async {
-    final resp = await _dio.get('/search', queryParameters: {'q': q, 'type': type});
+  Future<Map<String, dynamic>> globalSearch(String q,
+      {String type = 'all'}) async {
+    final resp =
+        await _dio.get('/search', queryParameters: {'q': q, 'type': type});
     return resp.data;
   }
 
@@ -182,18 +254,30 @@ class ApiService {
 
   // Weather
   Future<Map<String, dynamic>> getWeather(String city) async {
-    final resp = await _dio.get('/weather/current', queryParameters: {'city': city});
+    final resp =
+        await _dio.get('/weather/current', queryParameters: {'city': city});
     return resp.data;
   }
 
   Future<Map<String, dynamic>> getWeatherPlaylist(String city) async {
-    final resp = await _dio.get('/weather/playlist', queryParameters: {'city': city});
+    final resp =
+        await _dio.get('/weather/playlist', queryParameters: {'city': city});
     return resp.data;
+  }
+
+  Future<List<String>> searchCities(String q) async {
+    final resp = await _dio.get(
+      '/weather/cities/search',
+      queryParameters: {'q': q},
+    );
+    final raw = (resp.data as Map<String, dynamic>)['cities'] as List? ?? [];
+    return raw.map((item) => item.toString()).toList();
   }
 
   // Charts
   Future<List<dynamic>> getChartsByCity(String city) async {
-    final resp = await _dio.get('/charts/city', queryParameters: {'city': city});
+    final resp =
+        await _dio.get('/charts/city', queryParameters: {'city': city});
     return resp.data as List;
   }
 
@@ -203,8 +287,10 @@ class ApiService {
     return resp.data['playlists'] ?? [];
   }
 
-  Future<Map<String, dynamic>> createPlaylist(String title, {String visibility = 'private'}) async {
-    final resp = await _dio.post('/playlists/', data: {'title': title, 'visibility': visibility});
+  Future<Map<String, dynamic>> createPlaylist(String title,
+      {String visibility = 'private'}) async {
+    final resp = await _dio
+        .post('/playlists/', data: {'title': title, 'visibility': visibility});
     return resp.data;
   }
 
@@ -213,7 +299,8 @@ class ApiService {
     return resp.data;
   }
 
-  Future<void> addTrackToPlaylist(int playlistId, Map<String, dynamic> track) async {
+  Future<void> addTrackToPlaylist(
+      int playlistId, Map<String, dynamic> track) async {
     await _dio.post('/playlists/$playlistId/tracks', data: track);
   }
 
@@ -224,7 +311,8 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> decideMatch(int userId, String decision) async {
-    final resp = await _dio.post('/matches/decide/$userId', data: {'decision': decision});
+    final resp = await _dio
+        .post('/matches/decide/$userId', data: {'decision': decision});
     return resp.data;
   }
 
@@ -242,8 +330,8 @@ class ApiService {
   }
 
   Future<List<dynamic>> getChatMessages(int matchId, {int limit = 50}) async {
-    final resp = await _dio.get('/chats/$matchId/messages',
-        queryParameters: {'limit': limit});
+    final resp = await _dio
+        .get('/chats/$matchId/messages', queryParameters: {'limit': limit});
     return resp.data['messages'] ?? [];
   }
 
@@ -265,18 +353,20 @@ class ApiService {
   }
 
   Future<String?> resendVerification(String email) async {
-    final resp = await _dio.post('/auth/resend-verification', data: {'email': email});
+    final resp =
+        await _dio.post('/auth/resend-verification', data: {'email': email});
     return resp.data['dev_code'] as String?;
   }
 
   Future<String?> forgotPassword(String email) async {
-    final resp = await _dio.post('/auth/forgot-password', data: {'email': email});
+    final resp =
+        await _dio.post('/auth/forgot-password', data: {'email': email});
     return resp.data['dev_code'] as String?;
   }
 
   Future<String> verifyResetCode(String email, String code) async {
-    final resp = await _dio.post('/auth/verify-reset-code',
-        data: {'email': email, 'code': code});
+    final resp = await _dio
+        .post('/auth/verify-reset-code', data: {'email': email, 'code': code});
     return resp.data['reset_token'] as String;
   }
 
@@ -313,6 +403,19 @@ class ApiService {
 
   Future<void> sendFriendRequest(int userId) async {
     await _dio.post('/friends/$userId/request');
+  }
+
+  Future<void> followArtist(String artistId) async {
+    await _dio.post('/users/me/following/$artistId');
+  }
+
+  Future<void> unfollowArtist(String artistId) async {
+    await _dio.delete('/users/me/following/$artistId');
+  }
+
+  Future<List> getFollowedArtists() async {
+    final resp = await _dio.get('/users/me/following');
+    return resp.data as List? ?? [];
   }
 
   // Notifications

@@ -10,7 +10,7 @@ from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db
-from app.models.social import Block, Friend, FriendStatus, Match, Report
+from app.models.social import ArtistFollow, Block, Friend, FriendStatus, Match, Report
 from app.models.user import User
 from app.services import cache as cache_svc
 from app.services import firebase as firebase_svc
@@ -423,3 +423,64 @@ async def get_notifications(
 
     notifications.sort(key=lambda n: n["created_at"], reverse=True)
     return {"notifications": notifications}
+
+
+@router.post(
+    "/users/me/following/{deezer_artist_id}",
+    summary="Follow artist",
+    description="Follows a Deezer artist for the current user.",
+)
+async def follow_artist(
+    deezer_artist_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    existing = await db.scalar(
+        select(ArtistFollow).where(
+            ArtistFollow.user_id == current_user.id,
+            ArtistFollow.deezer_artist_id == deezer_artist_id,
+        )
+    )
+    if not existing:
+        db.add(ArtistFollow(user_id=current_user.id, deezer_artist_id=deezer_artist_id))
+        await db.commit()
+    return {"message": "Artist followed"}
+
+
+@router.delete(
+    "/users/me/following/{deezer_artist_id}",
+    summary="Unfollow artist",
+    description="Removes a followed Deezer artist for the current user.",
+)
+async def unfollow_artist(
+    deezer_artist_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await db.execute(
+        delete(ArtistFollow).where(
+            ArtistFollow.user_id == current_user.id,
+            ArtistFollow.deezer_artist_id == deezer_artist_id,
+        )
+    )
+    await db.commit()
+    return {"message": "Artist unfollowed"}
+
+
+@router.get(
+    "/users/me/following",
+    summary="List followed artists",
+    description="Returns followed Deezer artist ids for the current user.",
+)
+async def list_followed_artists(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        await db.execute(
+            select(ArtistFollow.deezer_artist_id)
+            .where(ArtistFollow.user_id == current_user.id)
+            .order_by(ArtistFollow.created_at.desc())
+        )
+    ).scalars().all()
+    return list(rows)

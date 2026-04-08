@@ -66,3 +66,13 @@ class Report(Base):
     reason: Mapped[str] = mapped_column(String(100), nullable=False)
     details: Mapped[Optional[str]] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ArtistFollow(Base):
+    __tablename__ = "artist_follows"
+    __table_args__ = (UniqueConstraint("user_id", "deezer_artist_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    deezer_artist_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

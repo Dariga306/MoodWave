@@ -70,7 +70,12 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
 
     if (!_passwordOk) {
-      _errors['password'] = 'Password must be at least 8 characters and include uppercase, lowercase, and a number';
+      if (_passwordCtrl.text.isNotEmpty) {
+        // Conditions list already visible — just show snackbar
+        showErrorSnackBar(context, 'Please meet all password requirements');
+        return;
+      }
+      _errors['password'] = 'Enter a password';
       hasError = true;
     }
 
