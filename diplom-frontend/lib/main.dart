@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
+import 'providers/player_provider.dart';
 import 'screens/splash_screen.dart';
 
 final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey =
@@ -26,8 +27,11 @@ void main() async {
     systemNavigationBarIconBrightness: Brightness.light,
   ));
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AuthProvider(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => PlayerProvider()),
+      ],
       child: const MoodWaveApp(),
     ),
   );

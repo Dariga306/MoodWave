@@ -1,51 +1,51 @@
 # MoodWave
 
-Дипломный проект — музыкальное приложение с рекомендациями по настроению и погоде, матчингом по музыкальному вкусу, чатом и совместным прослушиванием.
+MoodWave is a diploma project — a music application with mood and weather-based recommendations, music taste matching, chat, and shared listening.
 
-**Авторы:** Sabina Jamayeva, Dariga Nurgaliyeva  
-**Научный руководитель:** Omirgaliyev Ruslan  
+**Authors:** Sabina Jamayeva, Dariga Nurgaliyeva  
+**Supervisor:** Omirgaliyev Ruslan  
 **Astana IT University · 2026**
 
 ---
 
-## Стек технологий
+## Technology Stack
 
 | | |
 |---|---|
 | Mobile / Web | Flutter 3, Dart |
 | Backend | Python 3.12, FastAPI, PostgreSQL 16, Redis 7 |
-| Аутентификация | Firebase Auth (Google, Email + верификация) |
-| Музыка | Deezer API, iTunes Preview, lrclib.net (тексты) |
-| Плеер | YouTube IFrame API (полные треки), just_audio (превью) |
+| Authentication | Firebase Auth (Google, Email + verification) |
+| Music | Deezer API, iTunes Preview, lrclib.net (lyrics) |
+| Player | YouTube IFrame API (full tracks), just_audio (previews) |
 | Real-time | WebSocket, Firebase Realtime Database |
 | Admin | React, Vite, TypeScript, Ant Design |
-| Инфраструктура | Docker, Docker Compose |
+| Infrastructure | Docker, Docker Compose |
 
 ---
 
-## Функциональность
+## Features
 
-- Регистрация и вход (Email + верификация, Google OAuth)
-- Письма на почту: верификация, сброс пароля, уведомление о новом входе
-- Подбор музыки по настроению и погоде
-- Плеер с текстами песен (синхронизация с lrclib.net, Spotify-стиль)
-- Shuffle, Repeat (off / all / one), автопереход треков
-- Страница артиста: популярные треки, дискография, похожие артисты, Follow
-- Страница альбома: все треки, Play all
-- Поиск треков и артистов (русский и английский язык)
-- История прослушивания в поиске (Recently Played)
-- Матчинг пользователей по музыкальному вкусу
-- Чат с совпавшими пользователями
-- Библиотека плейлистов
-- Admin-панель (управление пользователями и контентом)
+- Registration and login (Email + verification, Google OAuth)
+- Email notifications: verification, password reset, new login alert
+- Music recommendations based on mood and weather
+- Music player with lyrics (lrclib.net sync, Spotify-style)
+- Shuffle, Repeat (off / all / one), automatic track advance
+- Artist page: popular tracks, discography, similar artists, follow
+- Album page: full track list, play all
+- Search tracks and artists (Russian and English)
+- Listening history in search (Recently Played)
+- User matching by music taste
+- Chat with matched users
+- Playlist library
+- Admin panel for user and content management
 
 ---
 
-## Запуск проекта
+## Running the Project
 
-### Необходимые файлы
+### Required files
 
-Перед запуском положи в папку `moodwave-backend/`:
+Put the following files into `moodwave-backend/` before running:
 - `.env`
 - `firebase-credentials.json`
 
@@ -58,16 +58,16 @@ cd moodwave-backend
 docker compose up --build
 ```
 
-Готов когда в логах появится: `INFO: Application startup complete.`  
+The backend is ready when logs show: `INFO: Application startup complete.`  
 Swagger UI: http://localhost:8000/docs
 
-**Первый запуск — применить миграции:**
+**First run — apply database migrations:**
 
 ```bash
 docker exec moodwave-backend-api-1 alembic upgrade head
 ```
 
-Или без Docker:
+Or run without Docker:
 
 ```bash
 cd moodwave-backend
@@ -79,7 +79,7 @@ uvicorn app.main:app --reload --port 8000
 
 ---
 
-### 2. Admin панель
+### 2. Admin panel
 
 ```bash
 cd admin-panel
@@ -88,9 +88,9 @@ echo "VITE_API_URL=http://localhost:8000" > .env
 npm run dev
 ```
 
-Открой http://localhost:5173
+Open http://localhost:5173
 
-Чтобы дать права администратора:
+To grant admin rights:
 
 ```sql
 UPDATE users SET is_admin = true WHERE email = 'your@email.com';
@@ -98,7 +98,7 @@ UPDATE users SET is_admin = true WHERE email = 'your@email.com';
 
 ---
 
-### 3. Flutter приложение (Web)
+### 3. Flutter app (Web)
 
 ```bash
 cd diplom-frontend
@@ -106,13 +106,13 @@ flutter pub get
 flutter run -d chrome --web-port 5005
 ```
 
-Открой http://localhost:5005
+Open http://localhost:5005
 
 ---
 
-### Запуск всего вместе
+### Run everything together
 
-| Терминал | Команда |
+| Terminal | Command |
 |----------|---------|
 | 1 | `cd moodwave-backend && docker compose up` |
 | 2 | `cd admin-panel && npm run dev` |
@@ -120,10 +120,10 @@ flutter run -d chrome --web-port 5005
 
 ---
 
-## Порты
+## Ports
 
-| Сервис | Адрес |
-|--------|-------|
+| Service | URL |
+|--------|-----|
 | API | http://localhost:8000 |
 | Swagger | http://localhost:8000/docs |
 | Admin | http://localhost:5173 |
@@ -133,13 +133,13 @@ flutter run -d chrome --web-port 5005
 
 ---
 
-## Решение проблем
+## Troubleshooting
 
-| Проблема | Решение |
+| Issue | Solution |
 |----------|---------|
-| Docker не запускается | Запустить Docker Desktop |
-| Порт занят | `netstat -ano` найти PID, `taskkill /PID <pid> /F` |
-| Alembic ошибка | Подождать 15 сек после `docker compose up` и повторить |
-| Flutter не видит бэкенд | Проверить http://localhost:8000/docs |
+| Docker does not start | Start Docker Desktop |
+| Port is busy | Use `netstat -ano` to find PID, then `taskkill /PID <pid> /F` |
+| Alembic error | Wait 15 seconds after `docker compose up` and retry |
+| Flutter cannot reach backend | Check http://localhost:8000/docs |
 | Admin: "Not authorized" | `UPDATE users SET is_admin = true WHERE email = 'your@email.com';` |
-| Email не приходит | Проверить `MAIL_USERNAME` и `MAIL_PASSWORD` в `.env` |
+| Email not delivered | Check `MAIL_USERNAME` and `MAIL_PASSWORD` in `.env` |

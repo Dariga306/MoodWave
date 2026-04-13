@@ -104,6 +104,88 @@ class ApiService {
     await _storage.delete(key: 'refresh_token');
   }
 
+  Map<String, dynamic> _normalizeTrack(Map raw) {
+    final track = Map<String, dynamic>.from(raw);
+    final resolvedId = track['spotify_id'] ??
+        track['deezer_id'] ??
+        track['track_id'] ??
+        track['trackId'];
+
+    if (resolvedId != null && resolvedId.toString().isNotEmpty) {
+      track['spotify_id'] ??= resolvedId.toString();
+      track['track_id'] ??= resolvedId.toString();
+    }
+    if ((track['title'] == null || track['title'].toString().isEmpty) &&
+        track['trackName'] != null) {
+      track['title'] = track['trackName'].toString();
+    }
+    if ((track['artist'] == null || track['artist'].toString().isEmpty) &&
+        track['artistName'] != null) {
+      track['artist'] = track['artistName'].toString();
+    }
+    if ((track['cover_url'] == null || track['cover_url'].toString().isEmpty) &&
+        track['artworkUrl100'] != null) {
+      track['cover_url'] = track['artworkUrl100'].toString();
+    }
+    if ((track['preview_url'] == null ||
+            track['preview_url'].toString().isEmpty) &&
+        track['previewUrl'] != null) {
+      track['preview_url'] = track['previewUrl'].toString();
+    }
+    return track;
+  }
+
+  List<Map<String, dynamic>> _normalizeTrackList(List<dynamic> items) {
+    return items.whereType<Map>().map(_normalizeTrack).toList();
+  }
+
+  String _normalizeText(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9а-яё]+'), ' ')
+        .trim();
+  }
+
+  int _scoreTrackCandidate(
+    Map<String, dynamic> track,
+    String title,
+    String artist, {
+    String? trackId,
+  }) {
+    final normalizedTitle = _normalizeText(title);
+    final normalizedArtist = _normalizeText(artist);
+    final candidateTitle = _normalizeText(track['title']?.toString() ?? '');
+    final candidateArtist = _normalizeText(track['artist']?.toString() ?? '');
+    final candidateId =
+        (track['spotify_id'] ?? track['track_id'] ?? '').toString();
+
+    var score = 0;
+    if (trackId != null && trackId.isNotEmpty && candidateId == trackId) {
+      score += 100;
+    }
+    if (normalizedTitle.isNotEmpty && candidateTitle == normalizedTitle) {
+      score += 60;
+    } else if (normalizedTitle.isNotEmpty &&
+        (candidateTitle.contains(normalizedTitle) ||
+            normalizedTitle.contains(candidateTitle))) {
+      score += 30;
+    }
+    if (normalizedArtist.isNotEmpty && candidateArtist == normalizedArtist) {
+      score += 40;
+    } else if (normalizedArtist.isNotEmpty &&
+        (candidateArtist.contains(normalizedArtist) ||
+            normalizedArtist.contains(candidateArtist))) {
+      score += 20;
+    }
+    if ((track['preview_url']?.toString().isNotEmpty ?? false)) {
+      score += 10;
+    }
+    if ((track['cover_url']?.toString().isNotEmpty ?? false)) {
+      score += 5;
+    }
+    return score;
+  }
+
   // Auth
   Future<Map<String, dynamic>> register({
     required String email,
@@ -164,7 +246,7 @@ class ApiService {
   }) async {
     try {
       final resp = await _dio.get(
-        '/tracks/$trackId/youtube',
+        '/tracks/${Uri.encodeComponent(trackId)}/youtube',
         queryParameters: {'title': title, 'artist': artist},
       );
       return resp.data['video_id'] as String?;
@@ -179,9 +261,132 @@ class ApiService {
     return resp.data as List;
   }
 
+  Future<List<Map<String, dynamic>>> searchTracksWithFallback(
+    String q, {
+    int limit = 20,
+  }) async {
+    try {
+      final primary = _normalizeTrackList(await searchTracks(q, limit: limit));
+      if (primary.isNotEmpty) {
+        return primary;
+      }
+    } catch (_) {}
+
+    try {
+      final fallback = await globalSearch(q, type: 'tracks');
+      final tracks =
+          _normalizeTrackList((fallback['tracks'] as List?) ?? const []);
+      if (tracks.isNotEmpty) {
+        return tracks.take(limit).toList();
+      }
+    } catch (_) {}
+
+    return [];
+  }
+
+  Future<Map<String, dynamic>?> resolveTrack({
+    required String title,
+    required String artist,
+    String? trackId,
+  }) async {
+    final queries = <String>[
+      if (artist.trim().isNotEmpty && title.trim().isNotEmpty)
+        '${artist.trim()} ${title.trim()}',
+      if (title.trim().isNotEmpty) title.trim(),
+      if (artist.trim().isNotEmpty) artist.trim(),
+    ];
+    final seenQueries = <String>{};
+
+    Map<String, dynamic>? bestMatch;
+    var bestScore = -1;
+
+    for (final query in queries) {
+      if (!seenQueries.add(query.toLowerCase())) {
+        continue;
+      }
+      final candidates = await searchTracksWithFallback(query, limit: 10);
+      for (final candidate in candidates) {
+        final score = _scoreTrackCandidate(
+          candidate,
+          title,
+          artist,
+          trackId: trackId,
+        );
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = candidate;
+        }
+      }
+      if (bestScore >= 100) {
+        break;
+      }
+    }
+
+    if (bestScore < 100 && artist.trim().isNotEmpty) {
+      try {
+        final artistResult = await searchArtist(artist.trim());
+        final artistData = artistResult['artist'] as Map<String, dynamic>?;
+        final artistId = artistData?['id']?.toString();
+        if (artistId != null && artistId.isNotEmpty) {
+          final profile = await getArtistProfile(artistId);
+          final topTracks =
+              _normalizeTrackList((profile['top_tracks'] as List?) ?? const []);
+          for (final candidate in topTracks) {
+            final score = _scoreTrackCandidate(
+              candidate,
+              title,
+              artist,
+              trackId: trackId,
+            );
+            if (score > bestScore) {
+              bestScore = score;
+              bestMatch = candidate;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    return bestScore > 0 ? bestMatch : null;
+  }
+
   Future<Map<String, dynamic>> searchArtist(String q) async {
     final resp = await _dio.get('/artists/search', queryParameters: {'q': q});
     return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> searchArtistsList(
+    String q, {
+    int limit = 10,
+  }) async {
+    try {
+      final resp = await _dio.get(
+        '/artists/search/list',
+        queryParameters: {'q': q, 'limit': limit},
+      );
+      return (resp.data as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> searchAlbums(
+    String q, {
+    int limit = 10,
+  }) async {
+    try {
+      final resp = await _dio.get(
+        '/albums/search',
+        queryParameters: {'q': q, 'limit': limit},
+      );
+      return (resp.data as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   Future<Map<String, dynamic>> getArtistProfile(String artistId) async {
@@ -196,7 +401,8 @@ class ApiService {
 
   Future<List<dynamic>> getRecentlyPlayed({int limit = 10}) async {
     try {
-      final resp = await _dio.get('/tracks/me/recent', queryParameters: {'limit': limit});
+      final resp = await _dio
+          .get('/tracks/me/recent', queryParameters: {'limit': limit});
       return resp.data as List? ?? [];
     } catch (_) {
       return [];
@@ -212,16 +418,49 @@ class ApiService {
     return resp.data as List;
   }
 
-  Future<void> playTrack(String spotifyId) async {
-    await _dio.post('/tracks/$spotifyId/play');
+  Future<void> playTrack(
+    String spotifyId, {
+    double completionPct = 0,
+    String? mood,
+    String? title,
+    String? artist,
+    String? genre,
+  }) async {
+    await _dio.post('/tracks/${Uri.encodeComponent(spotifyId)}/play', data: {
+      'completion_pct': completionPct,
+      if (mood != null) 'mood': mood,
+      if (title != null) 'title': title,
+      if (artist != null) 'artist': artist,
+      if (genre != null) 'genre': genre,
+    });
   }
 
-  Future<void> likeTrack(String spotifyId) async {
-    await _dio.post('/tracks/$spotifyId/like');
+  Future<void> likeTrack(
+    String spotifyId, {
+    String action = 'liked',
+    String? title,
+    String? artist,
+    String? genre,
+  }) async {
+    await _dio.post('/tracks/${Uri.encodeComponent(spotifyId)}/like', data: {
+      'action': action,
+      if (title != null) 'title': title,
+      if (artist != null) 'artist': artist,
+      if (genre != null) 'genre': genre,
+    });
   }
 
-  Future<void> skipTrack(String spotifyId) async {
-    await _dio.post('/tracks/$spotifyId/skip');
+  Future<void> skipTrack(
+    String spotifyId, {
+    int timeListenedMs = 0,
+    String? title,
+    String? artist,
+  }) async {
+    await _dio.post('/tracks/${Uri.encodeComponent(spotifyId)}/skip', data: {
+      'time_listened_ms': timeListenedMs,
+      if (title != null) 'title': title,
+      if (artist != null) 'artist': artist,
+    });
   }
 
   // Search
@@ -235,6 +474,43 @@ class ApiService {
   Future<List<dynamic>> getTrending() async {
     final resp = await _dio.get('/search/trending');
     return resp.data as List? ?? [];
+  }
+
+  Future<List<Map<String, dynamic>>> getSearchHistory({int limit = 20}) async {
+    try {
+      final resp =
+          await _dio.get('/search/history', queryParameters: {'limit': limit});
+      return (resp.data as List? ?? const [])
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveSearchHistory({
+    required String query,
+    required String resultType,
+    String? resultId,
+    String? resultTitle,
+    String? resultCover,
+  }) async {
+    await _dio.post('/search/history', data: {
+      'query': query,
+      'result_type': resultType,
+      if (resultId != null) 'result_id': resultId,
+      if (resultTitle != null) 'result_title': resultTitle,
+      if (resultCover != null) 'result_cover': resultCover,
+    });
+  }
+
+  Future<void> deleteSearchHistoryItem(int id) async {
+    await _dio.delete('/search/history/$id');
+  }
+
+  Future<void> clearSearchHistory() async {
+    await _dio.delete('/search/history');
   }
 
   Future<Map<String, dynamic>> getUserStats() async {
@@ -279,6 +555,16 @@ class ApiService {
     final resp =
         await _dio.get('/charts/city', queryParameters: {'city': city});
     return resp.data as List;
+  }
+
+  Future<List<dynamic>> getCharts({String genre = '', int limit = 20}) async {
+    try {
+      final resp = await _dio.get('/tracks/charts',
+          queryParameters: {if (genre.isNotEmpty) 'genre': genre, 'limit': limit});
+      return resp.data as List? ?? [];
+    } catch (_) {
+      return [];
+    }
   }
 
   // Playlists

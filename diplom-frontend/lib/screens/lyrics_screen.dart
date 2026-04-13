@@ -21,6 +21,7 @@ class LyricsScreen extends StatefulWidget {
   final List<String> lyricsLines;
   final Duration currentPosition;
   final List<int> syncedLineTimesMs;
+  final void Function(Duration)? onSeek;
 
   const LyricsScreen({
     super.key,
@@ -29,6 +30,7 @@ class LyricsScreen extends StatefulWidget {
     required this.lyricsLines,
     required this.currentPosition,
     this.syncedLineTimesMs = const [],
+    this.onSeek,
   });
 
   @override
@@ -183,7 +185,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
     if (_syncedLines.isEmpty) return;
 
     _updateActiveIndex();
-    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+    _timer = Timer.periodic(const Duration(milliseconds: 300), (_) {
       _updateActiveIndex();
     });
   }
@@ -193,7 +195,9 @@ class _LyricsScreenState extends State<LyricsScreen> {
 
     final elapsed = DateTime.now().difference(_openedAt).inMilliseconds;
     final positionMs = _basePositionMs + elapsed;
-    int nextIndex = 0;
+
+    // Start at -1: nothing active until the first lyric time is reached
+    int nextIndex = -1;
     for (int i = 0; i < _syncedLines.length; i++) {
       if (_syncedLines[i].timeMs <= positionMs) {
         nextIndex = i;
@@ -204,18 +208,35 @@ class _LyricsScreenState extends State<LyricsScreen> {
 
     if (nextIndex != _activeIndex && mounted) {
       setState(() => _activeIndex = nextIndex);
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => _scrollToActiveLine());
+      if (nextIndex >= 0) {
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => _scrollToActiveLine());
+      }
     }
   }
 
   void _scrollToActiveLine() {
     if (!_scrollController.hasClients || _activeIndex < 0) return;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final centerOffset = screenHeight / 2 - 80;
+    final targetOffset = (_activeIndex * 58.0) - centerOffset;
     _scrollController.animateTo(
-      _activeIndex * 58.0,
+      targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeInOut,
     );
+  }
+
+  void _seekToLine(int index) {
+    if (index < 0 || index >= _syncedLines.length) return;
+    final timeMs = _syncedLines[index].timeMs;
+    widget.onSeek?.call(Duration(milliseconds: timeMs));
+    setState(() {
+      _basePositionMs = timeMs;
+      _openedAt = DateTime.now();
+      _activeIndex = index;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToActiveLine());
   }
 
   @override
@@ -255,28 +276,55 @@ class _LyricsScreenState extends State<LyricsScreen> {
                     )
                   : ListView.builder(
                       controller: _scrollController,
-                      padding: const EdgeInsets.symmetric(vertical: 100),
+                      padding: EdgeInsets.symmetric(
+                        vertical: MediaQuery.of(context).size.height * 0.42,
+                      ),
                       itemCount: _lyricsLines.length,
                       itemBuilder: (context, index) {
-                        final isActive =
-                            _syncedLines.isNotEmpty && index == _activeIndex;
-                        return AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 8,
-                          ),
-                          child: Text(
-                            _lyricsLines[index],
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.outfit(
-                              fontSize: isActive ? 22 : 16,
-                              fontWeight:
-                                  isActive ? FontWeight.w700 : FontWeight.w400,
-                              color: isActive
-                                  ? Colors.white
-                                  : Colors.white.withOpacity(0.35),
-                              height: 1.6,
+                        final isActive = _syncedLines.isNotEmpty &&
+                            index == _activeIndex &&
+                            _activeIndex >= 0;
+                        final canSeek =
+                            _syncedLines.isNotEmpty && widget.onSeek != null;
+
+                        return GestureDetector(
+                          onTap: canSeek ? () => _seekToLine(index) : null,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 4,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
+                            decoration: isActive
+                                ? BoxDecoration(
+                                    color: Colors.white.withOpacity(0.12),
+                                    borderRadius: BorderRadius.circular(14),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.white.withOpacity(0.08),
+                                        blurRadius: 12,
+                                        spreadRadius: 1,
+                                      ),
+                                    ],
+                                  )
+                                : null,
+                            child: Text(
+                              _lyricsLines[index],
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.outfit(
+                                fontSize: isActive ? 22 : 16,
+                                fontWeight: isActive
+                                    ? FontWeight.w700
+                                    : FontWeight.w400,
+                                color: isActive
+                                    ? Colors.white
+                                    : Colors.white.withOpacity(0.3),
+                                height: 1.6,
+                              ),
                             ),
                           ),
                         );

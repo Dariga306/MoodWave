@@ -232,14 +232,31 @@ async def get_playlist(
             raise HTTPException(status_code=403, detail="Access denied")
 
     await db.refresh(playlist, ["tracks"])
-    payload = _playlist_payload(playlist, track_count=len(playlist.tracks))
+
+    # Join with TrackCache to get full track metadata in one pass
+    track_ids = [t.spotify_track_id for t in playlist.tracks]
+    cache_rows = (
+        await db.execute(
+            select(TrackCache).where(TrackCache.spotify_id.in_(track_ids))
+        )
+    ).scalars().all()
+    cache_map = {row.spotify_id: row for row in cache_rows}
+
+    sorted_tracks = sorted(playlist.tracks, key=lambda t: t.position)
+    payload = _playlist_payload(playlist, track_count=len(sorted_tracks))
     payload["tracks"] = [
         {
-            "spotify_track_id": track.spotify_track_id,
-            "position": track.position,
-            "added_at": track.added_at.isoformat(),
+            "spotify_id": t.spotify_track_id,
+            "deezer_id": t.spotify_track_id,
+            "position": t.position,
+            "added_at": t.added_at.isoformat(),
+            "title": cache_map[t.spotify_track_id].title if t.spotify_track_id in cache_map else "Unknown",
+            "artist": cache_map[t.spotify_track_id].artist if t.spotify_track_id in cache_map else "",
+            "cover_url": cache_map[t.spotify_track_id].cover_url if t.spotify_track_id in cache_map else None,
+            "preview_url": cache_map[t.spotify_track_id].preview_url if t.spotify_track_id in cache_map else None,
+            "duration_ms": cache_map[t.spotify_track_id].duration_ms if t.spotify_track_id in cache_map else 0,
         }
-        for track in playlist.tracks
+        for t in sorted_tracks
     ]
     return payload
 

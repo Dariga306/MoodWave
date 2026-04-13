@@ -6,10 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
+import 'package:provider/provider.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart' as yt;
 
+import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import 'artist_screen.dart';
 import 'lyrics_screen.dart';
 import 'modals.dart';
 import 'queue_screen.dart';
@@ -87,6 +90,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _isLiked = false;
   bool _shuffle = false;
   int _repeatMode = 0; // 0=off 1=repeat-all 2=repeat-one
+  bool _trackEnded = false;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -96,17 +100,35 @@ class _PlayerScreenState extends State<PlayerScreen>
   List<_LrcLine> _lrcLines = [];
   int _currentLyricIdx = -1;
 
+  // Sleep timer
+  Timer? _sleepTimer;
+  int? _sleepMinutesLeft;
+
   String get _title =>
       (_track['title'] ?? _track['trackName'] ?? 'Unknown').toString();
   String get _artist =>
       (_track['artist'] ?? _track['artistName'] ?? '').toString();
   String? get _coverUrl =>
       (_track['cover_url'] ?? _track['artworkUrl100'])?.toString();
-  String get _trackId =>
-      (_track['spotify_id'] ?? _track['deezer_id'] ?? _track['trackId'] ?? '')
-          .toString();
+  String get _trackId => (_track['spotify_id'] ??
+          _track['deezer_id'] ??
+          _track['track_id'] ??
+          _track['trackId'] ??
+          '')
+      .toString();
   bool get _usingYoutube => _ytReady && _ytController != null;
   bool get _isPlaying => _usingYoutube ? _ytPlaying : _audioPlaying;
+  String get _playbackLookupId {
+    if (_trackId.isNotEmpty) {
+      return _trackId;
+    }
+    final seed = '$_artist $_title'
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9а-яё]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+    return seed.isEmpty ? 'track_lookup' : 'query:$seed';
+  }
 
   List<String> get _lyricsLines => _lrcLines.map((line) => line.text).toList();
   List<int> get _lyricsTimesMs =>
@@ -114,10 +136,12 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   String? get _currentLyricLine {
     if (_lrcLines.isEmpty) return null;
-    if (_lyricsSynced &&
-        _currentLyricIdx >= 0 &&
-        _currentLyricIdx < _lrcLines.length) {
-      return _lrcLines[_currentLyricIdx].text;
+    if (_lyricsSynced) {
+      // Only show a line once the artist has actually started singing
+      if (_currentLyricIdx >= 0 && _currentLyricIdx < _lrcLines.length) {
+        return _lrcLines[_currentLyricIdx].text;
+      }
+      return null; // Before the first lyric timestamp — show nothing
     }
     return _lrcLines.first.text;
   }
@@ -132,12 +156,20 @@ class _PlayerScreenState extends State<PlayerScreen>
       vsync: this,
       duration: const Duration(seconds: 4),
     )..repeat(reverse: true);
+    // Register toggle callback with PlayerProvider
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<PlayerProvider>().registerToggle(_togglePlayPause);
+        context.read<PlayerProvider>().setTrack(_track, isPlaying: false);
+      }
+    });
     _loadTrack(_track, refreshQueue: false);
     unawaited(_ensureQueue());
   }
 
   @override
   void dispose() {
+    _sleepTimer?.cancel();
     _floatController.dispose();
     _ytStateSubscription?.cancel();
     _ytPositionSubscription?.cancel();
@@ -146,6 +178,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     _audioStateSubscription?.cancel();
     _ytController?.close();
     _player.dispose();
+    // Keep track info in provider but clear the toggle callback
+    try {
+      context.read<PlayerProvider>()
+        ..setPlaying(false)
+        ..unregisterToggle();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -162,15 +200,80 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   bool _sameTrack(Map<String, dynamic> a, Map<String, dynamic> b) {
-    final aId =
-        (a['spotify_id'] ?? a['deezer_id'] ?? a['trackId'] ?? '').toString();
-    final bId =
-        (b['spotify_id'] ?? b['deezer_id'] ?? b['trackId'] ?? '').toString();
+    final aId = (a['spotify_id'] ??
+            a['deezer_id'] ??
+            a['track_id'] ??
+            a['trackId'] ??
+            '')
+        .toString();
+    final bId = (b['spotify_id'] ??
+            b['deezer_id'] ??
+            b['track_id'] ??
+            b['trackId'] ??
+            '')
+        .toString();
     if (aId.isNotEmpty && bId.isNotEmpty) return aId == bId;
     return (a['title'] ?? a['trackName']).toString() ==
             (b['title'] ?? b['trackName']).toString() &&
         (a['artist'] ?? a['artistName']).toString() ==
             (b['artist'] ?? b['artistName']).toString();
+  }
+
+  Map<String, dynamic> _fillTrackData(
+    Map<String, dynamic> current,
+    Map<String, dynamic> resolved,
+  ) {
+    final merged = Map<String, dynamic>.from(current);
+    resolved.forEach((key, value) {
+      if (value == null) return;
+      if (value is String && value.trim().isEmpty) return;
+      final existing = merged[key];
+      final isMissing =
+          existing == null || (existing is String && existing.trim().isEmpty);
+      if (isMissing) {
+        merged[key] = value;
+      }
+    });
+    return merged;
+  }
+
+  Future<Map<String, dynamic>> _enrichTrack(
+    Map<String, dynamic> track,
+  ) async {
+    final title = (track['title'] ?? track['trackName'] ?? '').toString();
+    final artist = (track['artist'] ?? track['artistName'] ?? '').toString();
+    final trackId = (track['spotify_id'] ??
+            track['deezer_id'] ??
+            track['track_id'] ??
+            track['trackId'] ??
+            '')
+        .toString();
+    final hasPreview =
+        (track['preview_url'] ?? track['previewUrl'])?.toString().isNotEmpty ==
+            true;
+    final hasCover =
+        (track['cover_url'] ?? track['artworkUrl100'])?.toString().isNotEmpty ==
+            true;
+    final hasArtistId = track['artist_id'] != null;
+
+    if (title.isEmpty ||
+        (trackId.isNotEmpty && hasPreview && hasCover && hasArtistId)) {
+      return Map<String, dynamic>.from(track);
+    }
+
+    try {
+      final resolved = await ApiService().resolveTrack(
+        title: title,
+        artist: artist,
+        trackId: trackId.isEmpty ? null : trackId,
+      );
+      if (resolved == null) {
+        return Map<String, dynamic>.from(track);
+      }
+      return _fillTrackData(track, resolved);
+    } catch (_) {
+      return Map<String, dynamic>.from(track);
+    }
   }
 
   void _syncQueueIndex() {
@@ -182,10 +285,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_queue.length > 1 || _artist.isEmpty && _title.isEmpty) return;
 
     try {
-      final results =
-          await ApiService().searchTracks('$_artist $_title', limit: 10);
+      final results = await ApiService()
+          .searchTracksWithFallback('$_artist $_title', limit: 10);
       final merged = <Map<String, dynamic>>[Map<String, dynamic>.from(_track)];
-      for (final item in results.whereType<Map>()) {
+      for (final item in results) {
         final track = Map<String, dynamic>.from(item);
         if (!merged.any((existing) => _sameTrack(existing, track))) {
           merged.add(track);
@@ -222,13 +325,17 @@ class _PlayerScreenState extends State<PlayerScreen>
     await _resetPlayback();
     if (!mounted) return;
 
+    final enrichedTrack = await _enrichTrack(nextTrack);
+    if (!mounted) return;
+
     setState(() {
-      _track = Map<String, dynamic>.from(nextTrack);
+      _track = Map<String, dynamic>.from(enrichedTrack);
       _ytReady = false;
       _audioReady = false;
       _ytPlaying = false;
       _audioPlaying = false;
       _noPreview = false;
+      _trackEnded = false;
       _position = Duration.zero;
       _duration = Duration.zero;
       _lyricsLoading = false;
@@ -237,6 +344,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       _currentLyricIdx = -1;
       _loadingTrack = true;
     });
+    if (mounted) {
+      context.read<PlayerProvider>().setTrack(_track, isPlaying: false);
+    }
 
     _syncQueueIndex();
     await Future.wait([
@@ -258,7 +368,7 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     try {
       final videoId = await ApiService().getYouTubeId(
-        trackId: _trackId,
+        trackId: _playbackLookupId,
         title: _title,
         artist: _artist,
       );
@@ -275,12 +385,14 @@ class _PlayerScreenState extends State<PlayerScreen>
 
         _ytStateSubscription = controller.listen((value) {
           if (!mounted) return;
+          final playing = value.playerState == yt.PlayerState.playing;
           setState(() {
-            _ytPlaying = value.playerState == yt.PlayerState.playing;
+            _ytPlaying = playing;
             if (value.metaData.duration > Duration.zero) {
               _duration = value.metaData.duration;
             }
           });
+          context.read<PlayerProvider>().setPlaying(playing);
           if (value.playerState == yt.PlayerState.ended) {
             _onTrackEnded();
           }
@@ -303,9 +415,14 @@ class _PlayerScreenState extends State<PlayerScreen>
           });
         }
 
-        if (_trackId.isNotEmpty) {
-          ApiService().playTrack(_trackId).catchError((_) {});
-        }
+        ApiService()
+            .playTrack(
+              _playbackLookupId,
+              title: _title,
+              artist: _artist,
+              genre: _track['genre']?.toString(),
+            )
+            .catchError((_) {});
         return;
       }
     } catch (_) {}
@@ -318,22 +435,16 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     if (url == null || url.isEmpty) {
       try {
-        final query = Uri.encodeComponent('$_title $_artist');
-        final response = await http.get(
-          Uri.parse(
-            'https://itunes.apple.com/search?term=$query&media=music&limit=5',
-          ),
+        final resolved = await ApiService().resolveTrack(
+          title: _title,
+          artist: _artist,
+          trackId: _trackId.isEmpty ? null : _trackId,
         );
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body) as Map<String, dynamic>;
-          final results = data['results'] as List<dynamic>? ?? [];
-          for (final item in results) {
-            final candidate =
-                (item as Map<String, dynamic>)['previewUrl'] as String?;
-            if (candidate != null && candidate.isNotEmpty) {
-              url = candidate;
-              break;
-            }
+        if (resolved != null) {
+          final merged = _fillTrackData(_track, resolved);
+          url = (merged['preview_url'] ?? merged['previewUrl']) as String?;
+          if (mounted) {
+            setState(() => _track = merged);
           }
         }
       } catch (_) {}
@@ -367,9 +478,14 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
 
       await _player.play();
-      if (_trackId.isNotEmpty) {
-        ApiService().playTrack(_trackId).catchError((_) {});
-      }
+      ApiService()
+          .playTrack(
+            _playbackLookupId,
+            title: _title,
+            artist: _artist,
+            genre: _track['genre']?.toString(),
+          )
+          .catchError((_) {});
       if (mounted) {
         setState(() => _audioReady = true);
       }
@@ -482,19 +598,33 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   void _togglePlayPause() {
+    setState(() => _trackEnded = false);
     if (_usingYoutube && _ytController != null) {
-      _ytPlaying ? _ytController!.pauseVideo() : _ytController!.playVideo();
+      final nowPlaying = _ytPlaying;
+      nowPlaying ? _ytController!.pauseVideo() : _ytController!.playVideo();
+      if (mounted) {
+        context.read<PlayerProvider>().setPlaying(!nowPlaying);
+      }
       return;
     }
     if (_audioReady) {
-      _audioPlaying ? _player.pause() : _player.play();
+      final nowPlaying = _audioPlaying;
+      nowPlaying ? _player.pause() : _player.play();
+      if (mounted) {
+        context.read<PlayerProvider>().setPlaying(!nowPlaying);
+      }
     }
   }
 
   Future<void> _toggleLike() async {
-    if (_trackId.isEmpty) return;
+    if (_title.isEmpty) return;
     try {
-      await ApiService().likeTrack(_trackId);
+      await ApiService().likeTrack(
+        _playbackLookupId,
+        title: _title,
+        artist: _artist,
+        genre: _track['genre']?.toString(),
+      );
       if (!mounted) return;
       setState(() => _isLiked = !_isLiked);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -523,6 +653,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   void _onTrackEnded() {
+    if (mounted) setState(() => _trackEnded = true);
     if (_repeatMode == 2) {
       // repeat one — restart
       if (_usingYoutube && _ytController != null) {
@@ -562,6 +693,27 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (_repeatMode == 1) {
         setState(() => _queueIndex = 0);
         await _loadTrack(_queue[0], refreshQueue: false);
+        return;
+      }
+      // Queue exhausted — try to extend with more tracks from same artist
+      if (_artist.isNotEmpty) {
+        try {
+          final more = await ApiService().searchTracksWithFallback(_artist, limit: 20);
+          if (more.isNotEmpty) {
+            final filtered = more
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .where((t) => !_queue.any((q) => _sameTrack(q, t)))
+                .toList();
+            if (filtered.isNotEmpty && mounted) {
+              setState(() => _queue.addAll(filtered));
+              final nextIdx = _queueIndex + 1;
+              setState(() => _queueIndex = nextIdx);
+              await _loadTrack(_queue[nextIdx], refreshQueue: false);
+              return;
+            }
+          }
+        } catch (_) {}
       }
       return;
     }
@@ -593,6 +745,20 @@ class _PlayerScreenState extends State<PlayerScreen>
           lyricsLines: _lyricsLines,
           currentPosition: _position,
           syncedLineTimesMs: _lyricsTimesMs,
+          onSeek: (Duration pos) {
+            if (_ytReady && _ytController != null) {
+              _ytController!.seekTo(
+                seconds: pos.inMilliseconds / 1000.0,
+                allowSeekAhead: true,
+              );
+            } else if (_audioReady) {
+              _player.seek(pos);
+            }
+            if (mounted) {
+              setState(() => _position = pos);
+              _updateLyricIdx(pos);
+            }
+          },
         ),
       ),
     );
@@ -651,43 +817,22 @@ class _PlayerScreenState extends State<PlayerScreen>
                           _currentLyricLine!.isNotEmpty)
                         GestureDetector(
                           onTap: _openLyricsScreen,
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 8,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
                               vertical: 8,
                             ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.06),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.white12),
-                            ),
-                            child: Column(
-                              children: [
-                                Text(
-                                  _currentLyricLine!,
-                                  style: GoogleFonts.outfit(
-                                    fontSize: 15,
-                                    color: Colors.white.withOpacity(0.85),
-                                    fontWeight: FontWeight.w500,
-                                    height: 1.5,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Tap for full lyrics',
-                                  style: GoogleFonts.outfit(
-                                    fontSize: 11,
-                                    color: Colors.white38,
-                                  ),
-                                ),
-                              ],
+                            child: Text(
+                              _currentLyricLine!,
+                              style: GoogleFonts.outfit(
+                                fontSize: 15,
+                                color: Colors.white.withOpacity(0.75),
+                                fontStyle: FontStyle.italic,
+                                height: 1.5,
+                              ),
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ),
@@ -838,12 +983,47 @@ class _PlayerScreenState extends State<PlayerScreen>
                     letterSpacing: -0.5,
                   ),
                 ),
-                Text(
-                  _artist,
-                  style: GoogleFonts.outfit(
-                    fontSize: 15,
-                    color: const Color(0xB3C8B4FF),
-                  ),
+                Wrap(
+                  spacing: 0,
+                  children: () {
+                    final names = _artist
+                        .split(',')
+                        .map((s) => s.trim())
+                        .where((s) => s.isNotEmpty)
+                        .toList();
+                    return names.asMap().entries.map((entry) {
+                      final name = entry.value;
+                      final isLast = entry.key == names.length - 1;
+                      return GestureDetector(
+                        onTap: () {
+                          // Use numeric artist_id from track if available (single artist),
+                          // otherwise fall back to slug which artist_screen resolves via search
+                          final numericId = names.length == 1
+                              ? (_track['artist_id']?.toString() ?? '')
+                              : '';
+                          final artistId = numericId.isNotEmpty
+                              ? numericId
+                              : name.toLowerCase().replaceAll(' ', '_');
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ArtistScreen(
+                                artistId: artistId,
+                                artistName: name,
+                              ),
+                            ),
+                          );
+                        },
+                        child: Text(
+                          isLast ? name : '$name, ',
+                          style: GoogleFonts.outfit(
+                            fontSize: 15,
+                            color: const Color(0xB3C8B4FF),
+                          ),
+                        ),
+                      );
+                    }).toList();
+                  }(),
                 ),
               ],
             ),
@@ -918,7 +1098,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             icon: Icon(
               Icons.shuffle_rounded,
               size: 22,
-              color: _shuffle ? AppColors.purpleLight : AppColors.text3,
+              color: _shuffle ? AppColors.purpleLight : Colors.white54,
             ),
           ),
           IconButton(
@@ -930,7 +1110,22 @@ class _PlayerScreenState extends State<PlayerScreen>
             ),
           ),
           GestureDetector(
-            onTap: _loadingTrack ? null : _togglePlayPause,
+            onTap: _loadingTrack
+                ? null
+                : () {
+                    if (_trackEnded) {
+                      setState(() => _trackEnded = false);
+                      if (_usingYoutube) {
+                        _ytController?.seekTo(seconds: 0, allowSeekAhead: true);
+                        _ytController?.playVideo();
+                      } else {
+                        _player.seek(Duration.zero);
+                        _player.play();
+                      }
+                    } else {
+                      _togglePlayPause();
+                    }
+                  },
             child: Container(
               width: 72,
               height: 72,
@@ -961,9 +1156,11 @@ class _PlayerScreenState extends State<PlayerScreen>
                       ),
                     )
                   : Icon(
-                      _isPlaying
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
+                      _trackEnded
+                          ? Icons.replay_rounded
+                          : _isPlaying
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
                       color: Colors.white,
                       size: 34,
                     ),
@@ -978,17 +1175,110 @@ class _PlayerScreenState extends State<PlayerScreen>
             ),
           ),
           IconButton(
-            onPressed: () => setState(() => _repeatMode = (_repeatMode + 1) % 3),
+            onPressed: () =>
+                setState(() => _repeatMode = (_repeatMode + 1) % 3),
             icon: Icon(
               _repeatMode == 2
                   ? Icons.repeat_one_rounded
                   : Icons.repeat_rounded,
               size: 22,
-              color: _repeatMode > 0 ? AppColors.purpleLight : AppColors.text3,
+              color: _repeatMode > 0 ? AppColors.purpleLight : Colors.white54,
             ),
           ),
         ],
       );
+
+  void _showSleepTimerDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a1a2e),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(100)),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Sleep Timer',
+              style: GoogleFonts.outfit(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white),
+            ),
+            if (_sleepMinutesLeft != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Off in ${_sleepMinutesLeft}m',
+                  style: GoogleFonts.outfit(
+                      fontSize: 13, color: AppColors.purpleLight),
+                ),
+              ),
+            const SizedBox(height: 12),
+            for (final min in [5, 10, 15, 30, 45, 60])
+              ListTile(
+                leading: const Icon(Icons.timer_outlined,
+                    color: Colors.white70, size: 20),
+                title: Text('$min minutes',
+                    style: GoogleFonts.outfit(fontSize: 15, color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _setSleepTimer(min);
+                },
+              ),
+            if (_sleepTimer != null)
+              ListTile(
+                leading: const Icon(Icons.timer_off_outlined,
+                    color: AppColors.pink, size: 20),
+                title: Text('Cancel timer',
+                    style: GoogleFonts.outfit(fontSize: 15, color: AppColors.pink)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _cancelSleepTimer();
+                },
+              ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _setSleepTimer(int minutes) {
+    _sleepTimer?.cancel();
+    setState(() => _sleepMinutesLeft = minutes);
+    int remaining = minutes;
+    _sleepTimer = Timer.periodic(const Duration(minutes: 1), (t) {
+      remaining--;
+      if (mounted) setState(() => _sleepMinutesLeft = remaining);
+      if (remaining <= 0) {
+        t.cancel();
+        if (_usingYoutube) {
+          _ytController?.pauseVideo();
+        } else if (_audioReady) {
+          _player.pause();
+        }
+        if (mounted) {
+          setState(() => _sleepMinutesLeft = null);
+          context.read<PlayerProvider>().setPlaying(false);
+        }
+      }
+    });
+  }
+
+  void _cancelSleepTimer() {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    if (mounted) setState(() => _sleepMinutesLeft = null);
+  }
 
   Widget _extraActions() => Container(
         padding: const EdgeInsets.only(top: 20),
@@ -1009,7 +1299,15 @@ class _PlayerScreenState extends State<PlayerScreen>
             GestureDetector(
               onTap: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const QueueScreen()),
+                MaterialPageRoute(
+                  builder: (_) => QueueScreen(
+                    currentTitle: _title,
+                    currentArtist: _artist,
+                    currentCover: _coverUrl,
+                    queue: _queue,
+                    currentIndex: _queueIndex,
+                  ),
+                ),
               ),
               child: const _ExtraBtn(
                 icon: Icons.queue_music_rounded,
@@ -1017,17 +1315,27 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
             GestureDetector(
-              onTap: () => showShareTrack(context),
+              onTap: () => showShareTrack(context, track: _track),
               child: const _ExtraBtn(
                 icon: Icons.share_outlined,
                 label: 'Share',
               ),
             ),
             GestureDetector(
-              onTap: () => showAddToPlaylist(context),
+              onTap: () => showAddToPlaylist(context, track: _track),
               child: const _ExtraBtn(
                 icon: Icons.playlist_play_rounded,
                 label: 'Playlist',
+              ),
+            ),
+            GestureDetector(
+              onTap: _showSleepTimerDialog,
+              child: _ExtraBtn(
+                icon: Icons.bedtime_outlined,
+                label: _sleepMinutesLeft != null
+                    ? '${_sleepMinutesLeft}m'
+                    : 'Sleep',
+                active: _sleepTimer != null,
               ),
             ),
           ],

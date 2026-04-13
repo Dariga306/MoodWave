@@ -1,67 +1,65 @@
-"""Music service — Spotify Search API (primary) or iTunes Search (fallback)."""
-import logging
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.models.music import TrackCache
-from app.services import itunes
-
-logger = logging.getLogger(__name__)
+from app.services import deezer as deezer_service
 
 
-def _use_spotify() -> bool:
-    """True when Spotify Client Credentials are configured."""
-    return bool(settings.SPOTIFY_CLIENT_ID and settings.SPOTIFY_CLIENT_SECRET)
+TRACK_CACHE_FIELDS = {
+    "spotify_id",
+    "title",
+    "artist",
+    "album",
+    "cover_url",
+    "preview_url",
+    "duration_ms",
+}
 
 
 async def search_and_cache(query: str, limit: int, db: AsyncSession) -> list[dict]:
-    if _use_spotify():
-        from app.services import spotify_service
-        tracks = await spotify_service.search_tracks(query, limit)
-    else:
-        tracks = await itunes.search_tracks(query, limit)
+    tracks = await deezer_service.search_tracks(query, limit)
 
     for track_data in tracks:
-        cache_payload = dict(track_data)
-        genre = cache_payload.pop("genre", None)
-        cache_payload.pop("spotify_uri", None)  # not a DB column
+        cache_payload = {
+            key: value for key, value in dict(track_data).items() if key in TRACK_CACHE_FIELDS
+        }
+        genre = track_data.get("genre")
         existing = await db.scalar(
             select(TrackCache).where(TrackCache.spotify_id == track_data["spotify_id"])
         )
         if not existing:
-            tc = TrackCache(
-                **cache_payload,
-                genres=[genre] if genre else [],
-                audio_features={},
-            )
-            db.add(tc)
+            try:
+                tc = TrackCache(
+                    **cache_payload,
+                    genres=[genre] if genre else [],
+                    audio_features={},
+                )
+                db.add(tc)
+            except Exception:
+                pass
     if tracks:
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
     return tracks
 
 
 async def search_artists(query: str, limit: int = 10) -> list[dict]:
-    if _use_spotify():
-        from app.services import spotify_service
-        return await spotify_service.search_artists(query, limit)
-    return await itunes.search_artists(query, limit)
+    artist = await deezer_service.search_artist(query)
+    return [artist] if artist else []
 
 
 async def get_charts(genre: Optional[str] = None, limit: int = 20) -> list[dict]:
-    if _use_spotify():
-        from app.services import spotify_service
-        return await spotify_service.get_charts(genre, limit)
-    return await itunes.get_charts(genre, limit)
+    if genre:
+        return await deezer_service.get_genre_chart_tracks(genre, limit)
+    return await deezer_service.get_chart_tracks(limit)
 
 
 async def get_charts_by_city(city: str, limit: int = 20) -> list[dict]:
-    if _use_spotify():
-        from app.services import spotify_service
-        return await spotify_service.get_charts_by_city(city, limit)
-    return await itunes.get_charts_by_city(city, limit)
+    return await deezer_service.get_chart_tracks(limit)
 
 
 async def get_recommendations_from_spotify(
@@ -72,20 +70,8 @@ async def get_recommendations_from_spotify(
     mood_label: Optional[str] = None,
     limit: int = 20,
 ) -> list[dict]:
-    if _use_spotify():
-        from app.services import spotify_service
-        return await spotify_service.get_recommendations(
-            seed_genres=seed_genres,
-            seed_tracks=seed_tracks,
-            mood_label=mood_label,
-            target_energy=target_energy,
-            target_valence=target_valence,
-            limit=limit,
-        )
-    return await itunes.get_recommendations(
-        mood_label=mood_label,
+    return await deezer_service.get_recommendation_tracks(
         seed_genres=seed_genres,
-        target_energy=target_energy,
-        target_valence=target_valence,
+        mood_label=mood_label,
         limit=limit,
     )

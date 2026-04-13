@@ -223,7 +223,10 @@ class _PlaylistItem extends StatelessWidget {
 
     return GestureDetector(
       onTap: () => Navigator.push(context,
-          MaterialPageRoute(builder: (_) => const PlaylistScreen())),
+          MaterialPageRoute(builder: (_) => PlaylistScreen(
+            playlistId: id,
+            playlistTitle: title.toString(),
+          ))),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
         child: Row(children: [

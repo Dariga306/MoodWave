@@ -15,7 +15,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.database import AsyncSessionLocal, Base, engine
-from app.routers import auth, music, weather, match, chat, social, rooms, playlists, search, charts, debug, admin, spotify
+from app.routers import auth, music, weather, match, chat, social, rooms, playlists, search, charts, debug, admin
 from app.services import firebase as firebase_svc
 from app.services.matching import recalculate_all_vectors
 from app.services.email_service import send_account_deletion_email
@@ -176,7 +176,6 @@ app.include_router(charts.router, prefix="/charts", tags=["charts"])
 app.include_router(rooms.router, tags=["rooms"])
 app.include_router(debug.router, tags=["debug"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
-app.include_router(spotify.router, tags=["spotify"])
 
 
 @app.get(

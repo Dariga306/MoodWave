@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
+import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/common_widgets.dart';
+import 'player_screen.dart';
 
 // ══════════════════════════════════════════
 // LISTENING PARTY
@@ -278,6 +282,34 @@ class DiscoverScreen extends StatefulWidget {
 class _DiscoverScreenState extends State<DiscoverScreen> {
   int _tab = 0;
   final _tabs = ['🌍 Global', '🔥 Viral', '🆕 New Releases', '📈 Rising'];
+  final _tabGenres = ['', 'viral', 'pop', 'indie'];
+
+  List<dynamic> _tracks = [];
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTab(0);
+  }
+
+  Future<void> _loadTab(int tab) async {
+    setState(() { _loading = true; _tab = tab; });
+    try {
+      final genre = _tabGenres[tab];
+      final data = await ApiService().getCharts(genre: genre, limit: 20);
+      if (!mounted) return;
+      setState(() { _tracks = data; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  String _fmt(dynamic ms) {
+    final v = ms is int ? ms : int.tryParse('$ms') ?? 0;
+    if (v <= 0) return '';
+    return '${v ~/ 60000}:${((v % 60000) ~/ 1000).toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -307,7 +339,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                   padding: const EdgeInsets.only(left: 20),
                   itemCount: _tabs.length,
                   itemBuilder: (_, i) => GestureDetector(
-                    onTap: () => setState(() => _tab = i),
+                    onTap: () => _loadTab(i),
                     child: Container(
                       margin: const EdgeInsets.only(right: 8),
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
@@ -379,7 +411,59 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
               const SizedBox(height: 10),
               _TrendBar("Espresso · Sabrina Carpenter", "340M", 0.74,
                   const LinearGradient(colors: [Color(0xFF92400e), Color(0xFFf59e0b)])),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
+              const SectionHeader(title: 'Top Tracks Now'),
+              const SizedBox(height: 8),
+              if (_loading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.purpleLight)),
+                )
+              else
+                ..._tracks.asMap().entries.map((e) {
+                  final i = e.key;
+                  final track = Map<String, dynamic>.from(e.value as Map)
+                    ..['queue'] = _tracks;
+                  final title = track['title']?.toString() ?? 'Unknown';
+                  final artist = track['artist']?.toString() ?? '';
+                  final coverUrl = track['cover_url']?.toString();
+                  final dur = _fmt(track['duration_ms']);
+                  return GestureDetector(
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => PlayerScreen(track: track))),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
+                      child: Row(children: [
+                        SizedBox(width: 22,
+                          child: Text('${i + 1}', textAlign: TextAlign.center,
+                              style: GoogleFonts.outfit(fontSize: 13,
+                                  fontWeight: FontWeight.w600, color: AppColors.text3))),
+                        const SizedBox(width: 12),
+                        Container(width: 46, height: 46,
+                          decoration: BoxDecoration(
+                              gradient: AppColors.gradMixed,
+                              borderRadius: BorderRadius.circular(11)),
+                          child: coverUrl != null
+                              ? ClipRRect(borderRadius: BorderRadius.circular(11),
+                                  child: Image.network(coverUrl, fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) =>
+                                          const Center(child: Text('🎵', style: TextStyle(fontSize: 20)))))
+                              : const Center(child: Text('🎵', style: TextStyle(fontSize: 20)))),
+                        const SizedBox(width: 12),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
+                          if (artist.isNotEmpty)
+                            Text(artist, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text2)),
+                        ])),
+                        if (dur.isNotEmpty)
+                          Text(dur, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+                      ]),
+                    ),
+                  );
+                }),
+              const SizedBox(height: 32),
             ],
           ),
         ),
@@ -461,16 +545,19 @@ class CityChartsScreen extends StatefulWidget {
   State<CityChartsScreen> createState() => _CityChartsScreenState();
 }
 
-class _CityChartsScreenState extends State<CityChartsScreen> with SingleTickerProviderStateMixin {
-  int _city = 0;
+class _CityChartsScreenState extends State<CityChartsScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _blinkCtrl;
-  final _cities = ['📍 Astana', '🌆 Almaty', '🏙 Shymkent', '🌍 Kazakhstan'];
+  List<dynamic> _tracks = [];
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _blinkCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500))
+    _blinkCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1500))
       ..repeat(reverse: true);
+    _load();
   }
 
   @override
@@ -479,164 +566,288 @@ class _CityChartsScreenState extends State<CityChartsScreen> with SingleTickerPr
     super.dispose();
   }
 
+  Future<void> _load() async {
+    final user = context.read<AuthProvider>().user;
+    final city = user?['city']?.toString() ?? 'Astana';
+    try {
+      final data = await ApiService().getChartsByCity(city);
+      if (!mounted) return;
+      setState(() {
+        _tracks = data;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  String _fmt(dynamic ms) {
+    final v = ms is int ? ms : int.tryParse('$ms') ?? 0;
+    if (v <= 0) return '';
+    return '${v ~/ 60000}:${((v % 60000) ~/ 1000).toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final user = context.watch<AuthProvider>().user;
+    final city = user?['city']?.toString() ?? 'Astana';
+    final listeners = _tracks.length * 120 + 821;
+
+    final rankColors = [
+      const Color(0xFFf59e0b),
+      const Color(0xFF94a3b8),
+      const Color(0xFFc2774a),
+    ];
+
     return Scaffold(
       backgroundColor: AppColors.bg,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
-                child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  Text('City Charts', style: GoogleFonts.outfit(
-                      fontSize: 26, fontWeight: FontWeight.w800,
-                      color: AppColors.text, letterSpacing: -0.02 * 26)),
-                  Container(width: 40, height: 40,
-                    decoration: BoxDecoration(color: AppColors.glass,
-                        borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
-                    child: const Icon(Icons.search_rounded, size: 18, color: AppColors.text2)),
-                ]),
-              ),
-              // City hero
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(colors: [Color(0xFF080A28), Color(0xFF0D0D1A)]),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: AppColors.blue.withOpacity(0.2)),
-                  ),
-                  child: Stack(children: [
-                    Positioned.fill(child: Container(decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(24),
-                      gradient: RadialGradient(center: const Alignment(0.7, 0),
-                        colors: [AppColors.blue.withOpacity(0.1), Colors.transparent])))),
-                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Row(children: [
-                        const Text('🇰🇿', style: TextStyle(fontSize: 20)),
-                        const SizedBox(width: 10),
-                        Text('Astana', style: GoogleFonts.outfit(
-                            fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.text)),
-                      ]),
-                      const SizedBox(height: 4),
-                      AnimatedBuilder(
-                        animation: _blinkCtrl,
-                        builder: (_, __) => Row(children: [
-                          Opacity(opacity: 0.3 + 0.7 * _blinkCtrl.value,
-                            child: Container(width: 7, height: 7,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF22c55e), shape: BoxShape.circle))),
-                          const SizedBox(width: 5),
-                          Text('Updated live · just now', style: GoogleFonts.outfit(
-                              fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF22c55e))),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        color: AppColors.purpleLight,
+        backgroundColor: AppColors.surface,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: SafeArea(
+                bottom: false,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          GestureDetector(
+                            onTap: () => Navigator.of(context).pop(),
+                            child: Container(
+                              width: 40, height: 40,
+                              decoration: BoxDecoration(
+                                  color: AppColors.glass,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: AppColors.border)),
+                              child: const Icon(Icons.arrow_back_rounded,
+                                  size: 18, color: Colors.white),
+                            ),
+                          ),
+                          Text('City Charts',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.text)),
+                          const SizedBox(width: 40),
+                        ],
+                      ),
+                    ),
+                    // City hero
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                      child: Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                              colors: [Color(0xFF080A28), Color(0xFF0D0D1A)]),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                              color: AppColors.blue.withOpacity(0.2)),
+                        ),
+                        child: Stack(children: [
+                          Positioned.fill(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(24),
+                                gradient: RadialGradient(
+                                    center: const Alignment(0.7, 0),
+                                    colors: [
+                                      AppColors.blue.withOpacity(0.1),
+                                      Colors.transparent
+                                    ]),
+                              ),
+                            ),
+                          ),
+                          Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(children: [
+                                  const Text('📍',
+                                      style: TextStyle(fontSize: 20)),
+                                  const SizedBox(width: 10),
+                                  Text(city,
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppColors.text)),
+                                ]),
+                                const SizedBox(height: 4),
+                                AnimatedBuilder(
+                                  animation: _blinkCtrl,
+                                  builder: (_, __) => Row(children: [
+                                    Opacity(
+                                      opacity:
+                                          0.3 + 0.7 * _blinkCtrl.value,
+                                      child: Container(
+                                          width: 7,
+                                          height: 7,
+                                          decoration: const BoxDecoration(
+                                              color: Color(0xFF22c55e),
+                                              shape: BoxShape.circle)),
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Text('Updated live · just now',
+                                        style: GoogleFonts.outfit(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color:
+                                                const Color(0xFF22c55e))),
+                                  ]),
+                                ),
+                                const SizedBox(height: 8),
+                                ShaderMask(
+                                  shaderCallback: (b) =>
+                                      const LinearGradient(colors: [
+                                    AppColors.blueLight,
+                                    AppColors.cyan
+                                  ]).createShader(b),
+                                  child: Text('$listeners',
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 28,
+                                          fontWeight: FontWeight.w900,
+                                          color: Colors.white)),
+                                ),
+                                Text(
+                                    'people streaming right now in your city',
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 13,
+                                        color: AppColors.text2)),
+                              ]),
                         ]),
                       ),
-                      const SizedBox(height: 8),
-                      ShaderMask(
-                        shaderCallback: (b) => const LinearGradient(
-                          colors: [AppColors.blueLight, AppColors.cyan]).createShader(b),
-                        child: Text('4,821', style: GoogleFonts.outfit(
-                            fontSize: 28, fontWeight: FontWeight.w900, color: Colors.white)),
-                      ),
-                      Text('people streaming right now in your city',
-                          style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2)),
-                    ]),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            if (_loading)
+              const SliverFillRemaining(
+                child: Center(
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.purpleLight),
+                ),
+              )
+            else if (_tracks.isEmpty)
+              SliverFillRemaining(
+                child: Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Text('📊', style: TextStyle(fontSize: 48)),
+                    const SizedBox(height: 12),
+                    Text('Charts are loading',
+                        style: GoogleFonts.outfit(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.text)),
+                    const SizedBox(height: 6),
+                    Text('Play some tracks to see local charts',
+                        style: GoogleFonts.outfit(
+                            fontSize: 13, color: AppColors.text3)),
                   ]),
                 ),
-              ),
-              // City switcher
-              SizedBox(
-                height: 36,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.only(left: 20),
-                  itemCount: _cities.length,
-                  itemBuilder: (_, i) => GestureDetector(
-                    onTap: () => setState(() => _city = i),
-                    child: Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: _city == i
-                            ? AppColors.blue.withOpacity(0.2) : AppColors.glass,
-                        borderRadius: BorderRadius.circular(100),
-                        border: Border.all(
-                            color: _city == i ? AppColors.blue.withOpacity(0.4) : AppColors.border),
+              )
+            else
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, i) {
+                    final track =
+                        Map<String, dynamic>.from(_tracks[i] as Map)
+                          ..['queue'] = _tracks;
+                    final title =
+                        track['title']?.toString() ?? 'Unknown';
+                    final artist = track['artist']?.toString() ?? '';
+                    final coverUrl = track['cover_url']?.toString();
+                    final dur = _fmt(track['duration_ms']);
+                    final rankColor = i < 3
+                        ? rankColors[i]
+                        : AppColors.text3;
+
+                    return GestureDetector(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => PlayerScreen(track: track)),
                       ),
-                      child: Text(_cities[i], style: GoogleFonts.outfit(
-                          fontSize: 13, fontWeight: FontWeight.w600,
-                          color: _city == i ? AppColors.blueLight : AppColors.text2)),
-                    ),
-                  ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 10),
+                        child: Row(children: [
+                          SizedBox(
+                            width: 24,
+                            child: Text('${i + 1}',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                    color: rankColor)),
+                          ),
+                          const SizedBox(width: 14),
+                          Container(
+                            width: 46, height: 46,
+                            decoration: BoxDecoration(
+                              gradient: AppColors.gradMixed,
+                              borderRadius: BorderRadius.circular(11),
+                            ),
+                            child: coverUrl != null
+                                ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(11),
+                                    child: Image.network(coverUrl,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) =>
+                                            const Center(
+                                                child: Text('🎵',
+                                                    style: TextStyle(
+                                                        fontSize: 20)))))
+                                : const Center(
+                                    child: Text('🎵',
+                                        style: TextStyle(fontSize: 20))),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(title,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.text)),
+                                  Text(artist,
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 12,
+                                          color: AppColors.text2)),
+                                ]),
+                          ),
+                          if (dur.isNotEmpty)
+                            Text(dur,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 12, color: AppColors.text3)),
+                        ]),
+                      ),
+                    );
+                  },
+                  childCount: _tracks.length.clamp(0, 20),
                 ),
               ),
-              const SizedBox(height: 8),
-              // Chart items
-              _ChartItem('1', '🌨', AppColors.gradMixed, 'Sweater Weather', 'The Neighbourhood', '3:51', '▲ 2', true, isGold: true),
-              _ChartItem('2', '🌊', const LinearGradient(colors: [Color(0xFF1e3a8a), Color(0xFF06b6d4)]), 'Midnight Rain', 'Taylor Swift', '3:42', '—', false, isSilver: true),
-              _ChartItem('3', '🌿', AppColors.gradTeal, 'Snowfall', 'NIKI', '3:18', 'NEW', false, isBronze: true, isNew: true),
-              _ChartItem('4', '⭐', const LinearGradient(colors: [Color(0xFF0f172a), Color(0xFF312e81)]), 'Somebody Else', 'The 1975', '5:02', '▲ 5', true),
-              _ChartItem('5', '🎸', const LinearGradient(colors: [Color(0xFF4c1d95), Color(0xFF7c3aed)]), 'R U Mine?', 'Arctic Monkeys', '3:21', '▲ 1', true),
-              _ChartItem('6', '🌹', AppColors.gradPink, 'Creep', 'Radiohead', '3:56', '—', false),
-              _ChartItem('7', '🎤', const LinearGradient(colors: [Color(0xFF1c1917), Color(0xFF57534e)]), 'HUMBLE.', 'Kendrick Lamar', '2:57', '▲ 3', true),
-              const SizedBox(height: 16),
-            ],
-          ),
+
+            const SliverToBoxAdapter(child: SizedBox(height: 80)),
+          ],
         ),
       ),
     );
   }
 }
 
-class _ChartItem extends StatelessWidget {
-  final String num, emoji, title, artist, dur, trend;
-  final LinearGradient gradient;
-  final bool isUp, isGold, isSilver, isBronze, isNew;
-  const _ChartItem(this.num, this.emoji, this.gradient, this.title, this.artist,
-      this.dur, this.trend, this.isUp, {this.isGold = false, this.isSilver = false,
-        this.isBronze = false, this.isNew = false});
-  @override
-  Widget build(BuildContext context) {
-    Color numColor = isGold ? const Color(0xFFf59e0b)
-        : isSilver ? const Color(0xFF94a3b8)
-        : isBronze ? const Color(0xFFc2774a) : AppColors.text3;
-    Color trendColor = isNew ? AppColors.purpleLight
-        : isUp ? const Color(0xFF22c55e) : const Color(0xFF94a3b8);
-    Color trendBg = isNew ? AppColors.purple.withOpacity(0.12)
-        : isUp ? const Color(0xFF22c55e).withOpacity(0.1)
-        : const Color(0xFF94a3b8).withOpacity(0.08);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      child: Row(children: [
-        SizedBox(width: 24, child: Text(num, textAlign: TextAlign.center,
-            style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w800, color: numColor))),
-        const SizedBox(width: 14),
-        Container(width: 46, height: 46,
-          decoration: BoxDecoration(gradient: gradient, borderRadius: BorderRadius.circular(11)),
-          child: Center(child: Text(emoji, style: const TextStyle(fontSize: 20)))),
-        const SizedBox(width: 14),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text),
-              overflow: TextOverflow.ellipsis),
-          Text(artist, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text2)),
-        ])),
-        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Text(dur, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-          const SizedBox(height: 3),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(color: trendBg, borderRadius: BorderRadius.circular(100)),
-            child: Text(trend, style: GoogleFonts.outfit(
-                fontSize: 10, fontWeight: FontWeight.w700, color: trendColor))),
-        ]),
-      ]),
-    );
-  }
-}
 
 // ══════════════════════════════════════════
 // RADIO

@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../main.dart' show rootScaffoldMessengerKey;
 import '../providers/auth_provider.dart';
-import '../services/spotify_player_service.dart';
 import '../theme/app_colors.dart';
 import 'main/main_screen.dart';
 import 'onboarding_screen.dart';
@@ -24,17 +22,18 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1000));
-    _fade = Tween<double>(begin: 0, end: 1).animate(
-        CurvedAnimation(parent: _ctrl, curve: const Interval(0, 0.6, curve: Curves.easeOut)));
-    _scale = Tween<double>(begin: 0.85, end: 1).animate(
-        CurvedAnimation(parent: _ctrl, curve: const Interval(0, 0.6, curve: Curves.easeOutBack)));
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1000));
+    _fade = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(
+        parent: _ctrl, curve: const Interval(0, 0.6, curve: Curves.easeOut)));
+    _scale = Tween<double>(begin: 0.85, end: 1).animate(CurvedAnimation(
+        parent: _ctrl,
+        curve: const Interval(0, 0.6, curve: Curves.easeOutBack)));
     _ctrl.forward();
     _init();
   }
 
   Future<void> _init() async {
-    final spotifyJustConnected = SpotifyPlayerService.wasJustConnected();
     await Future.delayed(const Duration(milliseconds: 1600));
     if (!mounted) return;
     await context.read<AuthProvider>().checkAuth();
@@ -48,23 +47,8 @@ class _SplashScreenState extends State<SplashScreen>
     final dest = (status == AuthStatus.authenticated && hasCity)
         ? const MainScreen()
         : const OnboardingScreen();
-    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => dest));
-
-    if (spotifyJustConnected) {
-      rootScaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(
-          content: Row(children: [
-            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 16),
-            const SizedBox(width: 8),
-            Text('Spotify подключён! Полное воспроизведение доступно.',
-                style: GoogleFonts.outfit(color: Colors.white)),
-          ]),
-          backgroundColor: const Color(0xFF1DB954),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
-        ),
-      );
-    }
+    Navigator.of(context)
+        .pushReplacement(MaterialPageRoute(builder: (_) => dest));
   }
 
   @override
@@ -94,26 +78,36 @@ class _SplashScreenState extends State<SplashScreen>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    width: 88, height: 88,
+                    width: 88,
+                    height: 88,
                     decoration: BoxDecoration(
                       gradient: AppColors.gradMixed,
                       borderRadius: BorderRadius.circular(24),
-                      boxShadow: [BoxShadow(
-                          color: AppColors.purpleDark.withOpacity(0.5),
-                          blurRadius: 40, offset: const Offset(0, 10))],
+                      boxShadow: [
+                        BoxShadow(
+                            color: AppColors.purpleDark.withOpacity(0.5),
+                            blurRadius: 40,
+                            offset: const Offset(0, 10))
+                      ],
                     ),
-                    child: const Icon(Icons.graphic_eq_rounded, size: 48, color: Colors.white),
+                    child: const Icon(Icons.graphic_eq_rounded,
+                        size: 48, color: Colors.white),
                   ),
                   const SizedBox(height: 16),
-                  Text('MoodWave', style: GoogleFonts.outfit(
-                      fontSize: 28, fontWeight: FontWeight.w800,
-                      color: Colors.white, letterSpacing: -0.5)),
+                  Text('MoodWave',
+                      style: GoogleFonts.outfit(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                          letterSpacing: -0.5)),
                   const SizedBox(height: 6),
                   Text('Music for every mood',
-                      style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+                      style: GoogleFonts.outfit(
+                          fontSize: 14, color: AppColors.text2)),
                   const SizedBox(height: 48),
                   SizedBox(
-                    width: 28, height: 28,
+                    width: 28,
+                    height: 28,
                     child: CircularProgressIndicator(
                         strokeWidth: 2,
                         color: AppColors.purpleLight.withOpacity(0.5)),

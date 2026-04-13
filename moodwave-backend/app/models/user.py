@@ -100,3 +100,16 @@ class TasteVector(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="taste_vector")
+
+
+class SearchHistory(Base):
+    __tablename__ = "search_history"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    query: Mapped[str] = mapped_column(String(200), nullable=False)
+    result_type: Mapped[str] = mapped_column(String(20), default="track")
+    result_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    result_title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    result_cover: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -194,8 +194,12 @@ class _ChatItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final matchId = match['match_id'] as int? ?? match['id'] as int? ?? 0;
-    final partner = match['partner'] as Map<String, dynamic>? ?? match;
-    final name = partner['display_name'] ?? partner['username'] ?? 'User';
+    final partner = match['partner'] as Map<String, dynamic>?
+        ?? {'display_name': match['username'] ?? 'User'};
+    final name = partner['display_name']
+        ?? partner['first_name']
+        ?? partner['username']
+        ?? 'User';
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
     final similarity = match['similarity_pct'] ?? match['compatibility_pct'] ?? 0;
     final lastMsg = match['last_message'] as String? ?? 'Start a conversation 🎵';

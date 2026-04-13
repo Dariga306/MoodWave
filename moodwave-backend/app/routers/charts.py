@@ -4,19 +4,52 @@ import json
 from datetime import datetime, timedelta
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user_optional, get_db
-from app.models.music import ListeningHistory, TrackCache
+from app.models.music import ListeningAction, ListeningHistory, TrackCache
 from app.models.user import User
 from app.schemas.music import TrackResponse
-from app.services import itunes
 
 router = APIRouter()
 
-CHARTS_CACHE_TTL = 3600
+CHARTS_CACHE_TTL = 1800  # 30 min
+PLAY_ACTIONS = [
+    ListeningAction.played,
+    ListeningAction.completed,
+    ListeningAction.replayed,
+]
+
+
+async def _deezer_global_charts(limit: int) -> list[dict]:
+    """Fetch real global top tracks from Deezer."""
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(
+                "https://api.deezer.com/chart/0/tracks",
+                params={"limit": limit},
+            )
+        if resp.status_code == 200:
+            data = resp.json().get("data", [])
+            return [
+                {
+                    "spotify_id": f"deezer_{t['id']}",
+                    "title": t["title"],
+                    "artist": t["artist"]["name"],
+                    "album": t["album"]["title"],
+                    "cover_url": t["album"].get("cover_xl") or t["album"].get("cover_medium"),
+                    "preview_url": t.get("preview"),
+                    "duration_ms": int(t.get("duration", 0)) * 1000,
+                }
+                for t in data
+                if t.get("id")
+            ]
+    except Exception:
+        pass
+    return []
 
 
 def _track_payload(track_id: str, cache: TrackCache | None) -> dict:
@@ -57,7 +90,7 @@ async def charts_by_city(
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     redis = request.app.state.redis
-    cache_key = f"charts:city:{city.lower()}:{limit}"
+    cache_key = f"charts:v2:city:{city.lower()}:{limit}"
     cached = await redis.get(cache_key)
     if cached:
         return json.loads(cached)
@@ -67,41 +100,59 @@ async def charts_by_city(
         await db.execute(
             select(ListeningHistory.spotify_track_id, func.count(ListeningHistory.id).label("plays"))
             .join(User, User.id == ListeningHistory.user_id)
-            .where(
-                func.lower(User.city) == city.lower(),
-                ListeningHistory.created_at >= window_start,
-            )
+                .where(
+                    func.lower(User.city) == city.lower(),
+                    ListeningHistory.action.in_(PLAY_ACTIONS),
+                    ListeningHistory.created_at >= window_start,
+                )
             .group_by(ListeningHistory.spotify_track_id)
             .order_by(desc("plays"))
             .limit(limit)
         )
     ).all()
 
-    rows = city_rows
-    if not rows:
-        rows = (
+    # Step 2: city data last 7 days
+    if not city_rows:
+        window_7d = datetime.utcnow() - timedelta(days=7)
+        city_rows = (
             await db.execute(
                 select(ListeningHistory.spotify_track_id, func.count(ListeningHistory.id).label("plays"))
-                .where(ListeningHistory.created_at >= window_start)
+                .join(User, User.id == ListeningHistory.user_id)
+                .where(
+                    func.lower(User.city) == city.lower(),
+                    ListeningHistory.action.in_(PLAY_ACTIONS),
+                    ListeningHistory.created_at >= window_7d,
+                )
                 .group_by(ListeningHistory.spotify_track_id)
                 .order_by(desc("plays"))
                 .limit(limit)
             )
         ).all()
 
-    if rows:
+    # Step 3: global top from DB (all users, last 7 days)
+    if not city_rows:
+        window_7d = datetime.utcnow() - timedelta(days=7)
+        city_rows = (
+            await db.execute(
+                select(ListeningHistory.spotify_track_id, func.count(ListeningHistory.id).label("plays"))
+                .where(
+                    ListeningHistory.created_at >= window_7d,
+                    ListeningHistory.action.in_(PLAY_ACTIONS),
+                )
+                .group_by(ListeningHistory.spotify_track_id)
+                .order_by(desc("plays"))
+                .limit(limit)
+            )
+        ).all()
+
+    if city_rows:
         result: list[dict] = []
-        for track_id, _plays in rows:
+        for track_id, _plays in city_rows:
             cache = await db.scalar(select(TrackCache).where(TrackCache.spotify_id == track_id))
             result.append(_track_payload(track_id, cache))
     else:
-        # iTunes fallback when no listening history exists
-        try:
-            result = await itunes.search_tracks(f"top hits {city}", limit)
-            if not result:
-                result = await itunes.get_charts(limit=limit)
-        except Exception:
-            result = []
+        # Step 4: Deezer global charts (real top 50, not keyword search)
+        result = await _deezer_global_charts(limit)
 
     await redis.setex(cache_key, CHARTS_CACHE_TTL, json.dumps(result))
     return result

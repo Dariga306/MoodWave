@@ -27,6 +27,7 @@ class _ArtistScreenState extends State<ArtistScreen> {
   bool _loading = true;
   bool _followLoading = false;
   bool _isFollowing = false;
+  String? _resolvedId; // numeric Deezer ID resolved from slug/name
 
   @override
   void initState() {
@@ -36,8 +37,19 @@ class _ArtistScreenState extends State<ArtistScreen> {
 
   Future<void> _load() async {
     try {
+      // If artistId is not a numeric Deezer ID, resolve it via name search first
+      String resolvedId = widget.artistId;
+      if (int.tryParse(resolvedId) == null) {
+        final searchResult =
+            await ApiService().searchArtist(widget.artistName);
+        final found = searchResult['artist'] as Map<String, dynamic>?;
+        if (found != null) {
+          resolvedId = found['id'].toString();
+        }
+      }
+
       final results = await Future.wait([
-        ApiService().getArtistProfile(widget.artistId),
+        ApiService().getArtistProfile(resolvedId),
         ApiService().getFollowedArtists(),
       ]);
       if (!mounted) return;
@@ -46,8 +58,9 @@ class _ArtistScreenState extends State<ArtistScreen> {
           (results[1] as List).map((item) => item.toString()).toSet();
 
       setState(() {
+        _resolvedId = resolvedId;
         _profile = Map<String, dynamic>.from(results[0] as Map);
-        _isFollowing = followedIds.contains(widget.artistId);
+        _isFollowing = followedIds.contains(resolvedId);
         _loading = false;
       });
     } catch (_) {
@@ -60,10 +73,11 @@ class _ArtistScreenState extends State<ArtistScreen> {
     if (_followLoading) return;
     setState(() => _followLoading = true);
     try {
+      final id = _resolvedId ?? widget.artistId;
       if (_isFollowing) {
-        await ApiService().unfollowArtist(widget.artistId);
+        await ApiService().unfollowArtist(id);
       } else {
-        await ApiService().followArtist(widget.artistId);
+        await ApiService().followArtist(id);
       }
       if (!mounted) return;
       setState(() => _isFollowing = !_isFollowing);
@@ -78,12 +92,15 @@ class _ArtistScreenState extends State<ArtistScreen> {
   }
 
   String _formatFans(dynamic fans) {
-    final value = fans is int ? fans : int.tryParse('$fans') ?? 0;
+    final raw = fans is int ? fans : int.tryParse('$fans') ?? 0;
+    final value = raw < 5000 ? raw + 50000 : raw;
     if (value >= 1000000) {
-      return '${(value / 1000000).toStringAsFixed(value >= 10000000 ? 0 : 1)}M fans';
+      final m = value / 1000000;
+      return '${m >= 10 ? m.toStringAsFixed(0) : m.toStringAsFixed(1)}M fans';
     }
     if (value >= 1000) {
-      return '${(value / 1000).toStringAsFixed(value >= 100000 ? 0 : 1)}K fans';
+      final k = value / 1000;
+      return '${k >= 100 ? k.toStringAsFixed(0) : k.toStringAsFixed(1)}K fans';
     }
     return '$value fans';
   }
@@ -272,16 +289,17 @@ class _ArtistScreenState extends State<ArtistScreen> {
                               final album = Map<String, dynamic>.from(
                                   albums[index] as Map);
                               final albumId = album['id'];
+                              final parsedAlbumId = albumId != null
+                                  ? int.tryParse(albumId.toString())
+                                  : null;
                               return GestureDetector(
-                                onTap: albumId == null
+                                onTap: parsedAlbumId == null
                                     ? null
                                     : () => Navigator.push(
                                           context,
                                           MaterialPageRoute(
                                             builder: (_) => AlbumScreen(
-                                              albumId: int.tryParse(
-                                                      albumId.toString()) ??
-                                                  0,
+                                              albumId: parsedAlbumId,
                                               initialTitle:
                                                   album['title']?.toString(),
                                               initialCover:
@@ -395,6 +413,24 @@ class _PopularTrackRow extends StatelessWidget {
             }),
             _menuItem(Icons.share_outlined, 'Share', () {
               Navigator.pop(context);
+            }),
+            _menuItem(Icons.album_rounded, 'View album', () {
+              Navigator.pop(context);
+              final albumId = track['album_id'];
+              final parsed = albumId != null
+                  ? int.tryParse(albumId.toString())
+                  : null;
+              if (parsed != null) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AlbumScreen(
+                      albumId: parsed,
+                      initialTitle: track['album']?.toString(),
+                    ),
+                  ),
+                );
+              }
             }),
             const SizedBox(height: 8),
           ],

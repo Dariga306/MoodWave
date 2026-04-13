@@ -215,7 +215,9 @@ class _FriendRequestCardState extends State<_FriendRequestCard> {
   String? _result; // 'accepted' | 'declined'
 
   Future<void> _accept() async {
-    final userId = widget.notif['user_id'] as int;
+    final raw = widget.notif['user_id'];
+    final userId = raw is int ? raw : int.tryParse(raw.toString()) ?? 0;
+    if (userId == 0) return;
     setState(() => _loading = true);
     try {
       await ApiService().acceptFriendRequest(userId);
@@ -234,7 +236,9 @@ class _FriendRequestCardState extends State<_FriendRequestCard> {
   }
 
   Future<void> _decline() async {
-    final userId = widget.notif['user_id'] as int;
+    final raw = widget.notif['user_id'];
+    final userId = raw is int ? raw : int.tryParse(raw.toString()) ?? 0;
+    if (userId == 0) return;
     setState(() => _loading = true);
     try {
       await ApiService().declineFriendRequest(userId);

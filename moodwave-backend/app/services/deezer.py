@@ -1,8 +1,66 @@
 from __future__ import annotations
 
+import re
+from difflib import SequenceMatcher
+
 import httpx
 
 BASE_URL = "https://api.deezer.com"
+
+GENRE_TERMS: dict[str, str] = {
+    "pop": "pop",
+    "rock": "rock",
+    "hip-hop": "hip hop",
+    "hip hop": "hip hop",
+    "electronic": "electronic",
+    "jazz": "jazz",
+    "classical": "classical",
+    "rnb": "r&b",
+    "r&b": "r&b",
+    "indie": "indie",
+    "metal": "metal",
+    "country": "country",
+    "latin": "latin",
+    "dance": "dance",
+    "soul": "soul",
+    "indie rock": "indie rock",
+    "k-pop": "k-pop",
+    "ambient": "ambient",
+    "lo-fi": "lofi",
+    "punk": "punk",
+    "reggae": "reggae",
+    "blues": "blues",
+    "folk": "folk",
+    "funk": "funk",
+}
+
+MOOD_TERMS: dict[str, str] = {
+    "happy": "happy upbeat",
+    "sad": "sad emotional",
+    "energetic": "energetic workout",
+    "calm": "calm relaxing",
+    "angry": "aggressive rock",
+    "romantic": "romantic love",
+    "melancholic": "melancholic",
+    "sunny": "sunny summer",
+    "rainy": "rainy day",
+    "stormy": "dark intense",
+    "cloudy": "indie chill",
+    "foggy": "ambient atmospheric",
+    "neutral": "top hits",
+    "study": "focus study",
+    "late_night": "late night chill",
+    "workout": "workout energy",
+    "sleep": "sleep ambient",
+    "driving": "driving road trip",
+    "party": "party dance",
+    "morning": "morning coffee",
+}
+
+try:
+    from thefuzz import fuzz as _fuzz
+except Exception:  # pragma: no cover - optional dependency
+    _fuzz = None
 
 
 async def _get_json(path: str, params: dict | None = None) -> dict:
@@ -31,6 +89,32 @@ def _map_track(item: dict, rank: int) -> dict:
     }
 
 
+def _normalize_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _score_similarity(left: str, right: str) -> int:
+    if not left or not right:
+        return 0
+    if _fuzz is not None:
+        return int(_fuzz.token_set_ratio(left, right))
+    return int(SequenceMatcher(None, left, right).ratio() * 100)
+
+
+def _score_artist_name(candidate_name: str, query: str) -> int:
+    normalized_name = _normalize_text(candidate_name)
+    normalized_query = _normalize_text(query)
+    if not normalized_name or not normalized_query:
+        return 0
+    if normalized_name == normalized_query:
+        return 200
+    if normalized_name.startswith(normalized_query):
+        return 170
+    if normalized_query in normalized_name:
+        return 140
+    return _score_similarity(normalized_name, normalized_query)
+
+
 async def get_artist(deezer_artist_id: int) -> dict | None:
     data = await _get_json(f"/artist/{deezer_artist_id}")
     if not data or data.get("error"):
@@ -45,17 +129,41 @@ async def get_artist(deezer_artist_id: int) -> dict | None:
 
 
 async def search_artist(query: str) -> dict | None:
-    data = await _get_json("/search/artist", params={"q": query, "limit": 1})
-    items = data.get("data") or []
-    if not items:
+    queries = [
+        query,
+        f'artist:"{query}"',
+    ]
+    seen_ids: set[int] = set()
+    candidates: list[dict] = []
+
+    for current_query in queries:
+        try:
+            data = await _get_json("/search/artist", params={"q": current_query, "limit": 10})
+        except Exception:
+            continue
+        for artist in data.get("data") or []:
+            artist_id = artist.get("id")
+            if not artist_id or artist_id in seen_ids:
+                continue
+            seen_ids.add(artist_id)
+            candidates.append(artist)
+
+    if not candidates:
         return None
-    artist = items[0]
+
+    best = max(
+        candidates,
+        key=lambda artist: (
+            _score_artist_name(artist.get("name", ""), query),
+            int(artist.get("nb_fan", 0) or 0),
+        ),
+    )
     return {
-        "id": artist.get("id"),
-        "name": artist.get("name"),
-        "picture_xl": artist.get("picture_xl"),
-        "nb_fan": artist.get("nb_fan", 0),
-        "nb_album": artist.get("nb_album", 0),
+        "id": best.get("id"),
+        "name": best.get("name"),
+        "picture_xl": best.get("picture_xl"),
+        "nb_fan": best.get("nb_fan", 0),
+        "nb_album": best.get("nb_album", 0),
     }
 
 
@@ -88,16 +196,142 @@ async def get_album_detail(album_id: int) -> dict:
         return {}
     tracks_data = (data.get("tracks") or {}).get("data") or []
     artist = data.get("artist") or {}
+    album_cover = data.get("cover_xl") or data.get("cover_big") or data.get("cover_medium")
+    artist_name = artist.get("name", "")
+
+    tracks = []
+    for i, t in enumerate(tracks_data):
+        track = _map_track(t, i + 1)
+        # Tracks from the album endpoint lack album/cover context — fill it in
+        if not track.get("cover_url"):
+            track["cover_url"] = album_cover
+        if not track.get("artist"):
+            track["artist"] = artist_name
+        tracks.append(track)
+
     return {
         "id": data.get("id"),
         "title": data.get("title", ""),
-        "cover_xl": data.get("cover_xl") or data.get("cover_big") or data.get("cover_medium"),
-        "artist": artist.get("name", ""),
+        "cover_xl": album_cover,
+        "artist": artist_name,
         "artist_id": artist.get("id"),
         "release_date": data.get("release_date", ""),
         "nb_tracks": data.get("nb_tracks", 0),
-        "tracks": [_map_track(t, i + 1) for i, t in enumerate(tracks_data)],
+        "tracks": tracks,
     }
+
+
+async def get_album_tracks(deezer_album_id: int) -> list[dict]:
+    data = await _get_json(f"/album/{deezer_album_id}/tracks")
+    items = data.get("data") or []
+    return [_map_track(item, index + 1) for index, item in enumerate(items)]
+
+
+async def search_tracks(query: str, limit: int = 20) -> list[dict]:
+    """Search tracks on Deezer. Handles multilingual queries natively."""
+    try:
+        data = await _get_json("/search", params={"q": query, "limit": min(limit, 50)})
+        items = data.get("data") or []
+        return [_map_track(item, i + 1) for i, item in enumerate(items[:limit])]
+    except Exception:
+        return []
+
+
+async def get_chart_tracks(limit: int = 20) -> list[dict]:
+    try:
+        data = await _get_json("/chart/0/tracks", params={"limit": min(limit, 50)})
+        items = data.get("data") or []
+        return [_map_track(item, i + 1) for i, item in enumerate(items[:limit])]
+    except Exception:
+        return []
+
+
+async def get_genre_chart_tracks(genre: str, limit: int = 20) -> list[dict]:
+    term = GENRE_TERMS.get(genre.lower(), genre)
+    tracks = await search_tracks(term, limit)
+    if tracks:
+        return tracks
+    return await get_chart_tracks(limit)
+
+
+async def get_recommendation_tracks(
+    seed_genres: list[str],
+    mood_label: str | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    term = None
+    if mood_label:
+        term = MOOD_TERMS.get(mood_label.lower(), mood_label)
+    elif seed_genres:
+        first_genre = seed_genres[0].lower()
+        term = GENRE_TERMS.get(first_genre, seed_genres[0])
+
+    tracks = await search_tracks(term or "top hits", limit)
+    if tracks:
+        return tracks
+    return await get_chart_tracks(limit)
+
+
+async def search_artists_list(query: str, limit: int = 10) -> list[dict]:
+    """Search Deezer for multiple artist matches, scored and sorted by relevance."""
+    queries = [query, f'artist:"{query}"']
+    seen_ids: set[int] = set()
+    candidates: list[dict] = []
+
+    for current_query in queries:
+        try:
+            data = await _get_json(
+                "/search/artist",
+                params={"q": current_query, "limit": min(limit * 5, 50)},
+            )
+        except Exception:
+            continue
+        for artist in data.get("data") or []:
+            artist_id = artist.get("id")
+            if not artist_id or artist_id in seen_ids:
+                continue
+            seen_ids.add(artist_id)
+            candidates.append(artist)
+
+    candidates.sort(
+        key=lambda a: (
+            _score_artist_name(a.get("name", ""), query),
+            int(a.get("nb_fan", 0) or 0),
+        ),
+        reverse=True,
+    )
+
+    return [
+        {
+            "id": a.get("id"),
+            "name": a.get("name"),
+            "picture_xl": a.get("picture_xl"),
+            "picture_medium": a.get("picture_medium"),
+            "nb_fan": a.get("nb_fan", 0),
+            "nb_album": a.get("nb_album", 0),
+        }
+        for a in candidates[:limit]
+    ]
+
+
+async def search_albums(query: str, limit: int = 10) -> list[dict]:
+    """Search Deezer for albums matching the query."""
+    try:
+        data = await _get_json("/search/album", params={"q": query, "limit": min(limit, 50)})
+        return [
+            {
+                "id": a.get("id"),
+                "title": a.get("title"),
+                "cover_xl": a.get("cover_xl") or a.get("cover_big") or a.get("cover_medium"),
+                "artist": (a.get("artist") or {}).get("name", ""),
+                "artist_id": (a.get("artist") or {}).get("id"),
+                "release_date": a.get("release_date", ""),
+                "nb_tracks": a.get("nb_tracks", 0),
+            }
+            for a in (data.get("data") or [])[:limit]
+        ]
+    except Exception:
+        return []
 
 
 async def get_related_artists(deezer_artist_id: int, limit: int = 6) -> list[dict]:

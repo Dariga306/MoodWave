@@ -1,33 +1,31 @@
 """
-search_service.py — Search logic: iTunes API, user/playlist DB queries, Redis trending.
+search_service.py — Search logic: Deezer API, user/playlist DB queries, Redis trending.
 """
 from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
 
-import httpx
 from sqlalchemy import or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.music import Playlist, PlaylistVisibility
 from app.models.user import User
+from app.services import deezer as deezer_service
 
 logger = logging.getLogger(__name__)
 
-ITUNES_BASE_URL = "https://itunes.apple.com/search"
 TRACK_CACHE_TTL = 300   # 5 minutes
 TRENDING_TTL = 86400    # 24 hours
 TRENDING_KEY = "search:trending:daily"
 
 
 # ---------------------------------------------------------------------------
-# iTunes track search with Redis cache
+# Deezer track search with Redis cache
 # ---------------------------------------------------------------------------
 
-async def search_tracks_itunes(q: str, limit: int = 20, redis=None) -> list[dict]:
-    """Search iTunes API with Redis cache (key: search:tracks:{q}).
+async def search_tracks_deezer(q: str, limit: int = 20, redis=None) -> list[dict]:
+    """Search Deezer API with Redis cache (key: search:tracks:{q}).
     Returns [] on any error — never raises."""
     key = f"search:tracks:{q.lower().strip()}"
 
@@ -40,34 +38,7 @@ async def search_tracks_itunes(q: str, limit: int = 20, redis=None) -> list[dict
             pass
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                ITUNES_BASE_URL,
-                params={
-                    "term": q,
-                    "media": "music",
-                    "entity": "song",
-                    "limit": min(limit, 50),
-                    "country": "US",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        tracks = [
-            {
-                "track_id": str(item["trackId"]),
-                "title": item.get("trackName", ""),
-                "artist": item.get("artistName", ""),
-                "album": item.get("collectionName", ""),
-                "cover_url": item.get("artworkUrl100", "").replace("100x100", "300x300"),
-                "preview_url": item.get("previewUrl", ""),
-                "duration_ms": item.get("trackTimeMillis", 0),
-                "genre": item.get("primaryGenreName", ""),
-            }
-            for item in data.get("results", [])
-            if item.get("trackId")
-        ]
+        tracks = await deezer_service.search_tracks(q, limit)
 
         if redis and tracks:
             try:
@@ -78,7 +49,7 @@ async def search_tracks_itunes(q: str, limit: int = 20, redis=None) -> list[dict
         return tracks
 
     except Exception as exc:
-        logger.warning("iTunes search failed for '%s': %s", q, exc)
+        logger.warning("Deezer search failed for '%s': %s", q, exc)
         return []
 
 
