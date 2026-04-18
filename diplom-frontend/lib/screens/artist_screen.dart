@@ -48,18 +48,18 @@ class _ArtistScreenState extends State<ArtistScreen> {
         }
       }
 
-      final results = await Future.wait([
-        ApiService().getArtistProfile(resolvedId),
-        ApiService().getFollowedArtists(),
-      ]);
+      final profileResult = await ApiService().getArtistProfile(resolvedId);
+      List followedList = [];
+      try {
+        followedList = await ApiService().getFollowedArtists();
+      } catch (_) {}
       if (!mounted) return;
 
-      final followedIds =
-          (results[1] as List).map((item) => item.toString()).toSet();
+      final followedIds = followedList.map((item) => item.toString()).toSet();
 
       setState(() {
         _resolvedId = resolvedId;
-        _profile = Map<String, dynamic>.from(results[0] as Map);
+        _profile = Map<String, dynamic>.from(profileResult);
         _isFollowing = followedIds.contains(resolvedId);
         _loading = false;
       });
@@ -92,8 +92,7 @@ class _ArtistScreenState extends State<ArtistScreen> {
   }
 
   String _formatFans(dynamic fans) {
-    final raw = fans is int ? fans : int.tryParse('$fans') ?? 0;
-    final value = raw < 5000 ? raw + 50000 : raw;
+    final value = fans is int ? fans : int.tryParse('$fans') ?? 0;
     if (value >= 1000000) {
       final m = value / 1000000;
       return '${m >= 10 ? m.toStringAsFixed(0) : m.toStringAsFixed(1)}M fans';
@@ -267,7 +266,7 @@ class _ArtistScreenState extends State<ArtistScreen> {
                             ),
                           )
                         else
-                          ...tracks.asMap().entries.map((entry) {
+                          ...tracks.take(10).toList().asMap().entries.map((entry) {
                             final item = Map<String, dynamic>.from(
                                 entry.value as Map)
                               ..['queue'] = tracks;
@@ -356,16 +355,18 @@ class _ArtistScreenState extends State<ArtistScreen> {
                             padding: const EdgeInsets.symmetric(horizontal: 20),
                             child: GestureDetector(
                               onTap: () {
-                                final queue = tracks
-                                    .whereType<Map>()
-                                    .map((t) => Map<String, dynamic>.from(t))
-                                    .toList();
-                                final first = Map<String, dynamic>.from(queue.first)
-                                  ..['queue'] = queue;
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                      builder: (_) => PlayerScreen(track: first)),
+                                    builder: (_) => _ThisIsScreen(
+                                      artistName: artist['name']?.toString() ?? widget.artistName,
+                                      artistImageUrl: imageUrl,
+                                      tracks: tracks
+                                          .whereType<Map>()
+                                          .map((t) => Map<String, dynamic>.from(t))
+                                          .toList(),
+                                    ),
+                                  ),
                                 );
                               },
                               child: ClipRRect(
@@ -524,11 +525,39 @@ class _PopularTrackRow extends StatelessWidget {
   });
 
   void _showTrackMenu(BuildContext context, Map<String, dynamic> track) {
+    final artistId = track['artist_id']?.toString();
+    final artistName = track['artist']?.toString() ?? '';
+    final rawAlbumId = track['album_id'];
+    final albumId = rawAlbumId != null ? int.tryParse(rawAlbumId.toString()) : null;
+
     showTrackMenu(
       context,
       track,
       onPlayNow: () => Navigator.push(context,
           MaterialPageRoute(builder: (_) => PlayerScreen(track: track))),
+      onGoToArtist: artistId != null && artistName.isNotEmpty
+          ? () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ArtistScreen(
+                    artistId: artistId,
+                    artistName: artistName,
+                  ),
+                ),
+              )
+          : null,
+      onViewAlbum: albumId != null
+          ? () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => AlbumScreen(
+                    albumId: albumId,
+                    initialTitle: track['album']?.toString(),
+                    initialCover: track['cover_url']?.toString(),
+                  ),
+                ),
+              )
+          : null,
     );
   }
 
@@ -958,6 +987,325 @@ class _RelatedArtistCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── "This Is" full playlist screen ──────────────────────────────────────────
+
+class _ThisIsScreen extends StatelessWidget {
+  final String artistName;
+  final String? artistImageUrl;
+  final List<Map<String, dynamic>> tracks;
+
+  const _ThisIsScreen({
+    required this.artistName,
+    required this.artistImageUrl,
+    required this.tracks,
+  });
+
+  String _formatDuration(dynamic durationMs) {
+    final value =
+        durationMs is int ? durationMs : int.tryParse('$durationMs') ?? 0;
+    if (value <= 0) return '';
+    return '${value ~/ 60000}:${((value % 60000) ~/ 1000).toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final queue = tracks;
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: CustomScrollView(
+        slivers: [
+          // ── Header ──────────────────────────────────────────────────
+          SliverToBoxAdapter(
+            child: Stack(
+              children: [
+                // Background: artist photo
+                SizedBox(
+                  height: 260,
+                  width: double.infinity,
+                  child: artistImageUrl != null
+                      ? CachedNetworkImage(
+                          imageUrl: artistImageUrl!,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) =>
+                              Container(color: const Color(0xFF140B2A)),
+                          errorWidget: (_, __, ___) =>
+                              Container(color: const Color(0xFF140B2A)),
+                        )
+                      : Container(color: const Color(0xFF140B2A)),
+                ),
+                // Dark overlay
+                Container(
+                  height: 260,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x44000000), Color(0xFF08080F)],
+                      stops: [0.0, 1.0],
+                    ),
+                  ),
+                ),
+                // Back button + text
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 16, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const BackButton(color: Colors.white),
+                        const SizedBox(height: 80),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'THIS IS',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white54,
+                                  letterSpacing: 3,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                artistName,
+                                style: GoogleFonts.outfit(
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white,
+                                  height: 1.1,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '${tracks.length} songs',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 13,
+                                  color: Colors.white54,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Play All / Shuffle buttons ───────────────────────────────
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  GestureDetector(
+                    onTap: () {
+                      if (queue.isEmpty) return;
+                      final first = Map<String, dynamic>.from(queue.first)
+                        ..['queue'] = queue;
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => PlayerScreen(track: first)),
+                      );
+                    },
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF1DB954),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.play_arrow_rounded,
+                          color: Colors.white, size: 30),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Play all',
+                    style: GoogleFonts.outfit(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.text,
+                    ),
+                  ),
+                  const SizedBox(width: 20),
+                  GestureDetector(
+                    onTap: () {
+                      if (queue.isEmpty) return;
+                      final shuffled =
+                          List<Map<String, dynamic>>.from(queue)..shuffle();
+                      final first = Map<String, dynamic>.from(shuffled.first)
+                        ..['queue'] = shuffled;
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => PlayerScreen(track: first)),
+                      );
+                    },
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.08),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: const Icon(Icons.shuffle_rounded,
+                          color: Colors.white, size: 26),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Shuffle',
+                    style: GoogleFonts.outfit(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.text,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Track list ───────────────────────────────────────────────
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (ctx, i) {
+                final track = Map<String, dynamic>.from(queue[i])
+                  ..['queue'] = queue;
+                final title =
+                    track['title'] ?? track['trackName'] ?? 'Unknown';
+                final cover = track['cover_url'] ?? track['artworkUrl100'];
+                final dur = _formatDuration(track['duration_ms']);
+                final rawAlbumId = track['album_id'];
+                final albumId = rawAlbumId != null
+                    ? int.tryParse(rawAlbumId.toString())
+                    : null;
+
+                return InkWell(
+                  onTap: () => Navigator.push(
+                    ctx,
+                    MaterialPageRoute(
+                        builder: (_) => PlayerScreen(track: track)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 10),
+                    child: Row(children: [
+                      // Rank
+                      SizedBox(
+                        width: 26,
+                        child: Text(
+                          '${i + 1}',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.outfit(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.text3),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // Cover
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: cover != null
+                            ? CachedNetworkImage(
+                                imageUrl: cover.toString(),
+                                width: 44,
+                                height: 44,
+                                fit: BoxFit.cover,
+                                placeholder: (_, __) =>
+                                    const SizedBox(width: 44, height: 44),
+                                errorWidget: (_, __, ___) => Container(
+                                    width: 44,
+                                    height: 44,
+                                    color: AppColors.surface,
+                                    child: const Icon(Icons.music_note,
+                                        color: AppColors.text3)),
+                              )
+                            : Container(
+                                width: 44,
+                                height: 44,
+                                color: AppColors.surface,
+                                child: const Icon(Icons.music_note,
+                                    color: AppColors.text3)),
+                      ),
+                      const SizedBox(width: 12),
+                      // Title + artist
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title.toString(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.outfit(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.text),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Duration
+                      if (dur.isNotEmpty)
+                        Text(dur,
+                            style: GoogleFonts.outfit(
+                                fontSize: 12, color: AppColors.text3)),
+                      // 3-dot menu
+                      GestureDetector(
+                        onTap: () => showTrackMenu(
+                          ctx,
+                          track,
+                          onPlayNow: () => Navigator.push(
+                            ctx,
+                            MaterialPageRoute(
+                                builder: (_) => PlayerScreen(track: track)),
+                          ),
+                          onViewAlbum: albumId != null
+                              ? () => Navigator.push(
+                                    ctx,
+                                    MaterialPageRoute(
+                                      builder: (_) => AlbumScreen(
+                                        albumId: albumId,
+                                        initialTitle:
+                                            track['album']?.toString(),
+                                        initialCover:
+                                            track['cover_url']?.toString(),
+                                      ),
+                                    ),
+                                  )
+                              : null,
+                        ),
+                        child: const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Icon(Icons.more_vert_rounded,
+                              color: AppColors.text3, size: 18),
+                        ),
+                      ),
+                    ]),
+                  ),
+                );
+              },
+              childCount: queue.length,
+            ),
+          ),
+
+          const SliverToBoxAdapter(child: SizedBox(height: 32)),
+        ],
       ),
     );
   }

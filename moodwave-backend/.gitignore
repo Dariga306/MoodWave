@@ -9,7 +9,7 @@ build/
 .venv/
 venv/
 
-# Secrets — NEVER commit these
+# Secrets
 moodwave-backend/.env
 moodwave-backend/firebase-credentials.json
 moodwave-backend/.env.local
@@ -19,7 +19,7 @@ diplom-frontend/.dart_tool/
 diplom-frontend/build/
 diplom-frontend/.flutter-plugins
 diplom-frontend/.flutter-plugins-dependencies
-diplom-frontend/pubspec.lock
+diplom-frontend/pubspec.lockд
 
 # IDE
 .idea/

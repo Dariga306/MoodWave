@@ -77,6 +77,7 @@ def _map_track(item: dict, rank: int) -> dict:
         "spotify_id": str(item.get("id", "")),
         "deezer_id": str(item.get("id", "")),
         "artist_id": artist.get("id"),
+        "album_id": album.get("id"),
         "title": item.get("title", ""),
         "artist": artist.get("name", ""),
         "album": album.get("title"),

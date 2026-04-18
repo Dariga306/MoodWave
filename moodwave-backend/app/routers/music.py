@@ -945,12 +945,34 @@ async def get_artist_profile(
 ):
     artist, top_tracks, albums, related_artists = await asyncio.gather(
         deezer_service.get_artist(deezer_id),
-        deezer_service.get_artist_top_tracks(deezer_id),
+        deezer_service.get_artist_top_tracks(deezer_id, limit=50),
         deezer_service.get_artist_albums(deezer_id, limit=50),
         deezer_service.get_related_artists(deezer_id),
     )
     if not artist:
         raise HTTPException(status_code=404, detail="Artist not found")
+
+    # Fallback when the /top endpoint returns nothing (common for K-pop solo artists, etc.)
+    if not top_tracks:
+        fallback: list[dict] = []
+        if albums:
+            album_ids = [int(a["id"]) for a in albums[:4] if a.get("id")]
+            if album_ids:
+                album_results = await asyncio.gather(
+                    *[deezer_service.get_album_detail(aid) for aid in album_ids],
+                    return_exceptions=True,
+                )
+                seen: set[str] = set()
+                for res in album_results:
+                    if isinstance(res, dict):
+                        for t in res.get("tracks") or []:
+                            tid = str(t.get("spotify_id") or t.get("deezer_id") or "")
+                            if tid and tid not in seen:
+                                seen.add(tid)
+                                fallback.append(t)
+        if not fallback:
+            fallback = await deezer_service.search_tracks(artist["name"], limit=50)
+        top_tracks = fallback[:50]
 
     return {
         "artist": artist,

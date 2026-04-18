@@ -22,6 +22,7 @@ class LyricsScreen extends StatefulWidget {
   final Duration currentPosition;
   final List<int> syncedLineTimesMs;
   final void Function(Duration)? onSeek;
+  final Stream<Duration>? positionStream;
 
   const LyricsScreen({
     super.key,
@@ -31,6 +32,7 @@ class LyricsScreen extends StatefulWidget {
     required this.currentPosition,
     this.syncedLineTimesMs = const [],
     this.onSeek,
+    this.positionStream,
   });
 
   @override
@@ -41,6 +43,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
   final ScrollController _scrollController = ScrollController();
 
   Timer? _timer;
+  StreamSubscription<Duration>? _positionSub;
   List<String> _lyricsLines = [];
   List<SyncedLine> _syncedLines = [];
   bool _loading = true;
@@ -54,6 +57,13 @@ class _LyricsScreenState extends State<LyricsScreen> {
     _basePositionMs = widget.currentPosition.inMilliseconds;
     _openedAt = DateTime.now();
     _seedInitialLyrics();
+    // Keep lyrics in sync with actual playback position
+    if (widget.positionStream != null) {
+      _positionSub = widget.positionStream!.listen((pos) {
+        _basePositionMs = pos.inMilliseconds;
+        _openedAt = DateTime.now();
+      });
+    }
   }
 
   @override
@@ -68,6 +78,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _positionSub?.cancel();
     _scrollController.dispose();
     super.dispose();
   }

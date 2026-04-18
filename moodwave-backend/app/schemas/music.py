@@ -14,6 +14,7 @@ class TrackResponse(BaseModel):
     cover_url: Optional[str] = None
     preview_url: Optional[str] = None
     duration_ms: Optional[int] = None
+    artist_id: Optional[int] = None
 
 
 class HistoryRequest(BaseModel):

@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 
@@ -403,112 +404,168 @@ Future<void> _showAddToPlaylistDialog(
   );
 }
 
-/// [onPlayNow] – required, called when "Play now" is tapped.
-/// [onGoToArtist] – called when "Go to artist" is tapped; hidden if null.
-/// [onAddToPlaylist] – called when "Add to playlist" is tapped; hidden if null.
-/// [onDontPlay] – called when "Don't play this" is tapped; hidden if null.
 void showTrackMenu(
   BuildContext context,
   Map<String, dynamic> track, {
   required VoidCallback onPlayNow,
   VoidCallback? onGoToArtist,
-  VoidCallback? onAddToPlaylist, // kept for backward-compat, now handled internally
+  VoidCallback? onViewAlbum,
+  VoidCallback? onAddToPlaylist,
   VoidCallback? onDontPlay,
 }) {
   final title = track['title']?.toString() ?? 'Track';
   final artist = track['artist']?.toString() ?? '';
+  final previewUrl = track['preview_url']?.toString();
+  bool liked = false;
 
   showModalBottomSheet(
     context: context,
     backgroundColor: const Color(0xFF1a1a2e),
     shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-    builder: (ctx) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 8),
-          Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-                color: Colors.white24,
-                borderRadius: BorderRadius.circular(100)),
-          ),
-          const SizedBox(height: 14),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: GoogleFonts.outfit(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-                if (artist.isNotEmpty)
-                  Text(artist,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setS) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(100)),
+            ),
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
                       style: GoogleFonts.outfit(
-                          fontSize: 12, color: AppColors.text3),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
-              ],
+                  if (artist.isNotEmpty)
+                    Text(artist,
+                        style: GoogleFonts.outfit(
+                            fontSize: 12, color: AppColors.text3),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 10),
-          const Divider(color: Colors.white10, height: 1),
-          _TrackMenuItem(
-            icon: Icons.play_circle_outline_rounded,
-            label: 'Play now',
-            onTap: () {
-              Navigator.pop(ctx);
-              onPlayNow();
-            },
-          ),
-          _TrackMenuItem(
-            icon: Icons.playlist_add_rounded,
-            label: 'Add to playlist',
-            onTap: () {
-              Navigator.pop(ctx);
-              _showAddToPlaylistDialog(context, track);
-            },
-          ),
-          if (onGoToArtist != null && artist.isNotEmpty)
+            const SizedBox(height: 10),
+            const Divider(color: Colors.white10, height: 1),
             _TrackMenuItem(
-              icon: Icons.person_rounded,
-              label: 'Go to artist',
+              icon: Icons.play_circle_outline_rounded,
+              label: 'Play now',
               onTap: () {
                 Navigator.pop(ctx);
-                onGoToArtist();
+                onPlayNow();
               },
             ),
-          _TrackMenuItem(
-            icon: Icons.share_outlined,
-            label: 'Share',
-            onTap: () {
-              Navigator.pop(ctx);
-              Clipboard.setData(ClipboardData(text: '$title — $artist'));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text('Copied to clipboard'),
-                    duration: Duration(seconds: 2)),
-              );
-            },
-          ),
-          if (onDontPlay != null)
+            // Like / Save
+            ListTile(
+              leading: Icon(
+                liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                color: liked ? Colors.pinkAccent : Colors.white70,
+                size: 22,
+              ),
+              title: Text(
+                liked ? 'Saved to Liked Songs' : 'Save to Liked Songs',
+                style: GoogleFonts.outfit(
+                    fontSize: 15,
+                    color: liked ? Colors.pinkAccent : Colors.white),
+              ),
+              onTap: () {
+                final id = track['spotify_id']?.toString() ?? '';
+                if (id.isEmpty) return;
+                ApiService()
+                    .likeTrack(id, title: title, artist: artist)
+                    .then((_) => setS(() => liked = !liked))
+                    .catchError((_) {});
+              },
+            ),
             _TrackMenuItem(
-              icon: Icons.do_not_disturb_alt_outlined,
-              label: "Don't play this",
+              icon: Icons.queue_music_rounded,
+              label: 'Add to queue',
               onTap: () {
                 Navigator.pop(ctx);
-                onDontPlay();
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('Added to queue',
+                      style: GoogleFonts.outfit(color: Colors.white)),
+                  backgroundColor: AppColors.purpleDark,
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 2),
+                ));
               },
-              color: Colors.redAccent.withOpacity(0.85),
             ),
-          const SizedBox(height: 8),
-        ],
+            _TrackMenuItem(
+              icon: Icons.playlist_add_rounded,
+              label: 'Add to playlist',
+              onTap: () {
+                Navigator.pop(ctx);
+                _showAddToPlaylistDialog(context, track);
+              },
+            ),
+            if (onGoToArtist != null && artist.isNotEmpty)
+              _TrackMenuItem(
+                icon: Icons.person_rounded,
+                label: 'Go to artist',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onGoToArtist();
+                },
+              ),
+            if (onViewAlbum != null)
+              _TrackMenuItem(
+                icon: Icons.album_rounded,
+                label: 'View album',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onViewAlbum();
+                },
+              ),
+            if (previewUrl != null && previewUrl.isNotEmpty)
+              _TrackMenuItem(
+                icon: Icons.download_outlined,
+                label: 'Download preview',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  launchUrl(Uri.parse(previewUrl),
+                      mode: LaunchMode.externalApplication);
+                },
+              ),
+            _TrackMenuItem(
+              icon: Icons.share_outlined,
+              label: 'Share',
+              onTap: () {
+                Navigator.pop(ctx);
+                Clipboard.setData(ClipboardData(text: '$title — $artist'));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text('Copied to clipboard'),
+                      duration: Duration(seconds: 2)),
+                );
+              },
+            ),
+            if (onDontPlay != null)
+              _TrackMenuItem(
+                icon: Icons.do_not_disturb_alt_outlined,
+                label: "Don't play this",
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onDontPlay();
+                },
+                color: Colors.redAccent.withOpacity(0.85),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     ),
   );

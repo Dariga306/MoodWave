@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -392,7 +393,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (videoId != null && videoId.isNotEmpty) {
         final controller = yt.YoutubePlayerController.fromVideoId(
           videoId: videoId,
-          autoPlay: true,
+          autoPlay: false,
           params: const yt.YoutubePlayerParams(
             showControls: false,
             showFullscreenButton: false,
@@ -753,6 +754,13 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   void _openLyricsScreen() {
+    final posStream = _usingYoutube && _ytController != null
+        ? _ytController!.getCurrentPositionStream(
+            period: const Duration(milliseconds: 300))
+        : _audioReady
+            ? _player.positionStream
+            : null;
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -762,6 +770,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           lyricsLines: _lyricsLines,
           currentPosition: _position,
           syncedLineTimesMs: _lyricsTimesMs,
+          positionStream: posStream,
           onSeek: (Duration pos) {
             if (_ytReady && _ytController != null) {
               _ytController!.seekTo(
@@ -820,6 +829,16 @@ class _PlayerScreenState extends State<PlayerScreen>
                 child: _orb(300, AppColors.blue.withOpacity(0.15)),
               ),
             ),
+            // YouTube iframe positioned off-screen so it's in the DOM
+            // (required for JS bridge) but never visible to the user.
+            if (kIsWeb && _ytController != null)
+              Positioned(
+                left: -500,
+                top: -500,
+                width: 320,
+                height: 180,
+                child: yt.YoutubePlayer(controller: _ytController!),
+              ),
             SafeArea(
               child: SingleChildScrollView(
                 child: Padding(
@@ -855,7 +874,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ),
                       const SizedBox(height: 10),
                       _titleRow(),
-                      if (_ytController != null)
+                      // Native platforms: hide YouTube player as 1×1
+                      if (!kIsWeb && _ytController != null)
                         SizedBox(
                           height: 1,
                           width: 1,
