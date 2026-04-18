@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/common_widgets.dart';
+import '../extra_screens.dart';
 
 class FriendsTab extends StatefulWidget {
   const FriendsTab({super.key});
@@ -103,7 +104,9 @@ class _FriendsTabState extends State<FriendsTab> {
                 // Recently listened
                 if (_recent.isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  SectionHeader(title: 'Recently Listened', action: 'All →', onAction: () {}),
+                  SectionHeader(title: 'Recently Listened', action: 'All →',
+                      onAction: () => Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const RecentHistoryScreen()))),
                   const SizedBox(height: 8),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),

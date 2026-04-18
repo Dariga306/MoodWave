@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
@@ -60,6 +64,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   bool _saving = false;
   bool _showAvatarPicker = false;
   bool _showBannerPicker = false;
+  Uint8List? _avatarBytes;
+  Uint8List? _bannerBytes;
 
   @override
   void initState() {
@@ -75,6 +81,192 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _isPublic = widget.user['is_public'] ?? true;
     _showActivity = widget.user['show_activity'] ?? true;
     _gender = widget.user['gender'];
+  }
+
+  Future<void> _pickAvatarImage() async {
+    final picker = ImagePicker();
+    final XFile? image = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 400,
+      maxHeight: 400,
+      imageQuality: 85,
+    );
+    if (image == null) return;
+    final bytes = await image.readAsBytes();
+    if (!mounted) return;
+    setState(() {
+      _avatarBytes = bytes;
+      _showAvatarPicker = false;
+    });
+  }
+
+  Future<void> _pickBannerImage() async {
+    final picker = ImagePicker();
+    final XFile? image = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1200,
+      maxHeight: 400,
+      imageQuality: 85,
+    );
+    if (image == null) return;
+    final bytes = await image.readAsBytes();
+    if (!mounted) return;
+    setState(() {
+      _bannerBytes = bytes;
+      _showBannerPicker = false;
+    });
+  }
+
+  void _showAvatarOptions() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(width: 36, height: 4,
+                decoration: BoxDecoration(color: Colors.white24,
+                    borderRadius: BorderRadius.circular(100))),
+            const SizedBox(height: 14),
+            Text('Change Avatar', style: GoogleFonts.outfit(
+                fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text)),
+            const SizedBox(height: 10),
+            const Divider(color: Colors.white10, height: 1),
+            ListTile(
+              leading: Container(width: 36, height: 36,
+                decoration: BoxDecoration(
+                    color: AppColors.purple.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.photo_library_rounded,
+                    size: 18, color: AppColors.purpleLight)),
+              title: Text('Choose from Gallery', style: GoogleFonts.outfit(
+                  fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
+              subtitle: Text('Use your own photo', style: GoogleFonts.outfit(
+                  fontSize: 11, color: AppColors.text3)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickAvatarImage();
+              },
+            ),
+            ListTile(
+              leading: Container(width: 36, height: 36,
+                decoration: BoxDecoration(
+                    color: AppColors.blue.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.palette_rounded,
+                    size: 18, color: AppColors.blue)),
+              title: Text('Choose Color Preset', style: GoogleFonts.outfit(
+                  fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
+              subtitle: Text('Pick a gradient color', style: GoogleFonts.outfit(
+                  fontSize: 11, color: AppColors.text3)),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() {
+                  _showAvatarPicker = true;
+                  _showBannerPicker = false;
+                });
+              },
+            ),
+            if (_avatarBytes != null)
+              ListTile(
+                leading: Container(width: 36, height: 36,
+                  decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.delete_outline_rounded,
+                      size: 18, color: Colors.redAccent)),
+                title: Text('Remove Photo', style: GoogleFonts.outfit(
+                    fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  if (mounted) setState(() => _avatarBytes = null);
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showBannerOptions() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(width: 36, height: 4,
+                decoration: BoxDecoration(color: Colors.white24,
+                    borderRadius: BorderRadius.circular(100))),
+            const SizedBox(height: 14),
+            Text('Change Banner', style: GoogleFonts.outfit(
+                fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text)),
+            const SizedBox(height: 10),
+            const Divider(color: Colors.white10, height: 1),
+            ListTile(
+              leading: Container(width: 36, height: 36,
+                decoration: BoxDecoration(
+                    color: AppColors.purple.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.photo_library_rounded,
+                    size: 18, color: AppColors.purpleLight)),
+              title: Text('Choose from Gallery', style: GoogleFonts.outfit(
+                  fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
+              subtitle: Text('Use your own photo', style: GoogleFonts.outfit(
+                  fontSize: 11, color: AppColors.text3)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickBannerImage();
+              },
+            ),
+            ListTile(
+              leading: Container(width: 36, height: 36,
+                decoration: BoxDecoration(
+                    color: AppColors.blue.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.palette_rounded,
+                    size: 18, color: AppColors.blue)),
+              title: Text('Choose Color Preset', style: GoogleFonts.outfit(
+                  fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
+              subtitle: Text('Pick a gradient color', style: GoogleFonts.outfit(
+                  fontSize: 11, color: AppColors.text3)),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() {
+                  _showBannerPicker = true;
+                  _showAvatarPicker = false;
+                });
+              },
+            ),
+            if (_bannerBytes != null)
+              ListTile(
+                leading: Container(width: 36, height: 36,
+                  decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.delete_outline_rounded,
+                      size: 18, color: Colors.redAccent)),
+                title: Text('Remove Photo', style: GoogleFonts.outfit(
+                    fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  if (mounted) setState(() => _bannerBytes = null);
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -106,9 +298,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'show_activity': _showActivity,
         if (_gender != null) 'gender': _gender,
       };
-      await ApiService().updateMe(updates);
+      final updatedUser = await ApiService().updateMe(
+        updates,
+        avatarBytes: _avatarBytes,
+        bannerBytes: _bannerBytes,
+      );
       if (!mounted) return;
-      context.read<AuthProvider>().updateUser(updates);
+      context.read<AuthProvider>().updateUser(updatedUser);
       showSuccessSnackBar(context, 'Profile updated successfully!');
       Navigator.of(context).pop(true);
     } on DioException catch (e) {
@@ -125,6 +321,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             ? _firstNameCtrl.text
             : widget.user['display_name'] ?? 'U')[0]
         .toUpperCase();
+    final avatarUrl = widget.user['avatar_url'] as String? ?? '';
+    final bannerUrl = widget.user['banner_url'] as String? ?? '';
     final bannerColors = _bannerGradients[_bannerPreset];
     final avatarColors = _avatarGradients[_avatarPreset];
 
@@ -136,10 +334,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             children: [
               // Banner + avatar area
               GestureDetector(
-                onTap: () => setState(() {
-                  _showBannerPicker = !_showBannerPicker;
-                  _showAvatarPicker = false;
-                }),
+                onTap: _showBannerOptions,
                 child: Container(
                   height: 130,
                   decoration: BoxDecoration(
@@ -148,7 +343,23 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         end: Alignment.bottomRight,
                         colors: bannerColors),
                   ),
-                  child: Stack(children: [
+                  child: Stack(clipBehavior: Clip.none, children: [
+                    if (_bannerBytes != null)
+                      Positioned.fill(
+                        child: Image.memory(
+                          _bannerBytes!,
+                          fit: BoxFit.cover,
+                        ),
+                      )
+                    else if (bannerUrl.isNotEmpty)
+                      Positioned.fill(
+                        child: CachedNetworkImage(
+                          imageUrl: bannerUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => const SizedBox(),
+                          errorWidget: (_, __, ___) => const SizedBox(),
+                        ),
+                      ),
                     // Header row
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
@@ -206,10 +417,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       bottom: -40,
                       left: 20,
                       child: GestureDetector(
-                        onTap: () => setState(() {
-                          _showAvatarPicker = !_showAvatarPicker;
-                          _showBannerPicker = false;
-                        }),
+                        onTap: _showAvatarOptions,
                         child: Stack(children: [
                           Container(
                             width: 80, height: 80,
@@ -221,12 +429,37 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               shape: BoxShape.circle,
                               border: Border.all(color: const Color(0xFF08080f), width: 3),
                             ),
-                            child: Center(
-                              child: Text(initial,
-                                  style: GoogleFonts.outfit(
-                                      fontSize: 30, fontWeight: FontWeight.w800,
-                                      color: Colors.white)),
-                            ),
+                            child: _avatarBytes != null
+                                ? ClipOval(
+                                    child: Image.memory(
+                                      _avatarBytes!,
+                                      fit: BoxFit.cover,
+                                      width: 80,
+                                      height: 80,
+                                    ),
+                                  )
+                                : avatarUrl.isNotEmpty
+                                    ? ClipOval(
+                                        child: CachedNetworkImage(
+                                          imageUrl: avatarUrl,
+                                          width: 80,
+                                          height: 80,
+                                          fit: BoxFit.cover,
+                                          placeholder: (_, __) => const SizedBox(),
+                                          errorWidget: (_, __, ___) => Center(
+                                            child: Text(initial,
+                                                style: GoogleFonts.outfit(
+                                                    fontSize: 30, fontWeight: FontWeight.w800,
+                                                    color: Colors.white)),
+                                          ),
+                                        ),
+                                      )
+                                    : Center(
+                                        child: Text(initial,
+                                            style: GoogleFonts.outfit(
+                                                fontSize: 30, fontWeight: FontWeight.w800,
+                                                color: Colors.white)),
+                                      ),
                           ),
                           Positioned(
                             bottom: 0, right: 0,
@@ -289,7 +522,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ]),
                 ),
 
-              const SizedBox(height: 52),
+              const SizedBox(height: 48),
 
               // Avatar picker
               if (_showAvatarPicker)
@@ -341,7 +574,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
                 child: Column(children: [
                   const SizedBox(height: 8),
-                  Text('Tap avatar or banner to change',
+                  Text('Tap avatar or banner to change · Gallery or preset',
                       style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
                   const SizedBox(height: 20),
 

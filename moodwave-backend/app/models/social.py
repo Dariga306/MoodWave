@@ -76,3 +76,14 @@ class ArtistFollow(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     deezer_artist_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class UserFollow(Base):
+    """User → User follow relationship (subscribers/subscriptions)."""
+    __tablename__ = "user_follows"
+    __table_args__ = (UniqueConstraint("follower_id", "following_id", name="uq_user_follows"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    follower_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    following_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

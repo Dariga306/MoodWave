@@ -83,7 +83,7 @@ def _map_track(item: dict, rank: int) -> dict:
         "cover_url": album.get("cover_xl")
         or album.get("cover_big")
         or album.get("cover_medium"),
-        "preview_url": item.get("preview"),
+        "preview_url": item.get("preview") or None,
         "duration_ms": int(item.get("duration", 0) or 0) * 1000,
         "rank": rank,
     }
@@ -173,8 +173,8 @@ async def get_artist_top_tracks(deezer_artist_id: int, limit: int = 10) -> list[
     return [_map_track(item, index + 1) for index, item in enumerate(items[:limit])]
 
 
-async def get_artist_albums(deezer_artist_id: int, limit: int = 8) -> list[dict]:
-    data = await _get_json(f"/artist/{deezer_artist_id}/albums", params={"limit": limit})
+async def get_artist_albums(deezer_artist_id: int, limit: int = 50) -> list[dict]:
+    data = await _get_json(f"/artist/{deezer_artist_id}/albums", params={"limit": min(limit, 100)})
     items = data.get("data") or []
     return [
         {
@@ -185,8 +185,9 @@ async def get_artist_albums(deezer_artist_id: int, limit: int = 8) -> list[dict]
             or album.get("cover_medium"),
             "release_date": album.get("release_date"),
             "nb_tracks": album.get("nb_tracks", 0),
+            "record_type": (album.get("record_type") or "album").lower(),
         }
-        for album in items[:limit]
+        for album in items
     ]
 
 
@@ -196,8 +197,45 @@ async def get_album_detail(album_id: int) -> dict:
         return {}
     tracks_data = (data.get("tracks") or {}).get("data") or []
     artist = data.get("artist") or {}
-    album_cover = data.get("cover_xl") or data.get("cover_big") or data.get("cover_medium")
+    album_cover = (
+        data.get("cover_xl") or data.get("cover_big") or data.get("cover_medium")
+    )
     artist_name = artist.get("name", "")
+    nb_tracks = data.get("nb_tracks", 0)
+
+    # Fallback 1: if album main endpoint returned no/partial tracks,
+    # hit the dedicated /tracks endpoint (different Deezer cache path)
+    if not tracks_data:
+        try:
+            fallback = await _get_json(f"/album/{album_id}/tracks")
+            tracks_data = fallback.get("data") or []
+        except Exception:
+            pass
+
+    # Fallback 2: search by "artist album_title" to populate the track list
+    if not tracks_data and artist_name and data.get("title"):
+        try:
+            searched = await search_tracks(
+                f"{artist_name} {data['title']}", limit=min(nb_tracks or 20, 25)
+            )
+            tracks_data = searched  # already mapped by search_tracks
+            # Mark as pre-mapped so the loop below skips _map_track
+            tracks = [
+                {**t, "cover_url": t.get("cover_url") or album_cover, "artist": t.get("artist") or artist_name}
+                for t in tracks_data
+            ]
+            return {
+                "id": data.get("id"),
+                "title": data.get("title", ""),
+                "cover_xl": album_cover,
+                "artist": artist_name,
+                "artist_id": artist.get("id"),
+                "release_date": data.get("release_date", ""),
+                "nb_tracks": nb_tracks or len(tracks),
+                "tracks": tracks,
+            }
+        except Exception:
+            pass
 
     tracks = []
     for i, t in enumerate(tracks_data):
@@ -216,7 +254,7 @@ async def get_album_detail(album_id: int) -> dict:
         "artist": artist_name,
         "artist_id": artist.get("id"),
         "release_date": data.get("release_date", ""),
-        "nb_tracks": data.get("nb_tracks", 0),
+        "nb_tracks": nb_tracks or len(tracks),
         "tracks": tracks,
     }
 

@@ -277,14 +277,44 @@ class _ArtistScreenState extends State<ArtistScreen> {
                             );
                           }),
                         const SizedBox(height: 20),
-                        const SectionHeader(title: 'Discography'),
+                        // ─── Discography header with See All ──────────────
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Discography',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.text)),
+                              if (albums.isNotEmpty)
+                                GestureDetector(
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => _DiscographyAllScreen(
+                                        artistId: _resolvedId ?? widget.artistId,
+                                        artistName: artist['name']?.toString() ?? widget.artistName,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Text('See all',
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 13,
+                                          color: AppColors.purpleLight,
+                                          fontWeight: FontWeight.w600)),
+                                ),
+                            ],
+                          ),
+                        ),
                         const SizedBox(height: 12),
                         SizedBox(
-                          height: 188,
+                          height: 195,
                           child: ListView.builder(
                             scrollDirection: Axis.horizontal,
                             padding: const EdgeInsets.symmetric(horizontal: 20),
-                            itemCount: albums.length,
+                            itemCount: albums.take(10).length,
                             itemBuilder: (_, index) {
                               final album = Map<String, dynamic>.from(
                                   albums[index] as Map);
@@ -313,11 +343,134 @@ class _ArtistScreenState extends State<ArtistScreen> {
                                   imageUrl: album['cover_xl']?.toString(),
                                   year: _albumYear(
                                       album['release_date']?.toString()),
+                                  recordType: album['record_type']?.toString() ?? 'album',
                                 ),
                               );
                             },
                           ),
                         ),
+                        // ─── "This Is [Artist]" Spotify-style card ───────
+                        if (tracks.isNotEmpty) ...[
+                          const SizedBox(height: 24),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: GestureDetector(
+                              onTap: () {
+                                final queue = tracks
+                                    .whereType<Map>()
+                                    .map((t) => Map<String, dynamic>.from(t))
+                                    .toList();
+                                final first = Map<String, dynamic>.from(queue.first)
+                                  ..['queue'] = queue;
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (_) => PlayerScreen(track: first)),
+                                );
+                              },
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(18),
+                                child: SizedBox(
+                                  height: 160,
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      // White base
+                                      Container(color: Colors.white),
+                                      // Artist photo on right
+                                      if (imageUrl != null && imageUrl.isNotEmpty)
+                                        Positioned(
+                                          right: 0, top: 0, bottom: 0,
+                                          width: 150,
+                                          child: CachedNetworkImage(
+                                            imageUrl: imageUrl,
+                                            fit: BoxFit.cover,
+                                            placeholder: (_, __) => const SizedBox(),
+                                            errorWidget: (_, __, ___) => const SizedBox(),
+                                          ),
+                                        ),
+                                      // Gradient fade from left
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            colors: [
+                                              Colors.white,
+                                              Colors.white,
+                                              Colors.white.withOpacity(0.85),
+                                              Colors.white.withOpacity(0.0),
+                                            ],
+                                            stops: const [0.0, 0.45, 0.65, 1.0],
+                                          ),
+                                        ),
+                                      ),
+                                      // Text overlay
+                                      Padding(
+                                        padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  'THIS IS',
+                                                  style: GoogleFonts.outfit(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w900,
+                                                    color: Colors.black54,
+                                                    letterSpacing: 2,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  artist['name']?.toString() ??
+                                                      widget.artistName,
+                                                  maxLines: 2,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: GoogleFonts.outfit(
+                                                    fontSize: 22,
+                                                    fontWeight: FontWeight.w900,
+                                                    color: Colors.black,
+                                                    height: 1.1,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            Row(children: [
+                                              Container(
+                                                width: 38,
+                                                height: 38,
+                                                decoration: const BoxDecoration(
+                                                  color: Color(0xFF1DB954),
+                                                  shape: BoxShape.circle,
+                                                ),
+                                                child: const Icon(
+                                                  Icons.play_arrow_rounded,
+                                                  color: Colors.white,
+                                                  size: 24,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 10),
+                                              Text(
+                                                '${tracks.length} songs',
+                                                style: GoogleFonts.outfit(
+                                                  fontSize: 13,
+                                                  color: Colors.black54,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ]),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 20),
                         const SectionHeader(title: 'Fans also like'),
                         const SizedBox(height: 12),
@@ -371,80 +524,11 @@ class _PopularTrackRow extends StatelessWidget {
   });
 
   void _showTrackMenu(BuildContext context, Map<String, dynamic> track) {
-    final title = track['title']?.toString() ?? 'Unknown';
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1a1a2e),
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(100)),
-            ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                title,
-                style: GoogleFonts.outfit(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _menuItem(Icons.play_circle_outline_rounded, 'Play now', () {
-              Navigator.pop(context);
-              Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => PlayerScreen(track: track)));
-            }),
-            _menuItem(Icons.playlist_add_rounded, 'Add to playlist', () {
-              Navigator.pop(context);
-            }),
-            _menuItem(Icons.share_outlined, 'Share', () {
-              Navigator.pop(context);
-            }),
-            _menuItem(Icons.album_rounded, 'View album', () {
-              Navigator.pop(context);
-              final albumId = track['album_id'];
-              final parsed = albumId != null
-                  ? int.tryParse(albumId.toString())
-                  : null;
-              if (parsed != null) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AlbumScreen(
-                      albumId: parsed,
-                      initialTitle: track['album']?.toString(),
-                    ),
-                  ),
-                );
-              }
-            }),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _menuItem(IconData icon, String label, VoidCallback onTap) {
-    return ListTile(
-      leading: Icon(icon, color: Colors.white70, size: 22),
-      title: Text(label,
-          style: GoogleFonts.outfit(fontSize: 15, color: Colors.white)),
-      onTap: onTap,
+    showTrackMenu(
+      context,
+      track,
+      onPlayNow: () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => PlayerScreen(track: track))),
     );
   }
 
@@ -549,12 +633,24 @@ class _AlbumCard extends StatelessWidget {
   final String title;
   final String? imageUrl;
   final String year;
+  final String recordType;
 
   const _AlbumCard({
     required this.title,
     required this.imageUrl,
     required this.year,
+    this.recordType = 'album',
   });
+
+  String get _typeLabel {
+    switch (recordType) {
+      case 'single': return 'Single';
+      case 'ep': return 'EP';
+      case 'live': return 'Live';
+      case 'compilation': return 'Compilation';
+      default: return 'Album';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -564,29 +660,49 @@ class _AlbumCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 120,
-            height: 120,
-            decoration: BoxDecoration(
-              gradient: AppColors.gradMixed,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: imageUrl != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: CachedNetworkImage(
-                      imageUrl: imageUrl!,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => const SizedBox(),
-                      errorWidget: (_, __, ___) => const Center(
-                        child: Text('💿'),
-                      ),
+          Stack(
+            children: [
+              Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  gradient: AppColors.gradMixed,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: imageUrl != null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: CachedNetworkImage(
+                          imageUrl: imageUrl!,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => const SizedBox(),
+                          errorWidget: (_, __, ___) => const Center(
+                            child: Text('💿'),
+                          ),
+                        ),
+                      )
+                    : const Center(
+                        child: Text('💿', style: TextStyle(fontSize: 28))),
+              ),
+              if (recordType != 'album')
+                Positioned(
+                  bottom: 6, left: 6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.65),
+                      borderRadius: BorderRadius.circular(6),
                     ),
-                  )
-                : const Center(
-                    child: Text('💿', style: TextStyle(fontSize: 28))),
+                    child: Text(_typeLabel,
+                        style: GoogleFonts.outfit(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white70)),
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
             title,
             maxLines: 2,
@@ -600,10 +716,187 @@ class _AlbumCard extends StatelessWidget {
           if (year.isNotEmpty)
             Text(
               year,
-              style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3),
+              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3),
             ),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Full Discography Screen
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DiscographyAllScreen extends StatefulWidget {
+  final String artistId;
+  final String artistName;
+
+  const _DiscographyAllScreen({
+    required this.artistId,
+    required this.artistName,
+  });
+
+  @override
+  State<_DiscographyAllScreen> createState() => _DiscographyAllScreenState();
+}
+
+class _DiscographyAllScreenState extends State<_DiscographyAllScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tab;
+  Map<String, dynamic>? _data;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _tab = TabController(length: 3, vsync: this);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _tab.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final data = await ApiService().getArtistDiscography(widget.artistId);
+      if (!mounted) return;
+      setState(() {
+        _data = data;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  String _albumYear(String? date) =>
+      (date?.isNotEmpty == true) ? date!.split('-').first : '';
+
+  Widget _buildGrid(List<dynamic> items) {
+    if (items.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Text('Nothing here yet',
+              style: GoogleFonts.outfit(fontSize: 15, color: AppColors.text3)),
+        ),
+      );
+    }
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        mainAxisSpacing: 16,
+        crossAxisSpacing: 12,
+        childAspectRatio: 0.72,
+      ),
+      itemCount: items.length,
+      itemBuilder: (ctx, i) {
+        final album = Map<String, dynamic>.from(items[i] as Map);
+        final albumId = album['id'];
+        final parsedId = albumId != null ? int.tryParse(albumId.toString()) : null;
+        final cover = album['cover_xl']?.toString();
+        final title = album['title']?.toString() ?? 'Unknown';
+        final year = _albumYear(album['release_date']?.toString());
+        return GestureDetector(
+          onTap: parsedId == null
+              ? null
+              : () => Navigator.push(
+                    ctx,
+                    MaterialPageRoute(
+                      builder: (_) => AlbumScreen(
+                        albumId: parsedId,
+                        initialTitle: title,
+                        initialCover: cover,
+                      ),
+                    ),
+                  ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            AspectRatio(
+              aspectRatio: 1,
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: AppColors.gradMixed,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: cover != null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: CachedNetworkImage(
+                          imageUrl: cover,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => const SizedBox(),
+                          errorWidget: (_, __, ___) =>
+                              const Center(child: Text('💿')),
+                        ),
+                      )
+                    : const Center(child: Text('💿', style: TextStyle(fontSize: 24))),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.outfit(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.text)),
+            if (year.isNotEmpty)
+              Text(year,
+                  style: GoogleFonts.outfit(
+                      fontSize: 11, color: AppColors.text3)),
+          ]),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final albums = (_data?['albums'] as List?) ?? [];
+    final singles = (_data?['singles'] as List?) ?? [];
+    final eps = (_data?['eps'] as List?) ?? [];
+
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        backgroundColor: AppColors.bg,
+        elevation: 0,
+        leading: const BackButton(color: Colors.white),
+        title: Text(widget.artistName,
+            style: GoogleFonts.outfit(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: AppColors.text)),
+        bottom: TabBar(
+          controller: _tab,
+          labelColor: AppColors.purpleLight,
+          unselectedLabelColor: AppColors.text3,
+          indicatorColor: AppColors.purpleLight,
+          labelStyle: GoogleFonts.outfit(fontWeight: FontWeight.w700),
+          tabs: [
+            Tab(text: 'Albums (${albums.length})'),
+            Tab(text: 'Singles (${singles.length})'),
+            Tab(text: 'EPs (${eps.length})'),
+          ],
+        ),
+      ),
+      body: _loading
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.purpleLight))
+          : TabBarView(
+              controller: _tab,
+              children: [
+                _buildGrid(albums),
+                _buildGrid(singles),
+                _buildGrid(eps),
+              ],
+            ),
     );
   }
 }

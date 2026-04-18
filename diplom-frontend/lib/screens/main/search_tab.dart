@@ -10,6 +10,7 @@ import '../../widgets/common_widgets.dart';
 import '../album_screen.dart';
 import '../artist_screen.dart';
 import '../extra_screens.dart';
+import '../genre_tracks_screen.dart';
 import '../player_screen.dart';
 import '../weather_screen.dart';
 import '../ai_playlist_screen.dart';
@@ -30,6 +31,7 @@ class _SearchTabState extends State<SearchTab> {
   List<dynamic> _tracks = [];
   List<dynamic> _artists = [];
   List<dynamic> _albums = [];
+  List<String> _trendingSearches = [];
   bool _searching = false;
   bool _hasQuery = false;
 
@@ -37,6 +39,7 @@ class _SearchTabState extends State<SearchTab> {
   void initState() {
     super.initState();
     _loadHistory();
+    _loadTrending();
   }
 
   @override
@@ -51,6 +54,15 @@ class _SearchTabState extends State<SearchTab> {
     final data = await ApiService().getSearchHistory(limit: 20);
     if (!mounted) return;
     setState(() => _searchHistory = data);
+  }
+
+  Future<void> _loadTrending() async {
+    try {
+      final resp = await ApiService().globalSearch('');
+      final trending = (resp['trending'] as List?)?.map((e) => e.toString()).toList() ?? [];
+      if (!mounted) return;
+      setState(() => _trendingSearches = trending.take(10).toList());
+    } catch (_) {}
   }
 
   Future<void> _clearAllHistory() async {
@@ -147,125 +159,42 @@ class _SearchTabState extends State<SearchTab> {
     );
   }
 
-  bool _hasCyrillic(String s) => s.runes.any((r) => r >= 0x0400 && r <= 0x04FF);
-
-  String _transliterate(String input) {
-    const map = {
-      'а': 'a',
-      'б': 'b',
-      'в': 'v',
-      'г': 'g',
-      'д': 'd',
-      'е': 'e',
-      'ё': 'yo',
-      'ж': 'zh',
-      'з': 'z',
-      'и': 'i',
-      'й': 'y',
-      'к': 'k',
-      'л': 'l',
-      'м': 'm',
-      'н': 'n',
-      'о': 'o',
-      'п': 'p',
-      'р': 'r',
-      'с': 's',
-      'т': 't',
-      'у': 'u',
-      'ф': 'f',
-      'х': 'kh',
-      'ц': 'ts',
-      'ч': 'ch',
-      'ш': 'sh',
-      'щ': 'sch',
-      'ъ': '',
-      'ы': 'y',
-      'ь': '',
-      'э': 'e',
-      'ю': 'yu',
-      'я': 'ya',
-    };
-    return input.toLowerCase().split('').map((c) => map[c] ?? c).join('');
-  }
-
   Future<void> _search(String q) async {
-    final isCyrillic = _hasCyrillic(q);
-    final transliterated = isCyrillic ? _transliterate(q) : q;
-
     // Extract artist name if query has "Artist - Song" separator
-    String artistQuery = transliterated;
-    if (transliterated.contains(' - ')) {
-      artistQuery = transliterated.split(' - ').first.trim();
-    } else if (transliterated.contains(' – ')) {
-      artistQuery = transliterated.split(' – ').first.trim();
-    } else if (transliterated.contains(':')) {
-      artistQuery = transliterated.split(':').first.trim();
-    } else if (transliterated.contains(' | ')) {
-      artistQuery = transliterated.split(' | ').first.trim();
-    }
-    String cyrillicArtistQuery = q;
+    String artistQuery = q;
     if (q.contains(' - ')) {
-      cyrillicArtistQuery = q.split(' - ').first.trim();
+      artistQuery = q.split(' - ').first.trim();
     } else if (q.contains(' – ')) {
-      cyrillicArtistQuery = q.split(' – ').first.trim();
+      artistQuery = q.split(' – ').first.trim();
+    } else if (q.contains(':')) {
+      artistQuery = q.split(':').first.trim();
+    } else if (q.contains(' | ')) {
+      artistQuery = q.split(' | ').first.trim();
     }
 
     try {
-      // Always fetch tracks, multiple artists, and albums in parallel
-      final futures = <Future>[
+      final results = await Future.wait([
         ApiService()
-            .searchTracksWithFallback(transliterated, limit: 10)
+            .searchTracksWithFallback(q, limit: 10)
             .catchError((_) => <Map<String, dynamic>>[]),
         ApiService()
             .searchArtistsList(artistQuery, limit: 12)
             .catchError((_) => <Map<String, dynamic>>[]),
         ApiService()
-            .searchAlbums(transliterated, limit: 8)
+            .searchAlbums(q, limit: 8)
             .catchError((_) => <Map<String, dynamic>>[]),
-        if (isCyrillic)
-          ApiService()
-              .searchTracksWithFallback(q, limit: 10)
-              .catchError((_) => <Map<String, dynamic>>[]),
-        if (isCyrillic)
-          ApiService()
-              .searchArtistsList(cyrillicArtistQuery, limit: 12)
-              .catchError((_) => <Map<String, dynamic>>[]),
-      ];
-
-      final results = await Future.wait(futures);
+      ]);
       if (!mounted) return;
 
-      // Merge tracks
-      List<dynamic> tracks = (results[0] as List?) ?? [];
-      if (isCyrillic && results.length > 3) {
-        final altTracks = (results[3] as List?) ?? [];
-        final seen = <String>{};
-        final merged = <dynamic>[];
-        for (final item in [...tracks, ...altTracks]) {
-          final track = item as Map;
-          final id = track['spotify_id']?.toString() ??
-              track['track_id']?.toString() ??
-              track['id']?.toString() ??
-              track['title']?.toString() ??
-              '';
-          if (seen.add(id)) merged.add(item);
-        }
-        tracks = merged.take(10).toList();
-      }
+      final tracks = (results[0] as List?) ?? [];
 
-      // Merge artists from both queries
       final seenArtistIds = <String>{};
       final artists = <Map<String, dynamic>>[];
-      for (final raw in [
-        (results[1] as List?) ?? [],
-        if (isCyrillic && results.length > 4) (results[4] as List?) ?? [],
-      ]) {
-        for (final a in raw) {
-          final artist = Map<String, dynamic>.from(a as Map);
-          final id = artist['id']?.toString() ?? '';
-          if (id.isNotEmpty && seenArtistIds.add(id)) {
-            artists.add(artist);
-          }
+      for (final a in (results[1] as List?) ?? []) {
+        final artist = Map<String, dynamic>.from(a as Map);
+        final id = artist['id']?.toString() ?? '';
+        if (id.isNotEmpty && seenArtistIds.add(id)) {
+          artists.add(artist);
         }
       }
 
@@ -330,17 +259,6 @@ class _SearchTabState extends State<SearchTab> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      if (_hasCyrillic(_ctrl.text) && _ctrl.text.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Text(
-                            'Searching as: ${_transliterate(_ctrl.text)}',
-                            style: GoogleFonts.outfit(
-                              fontSize: 11,
-                              color: AppColors.text3,
-                            ),
-                          ),
-                        ),
                       Container(
                         decoration: BoxDecoration(
                           color: AppColors.surface,
@@ -614,7 +532,43 @@ class _SearchTabState extends State<SearchTab> {
                     ),
                   ),
                 ],
+                // ── Explore ──────────────────────────────────────────────
                 const SizedBox(height: 20),
+                const SectionHeader(title: 'Explore'),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: GridView.count(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisCount: 3,
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 10,
+                    childAspectRatio: 1.4,
+                    children: [
+                      _ExploreCard(
+                          '🌍', 'Discover', AppColors.gradBlue,
+                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscoverScreen()))),
+                      _ExploreCard(
+                          '🏙', 'Charts', AppColors.gradPurple,
+                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CityChartsScreen()))),
+                      _ExploreCard(
+                          '📻', 'Radio', AppColors.gradMixed,
+                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RadioScreen()))),
+                      _ExploreCard(
+                          '🎉', 'Party', AppColors.gradPink,
+                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BrowseRoomsScreen()))),
+                      _ExploreCard(
+                          '✦', 'AI Mix', AppColors.gradOrange,
+                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AIPlaylistScreen()))),
+                      _ExploreCard(
+                          '🌨', 'Weather', AppColors.gradCyan,
+                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WeatherScreen()))),
+                    ],
+                  ),
+                ),
+                // ── Browse Genres ─────────────────────────────────────────
+                const SizedBox(height: 24),
                 const SectionHeader(title: 'Browse Genres'),
                 const SizedBox(height: 12),
                 Padding(
@@ -633,10 +587,12 @@ class _SearchTabState extends State<SearchTab> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF7c3aed), Color(0xFFa855f7)],
                         ),
-                        onTap: () {
-                          _ctrl.text = 'Pop';
-                          _onChanged('Pop');
-                        },
+                        onTap: () => Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => const GenreTracksScreen(
+                            genre: 'Pop', emoji: '🎤',
+                            gradient: LinearGradient(colors: [Color(0xFF7c3aed), Color(0xFFa855f7)]),
+                          ),
+                        )),
                       ),
                       _GenreCard(
                         emoji: '🎸',
@@ -644,10 +600,12 @@ class _SearchTabState extends State<SearchTab> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF1e3a8a), Color(0xFF3b82f6)],
                         ),
-                        onTap: () {
-                          _ctrl.text = 'Rock';
-                          _onChanged('Rock');
-                        },
+                        onTap: () => Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => const GenreTracksScreen(
+                            genre: 'Rock', emoji: '🎸',
+                            gradient: LinearGradient(colors: [Color(0xFF1e3a8a), Color(0xFF3b82f6)]),
+                          ),
+                        )),
                       ),
                       _GenreCard(
                         emoji: '✨',
@@ -655,10 +613,12 @@ class _SearchTabState extends State<SearchTab> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF9d174d), Color(0xFFec4899)],
                         ),
-                        onTap: () {
-                          _ctrl.text = 'K-Pop';
-                          _onChanged('K-Pop');
-                        },
+                        onTap: () => Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => const GenreTracksScreen(
+                            genre: 'K-Pop', emoji: '✨',
+                            gradient: LinearGradient(colors: [Color(0xFF9d174d), Color(0xFFec4899)]),
+                          ),
+                        )),
                       ),
                       _GenreCard(
                         emoji: '🎤',
@@ -666,10 +626,12 @@ class _SearchTabState extends State<SearchTab> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF1c1917), Color(0xFF57534e)],
                         ),
-                        onTap: () {
-                          _ctrl.text = 'Hip-Hop';
-                          _onChanged('Hip-Hop');
-                        },
+                        onTap: () => Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => const GenreTracksScreen(
+                            genre: 'Hip-Hop', emoji: '🎤',
+                            gradient: LinearGradient(colors: [Color(0xFF1c1917), Color(0xFF57534e)]),
+                          ),
+                        )),
                       ),
                       _GenreCard(
                         emoji: '🎹',
@@ -677,10 +639,12 @@ class _SearchTabState extends State<SearchTab> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF164e63), Color(0xFF06b6d4)],
                         ),
-                        onTap: () {
-                          _ctrl.text = 'Electronic';
-                          _onChanged('Electronic');
-                        },
+                        onTap: () => Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => const GenreTracksScreen(
+                            genre: 'Electronic', emoji: '🎹',
+                            gradient: LinearGradient(colors: [Color(0xFF164e63), Color(0xFF06b6d4)]),
+                          ),
+                        )),
                       ),
                       _GenreCard(
                         emoji: '🌙',
@@ -688,55 +652,477 @@ class _SearchTabState extends State<SearchTab> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF3b0764), Color(0xFF7c3aed)],
                         ),
-                        onTap: () {
-                          _ctrl.text = 'Ambient';
-                          _onChanged('Ambient');
-                        },
+                        onTap: () => Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => const GenreTracksScreen(
+                            genre: 'Ambient', emoji: '🌙',
+                            gradient: LinearGradient(colors: [Color(0xFF3b0764), Color(0xFF7c3aed)]),
+                          ),
+                        )),
                       ),
                     ],
                   ),
                 ),
-              // ── Explore ──────────────────────────────────────────────────
-              const SizedBox(height: 24),
-              const SectionHeader(title: 'Explore'),
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 3,
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                  childAspectRatio: 1.4,
-                  children: [
-                    _ExploreCard(
-                        '🌍', 'Discover', AppColors.gradBlue,
-                        () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscoverScreen()))),
-                    _ExploreCard(
-                        '🏙', 'Charts', AppColors.gradPurple,
-                        () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CityChartsScreen()))),
-                    _ExploreCard(
-                        '📻', 'Radio', AppColors.gradMixed,
-                        () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RadioScreen()))),
-                    _ExploreCard(
-                        '🎉', 'Party', AppColors.gradPink,
-                        () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ListeningPartyScreen()))),
-                    _ExploreCard(
-                        '✦', 'AI Mix', AppColors.gradOrange,
-                        () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AIPlaylistScreen()))),
-                    _ExploreCard(
-                        '🌨', 'Weather', AppColors.gradCyan,
-                        () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WeatherScreen()))),
-                  ],
-                ),
-              ),
               ],
-              const SizedBox(height: 16),
+
+              // ── Made for You banner removed ───────────────────────────
+              if (false) ...[
+                const SizedBox(height: 24),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const _ForYouScreen(
+                          category: 'my_mix',
+                          title: 'Made for You',
+                          subtitle: 'Your personal music picks',
+                        ),
+                      ),
+                    ),
+                    child: Container(
+                      height: 104,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF5B21B6), Color(0xFF7C3AED), Color(0xFFA855F7)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Stack(
+                        children: [
+                          // Decorative music note circles
+                          Positioned(
+                            right: 70, top: -10,
+                            child: Container(
+                              width: 80, height: 80,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.white.withOpacity(0.06),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            right: 10, bottom: -20,
+                            child: Container(
+                              width: 100, height: 100,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.white.withOpacity(0.06),
+                              ),
+                            ),
+                          ),
+                          // Small playlist card (right side)
+                          Positioned(
+                            right: 16, top: 0, bottom: 0,
+                            child: Center(
+                              child: Container(
+                                width: 72, height: 72,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(10),
+                                  color: Colors.white.withOpacity(0.18),
+                                  border: Border.all(color: Colors.white.withOpacity(0.25)),
+                                ),
+                                child: const Center(
+                                  child: Icon(Icons.library_music_rounded,
+                                      color: Colors.white, size: 32),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Text
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 18, 104, 18),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  'Made for You',
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                    height: 1.1,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Your personal picks',
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 13,
+                                    color: Colors.white70,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 20),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─── For You Card ─────────────────────────────────────────────────────────────
+
+class _ForYouCard extends StatelessWidget {
+  final String emoji, label, sublabel;
+  final LinearGradient gradient;
+  final VoidCallback onTap;
+  const _ForYouCard({
+    required this.emoji,
+    required this.label,
+    required this.sublabel,
+    required this.gradient,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: gradient,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(emoji, style: const TextStyle(fontSize: 26)),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: GoogleFonts.outfit(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white)),
+                  Text(sublabel,
+                      style: GoogleFonts.outfit(
+                          fontSize: 11, color: Colors.white70)),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+// ─── For You Screen ───────────────────────────────────────────────────────────
+
+class _ForYouScreen extends StatefulWidget {
+  final String category, title, subtitle;
+  const _ForYouScreen({
+    required this.category,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  State<_ForYouScreen> createState() => _ForYouScreenState();
+}
+
+class _ForYouScreenState extends State<_ForYouScreen> {
+  List<dynamic> _tracks = [];
+  bool _loading = true;
+
+  // gradient header colour per category
+  LinearGradient get _headerGradient {
+    switch (widget.category) {
+      case 'on_repeat':
+        return const LinearGradient(
+            colors: [Color(0xFF6C3FC7), Color(0xFF9B5DFF)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight);
+      case 'flashbacks':
+        return const LinearGradient(
+            colors: [Color(0xFF1a6b5a), Color(0xFF2ec4a6)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight);
+      case 'my_mix':
+        return const LinearGradient(
+            colors: [Color(0xFF5B21B6), Color(0xFFA855F7)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight);
+      default:
+        return const LinearGradient(
+            colors: [Color(0xFF1a3d7a), Color(0xFF3a7bd5)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight);
+    }
+  }
+
+  String get _headerEmoji {
+    switch (widget.category) {
+      case 'on_repeat':
+        return '🔁';
+      case 'flashbacks':
+        return '⏳';
+      case 'my_mix':
+        return '🎨';
+      default:
+        return '🔭';
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      List<dynamic> data;
+      switch (widget.category) {
+        case 'on_repeat':
+          data = await ApiService().getOnRepeat(limit: 30);
+        case 'flashbacks':
+          data = await ApiService().getFlashbacks(limit: 30);
+        default:
+          data = await ApiService().getRecommendations();
+      }
+      if (!mounted) return;
+      setState(() {
+        _tracks = data;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  String _formatDuration(dynamic durationMs) {
+    final value =
+        durationMs is int ? durationMs : int.tryParse('$durationMs') ?? 0;
+    if (value <= 0) return '';
+    return '${value ~/ 60000}:${((value % 60000) ~/ 1000).toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: _loading
+          ? const Center(
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: AppColors.purpleLight))
+          : CustomScrollView(
+              slivers: [
+                // ── Gradient header ─────────────────────────────────
+                SliverToBoxAdapter(
+                  child: Container(
+                    decoration: BoxDecoration(gradient: _headerGradient),
+                    child: SafeArea(
+                      bottom: false,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 8, 16, 0),
+                            child: IconButton(
+                              icon: const Icon(Icons.arrow_back_rounded,
+                                  color: Colors.white),
+                              onPressed: () => Navigator.pop(context),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(_headerEmoji,
+                                    style: const TextStyle(fontSize: 44)),
+                                const SizedBox(height: 8),
+                                Text(widget.title,
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 28,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.white)),
+                                const SizedBox(height: 4),
+                                Text(widget.subtitle,
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 14,
+                                        color: Colors.white70)),
+                                const SizedBox(height: 12),
+                                Text(
+                                  '${_tracks.length} songs',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 13, color: Colors.white60),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                // ── Play all button ──────────────────────────────────
+                if (_tracks.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                      child: Row(children: [
+                        GestureDetector(
+                          onTap: () {
+                            final queue = _tracks
+                                .whereType<Map>()
+                                .map((t) => Map<String, dynamic>.from(t))
+                                .toList();
+                            final first = Map<String, dynamic>.from(queue.first)
+                              ..['queue'] = queue;
+                            Navigator.push(context,
+                                MaterialPageRoute(
+                                    builder: (_) => PlayerScreen(track: first)));
+                          },
+                          child: Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              gradient: _headerGradient,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.play_arrow_rounded,
+                                color: Colors.white, size: 28),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Text('Play all',
+                            style: GoogleFonts.outfit(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.text)),
+                      ]),
+                    ),
+                  ),
+
+                // ── Track list ───────────────────────────────────────
+                if (_tracks.isEmpty)
+                  SliverFillRemaining(
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('🎵',
+                              style: TextStyle(fontSize: 48)),
+                          const SizedBox(height: 12),
+                          Text('Nothing here yet',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.text)),
+                          const SizedBox(height: 4),
+                          Text('Keep listening to fill this up!',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 13, color: AppColors.text3)),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (_, i) {
+                        final track =
+                            Map<String, dynamic>.from(_tracks[i] as Map);
+                        final title =
+                            track['title'] ?? track['trackName'] ?? 'Unknown';
+                        final artist =
+                            track['artist'] ?? track['artistName'] ?? '';
+                        final cover =
+                            track['cover_url'] ?? track['artworkUrl100'];
+                        final dur = _formatDuration(track['duration_ms']);
+                        return GestureDetector(
+                          onTap: () {
+                            track['queue'] = _tracks;
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => PlayerScreen(track: track)),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 7),
+                            child: Row(children: [
+                              // Cover
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: cover != null
+                                    ? CachedNetworkImage(
+                                        imageUrl: cover.toString(),
+                                        width: 50,
+                                        height: 50,
+                                        fit: BoxFit.cover,
+                                        placeholder: (_, __) =>
+                                            const SizedBox(),
+                                        errorWidget: (_, __, ___) => Container(
+                                            width: 50,
+                                            height: 50,
+                                            color: AppColors.surface,
+                                            child: const Icon(Icons.music_note,
+                                                color: AppColors.text3)))
+                                    : Container(
+                                        width: 50,
+                                        height: 50,
+                                        color: AppColors.surface,
+                                        child: const Icon(Icons.music_note,
+                                            color: AppColors.text3)),
+                              ),
+                              const SizedBox(width: 12),
+                              // Title + artist
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(title.toString(),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.outfit(
+                                            color: AppColors.text,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 14)),
+                                    Text(artist.toString(),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.outfit(
+                                            color: AppColors.text3,
+                                            fontSize: 12)),
+                                  ],
+                                ),
+                              ),
+                              if (dur.isNotEmpty)
+                                Text(dur,
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 12,
+                                        color: AppColors.text3)),
+                            ]),
+                          ),
+                        );
+                      },
+                      childCount: _tracks.length,
+                    ),
+                  ),
+
+                const SliverToBoxAdapter(child: SizedBox(height: 24)),
+              ],
+            ),
     );
   }
 }
@@ -1021,76 +1407,6 @@ class _SearchAlbumCard extends StatelessWidget {
               style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3),
             ),
         ],
-      ),
-    );
-  }
-}
-
-class _TrendItem extends StatelessWidget {
-  final String icon;
-  final LinearGradient gradient;
-  final String name;
-  final String type;
-  final VoidCallback? onTap;
-
-  const _TrendItem({
-    required this.icon,
-    required this.gradient,
-    required this.name,
-    required this.type,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: Color(0x0AFFFFFF))),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                gradient: gradient,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Center(
-                  child: Text(icon, style: const TextStyle(fontSize: 18))),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: GoogleFonts.outfit(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.text,
-                    ),
-                  ),
-                  Text(
-                    type,
-                    style: GoogleFonts.outfit(
-                      fontSize: 12,
-                      color: AppColors.text3,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Text(
-              '›',
-              style: GoogleFonts.outfit(fontSize: 18, color: AppColors.text3),
-            ),
-          ],
-        ),
       ),
     );
   }

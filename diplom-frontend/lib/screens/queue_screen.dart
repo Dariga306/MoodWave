@@ -3,12 +3,16 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_colors.dart';
 import 'player_screen.dart';
 
-class QueueScreen extends StatelessWidget {
+class QueueScreen extends StatefulWidget {
   final String? currentTitle;
   final String? currentArtist;
   final String? currentCover;
   final List<Map<String, dynamic>> queue;
   final int currentIndex;
+  final bool shuffle;
+  final int repeatMode; // 0=off 1=all 2=one
+  final VoidCallback? onToggleShuffle;
+  final ValueChanged<int>? onChangeRepeat;
 
   const QueueScreen({
     super.key,
@@ -17,7 +21,26 @@ class QueueScreen extends StatelessWidget {
     this.currentCover,
     this.queue = const [],
     this.currentIndex = 0,
+    this.shuffle = false,
+    this.repeatMode = 0,
+    this.onToggleShuffle,
+    this.onChangeRepeat,
   });
+
+  @override
+  State<QueueScreen> createState() => _QueueScreenState();
+}
+
+class _QueueScreenState extends State<QueueScreen> {
+  late bool _shuffle;
+  late int _repeatMode;
+
+  @override
+  void initState() {
+    super.initState();
+    _shuffle = widget.shuffle;
+    _repeatMode = widget.repeatMode;
+  }
 
   String _fmt(dynamic durationMs) {
     final ms =
@@ -28,10 +51,10 @@ class QueueScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = currentTitle ?? 'Unknown';
-    final artist = currentArtist ?? '';
-    final upNext = queue.asMap().entries
-        .where((e) => e.key > currentIndex)
+    final title = widget.currentTitle ?? 'Unknown';
+    final artist = widget.currentArtist ?? '';
+    final upNext = widget.queue.asMap().entries
+        .where((e) => e.key > widget.currentIndex)
         .map((e) => e.value)
         .toList();
 
@@ -96,11 +119,11 @@ class QueueScreen extends StatelessWidget {
                     gradient: AppColors.gradMixed,
                     borderRadius: BorderRadius.circular(13),
                   ),
-                  child: currentCover != null
+                  child: widget.currentCover != null
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(13),
                           child: Image.network(
-                            currentCover!,
+                            widget.currentCover!,
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) =>
                                 const Center(child: Text('🎵', style: TextStyle(fontSize: 22))),
@@ -153,9 +176,24 @@ class QueueScreen extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
             child: Row(children: [
-              _CtrlBtn(icon: Icons.shuffle_rounded, active: false),
+              _CtrlBtn(
+                icon: Icons.shuffle_rounded,
+                active: _shuffle,
+                onTap: () {
+                  setState(() => _shuffle = !_shuffle);
+                  widget.onToggleShuffle?.call();
+                },
+              ),
               const SizedBox(width: 6),
-              _CtrlBtn(icon: Icons.repeat_rounded, active: false),
+              _CtrlBtn(
+                icon: _repeatMode == 2 ? Icons.repeat_one_rounded : Icons.repeat_rounded,
+                active: _repeatMode > 0,
+                onTap: () {
+                  final next = (_repeatMode + 1) % 3;
+                  setState(() => _repeatMode = next);
+                  widget.onChangeRepeat?.call(next);
+                },
+              ),
               const SizedBox(width: 4),
               Text('Shuffle · Repeat',
                   style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
@@ -307,18 +345,27 @@ class QueueScreen extends StatelessWidget {
 class _CtrlBtn extends StatelessWidget {
   final IconData icon;
   final bool active;
-  const _CtrlBtn({required this.icon, this.active = false});
+  final VoidCallback? onTap;
+  const _CtrlBtn({required this.icon, this.active = false, this.onTap});
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 32,
-      height: 32,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
-        shape: BoxShape.circle,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: active
+              ? AppColors.purpleLight.withOpacity(0.15)
+              : Colors.white.withOpacity(0.06),
+          shape: BoxShape.circle,
+          border: active
+              ? Border.all(color: AppColors.purpleLight.withOpacity(0.4))
+              : null,
+        ),
+        child: Icon(icon,
+            size: 14, color: active ? AppColors.purpleLight : AppColors.text2),
       ),
-      child: Icon(icon,
-          size: 14, color: active ? AppColors.purpleLight : AppColors.text2),
     );
   }
 }

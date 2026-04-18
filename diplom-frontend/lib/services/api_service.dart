@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart'
     show kIsWeb, kDebugMode, defaultTargetPlatform, TargetPlatform;
@@ -226,8 +228,41 @@ class ApiService {
     return resp.data;
   }
 
-  Future<void> updateMe(Map<String, dynamic> data) async {
-    await _dio.put('/users/me', data: data);
+  Future<Map<String, dynamic>> updateMe(
+    Map<String, dynamic> data, {
+    Uint8List? avatarBytes,
+    Uint8List? bannerBytes,
+    String avatarFileName = 'avatar.jpg',
+    String bannerFileName = 'banner.jpg',
+  }) async {
+    final hasUploads = avatarBytes != null || bannerBytes != null;
+    late final Response resp;
+
+    if (hasUploads) {
+      final formMap = <String, dynamic>{...data};
+      if (avatarBytes != null) {
+        formMap['avatar'] = MultipartFile.fromBytes(
+          avatarBytes,
+          filename: avatarFileName,
+        );
+      }
+      if (bannerBytes != null) {
+        formMap['banner'] = MultipartFile.fromBytes(
+          bannerBytes,
+          filename: bannerFileName,
+        );
+      }
+
+      resp = await _dio.put(
+        '/users/me',
+        data: FormData.fromMap(formMap),
+        options: Options(contentType: 'multipart/form-data'),
+      );
+    } else {
+      resp = await _dio.put('/users/me', data: data);
+    }
+
+    return Map<String, dynamic>.from(resp.data as Map);
   }
 
   Future<void> saveGenres(List<Map<String, dynamic>> genres) async {
@@ -394,6 +429,11 @@ class ApiService {
     return Map<String, dynamic>.from(resp.data as Map);
   }
 
+  Future<Map<String, dynamic>> getArtistDiscography(String artistId) async {
+    final resp = await _dio.get('/artists/$artistId/discography');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
   Future<Map<String, dynamic>> getAlbumDetail(int albumId) async {
     final resp = await _dio.get('/albums/$albumId');
     return Map<String, dynamic>.from(resp.data as Map);
@@ -409,6 +449,16 @@ class ApiService {
     }
   }
 
+  Future<List<dynamic>> getListeningHistory({int limit = 150}) async {
+    try {
+      final resp = await _dio
+          .get('/tracks/me/history', queryParameters: {'limit': limit});
+      return resp.data as List? ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<List<dynamic>> getRecommendations(
       {String? mood, String? weather}) async {
     final resp = await _dio.get('/tracks/recommendations', queryParameters: {
@@ -416,6 +466,36 @@ class ApiService {
       if (weather != null) 'weather': weather,
     });
     return resp.data as List;
+  }
+
+  Future<List<dynamic>> getLikedTracks({int limit = 100}) async {
+    try {
+      final resp = await _dio
+          .get('/tracks/me/liked', queryParameters: {'limit': limit});
+      return resp.data as List? ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> getOnRepeat({int limit = 20}) async {
+    try {
+      final resp = await _dio
+          .get('/tracks/me/on-repeat', queryParameters: {'limit': limit});
+      return resp.data as List? ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> getFlashbacks({int limit = 20}) async {
+    try {
+      final resp = await _dio
+          .get('/tracks/me/flashbacks', queryParameters: {'limit': limit});
+      return resp.data as List? ?? [];
+    } catch (_) {
+      return [];
+    }
   }
 
   Future<void> playTrack(
@@ -590,6 +670,21 @@ class ApiService {
     await _dio.post('/playlists/$playlistId/tracks', data: track);
   }
 
+  Future<void> updatePlaylist(int playlistId, {String? title, String? visibility}) async {
+    await _dio.put('/playlists/$playlistId', data: {
+      if (title != null) 'title': title,
+      if (visibility != null) 'visibility': visibility,
+    });
+  }
+
+  Future<void> deletePlaylist(int playlistId) async {
+    await _dio.delete('/playlists/$playlistId');
+  }
+
+  Future<void> removeTrackFromPlaylist(int playlistId, String trackId) async {
+    await _dio.delete('/playlists/$playlistId/tracks/$trackId');
+  }
+
   // Match
   Future<List<dynamic>> getMatchCandidates() async {
     final resp = await _dio.get('/matches/candidates');
@@ -704,6 +799,35 @@ class ApiService {
     return resp.data as List? ?? [];
   }
 
+  Future<List<dynamic>> getFollowedArtistsDetails() async {
+    try {
+      final resp = await _dio.get('/users/me/following/details');
+      return resp.data as List? ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> getActiveRooms({int limit = 5}) async {
+    try {
+      final resp = await _dio.get('/rooms/active', queryParameters: {'limit': limit});
+      final data = resp.data;
+      if (data is Map) return (data['rooms'] as List?) ?? [];
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>> getRoomDetails(int roomId) async {
+    final resp = await _dio.get('/rooms/$roomId');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<void> sendJoinRequest(int roomId) async {
+    await _dio.post('/rooms/$roomId/join-request');
+  }
+
   // Notifications
   Future<Map<String, dynamic>> getNotifications() async {
     final resp = await _dio.get('/notifications');
@@ -733,9 +857,163 @@ class ApiService {
     await _dio.delete('/spotify/disconnect');
   }
 
+  Future<Map<String, dynamic>> getPrivacySettings() async {
+    final resp = await _dio.get('/users/me/privacy-settings');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<Map<String, dynamic>> updatePrivacySettings(Map<String, dynamic> data) async {
+    final resp = await _dio.put('/users/me/privacy-settings', data: data);
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<Map<String, dynamic>> getNotificationSettings() async {
+    final resp = await _dio.get('/users/me/notification-settings');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<Map<String, dynamic>> updateNotificationSettings(Map<String, dynamic> data) async {
+    final resp = await _dio.put('/users/me/notification-settings', data: data);
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<void> clearUserCache() async {
+    await _dio.post('/users/me/cache-clear');
+  }
+
+  Future<void> followUser(int userId) async {
+    await _dio.post('/users/$userId/follow');
+  }
+
+  Future<void> unfollowUser(int userId) async {
+    await _dio.delete('/users/$userId/follow');
+  }
+
+  Future<List<Map<String, dynamic>>> getUserFollowers(
+    int userId, {
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final resp = await _dio.get(
+      '/users/$userId/followers',
+      queryParameters: {'limit': limit, 'offset': offset},
+    );
+    return (resp.data as List? ?? const [])
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getUserFollowing(
+    int userId, {
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final resp = await _dio.get(
+      '/users/$userId/following',
+      queryParameters: {'limit': limit, 'offset': offset},
+    );
+    return (resp.data as List? ?? const [])
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getGenreMixes({
+    int limit = 6,
+    int tracksPerMix = 12,
+  }) async {
+    try {
+      final resp = await _dio.get(
+        '/tracks/me/genre-mixes',
+        queryParameters: {'limit': limit, 'tracks_per_mix': tracksPerMix},
+      );
+      return (resp.data as List? ?? const [])
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   // Debug (dev only)
   Future<Map<String, dynamic>> seedDemoMatch() async {
     final resp = await _dio.post('/debug/seed-demo-match');
     return resp.data as Map<String, dynamic>;
+  }
+
+  // ─── Home feed ────────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> getHomeFeed() async {
+    try {
+      final resp = await _dio.get('/trending/feed');
+      return Map<String, dynamic>.from(resp.data as Map);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  // ─── Trending / Hot ───────────────────────────────────────────────────────
+
+  Future<List<dynamic>> getTrendingTracks({String? city, int limit = 20}) async {
+    try {
+      final resp = await _dio.get(
+        '/trending/tracks',
+        queryParameters: {
+          if (city != null) 'city': city,
+          'limit': limit,
+        },
+      );
+      return (resp.data['tracks'] as List?) ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ─── Radio ────────────────────────────────────────────────────────────────
+
+  Future<List<dynamic>> getRadioStations() async {
+    try {
+      final resp = await _dio.get('/radio/stations');
+      return (resp.data['stations'] as List?) ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> getRadioTracks(String stationId) async {
+    try {
+      final resp = await _dio.get('/radio/$stationId/tracks');
+      return (resp.data['tracks'] as List?) ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> getRadioNext(
+      String stationId, String currentTrackId) async {
+    try {
+      final resp = await _dio.post(
+        '/radio/$stationId/next',
+        data: {'current_track_id': currentTrackId},
+      );
+      final t = resp.data['track'];
+      return t != null ? Map<String, dynamic>.from(t as Map) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ─── Progress heartbeat ───────────────────────────────────────────────────
+
+  Future<void> updateTrackProgress(
+      String trackId, int progressMs, bool completed) async {
+    try {
+      await _dio.post(
+        '/tracks/$trackId/progress',
+        data: {'progress_ms': progressMs, 'completed': completed},
+      );
+    } catch (_) {}
   }
 }

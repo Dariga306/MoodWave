@@ -1,15 +1,17 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
+import '../artist_screen.dart';
 import '../edit_profile_screen.dart';
-import '../login_screen.dart';
-import '../settings_screen.dart';
-import '../stats_screen.dart';
+import '../extra_screens.dart';
 import '../library_screen.dart';
 import '../notifications_screen.dart';
+import '../settings_screen.dart';
+import '../stats_screen.dart';
 
 class ProfileTab extends StatefulWidget {
   const ProfileTab({super.key});
@@ -19,15 +21,19 @@ class ProfileTab extends StatefulWidget {
 }
 
 class _ProfileTabState extends State<ProfileTab> {
-  int? _songsCount;
-  int? _thisMonthCount;
-  int? _friendsCount;
+  int? _followersCount;
+  int? _followingCount;
   bool _statsLoaded = false;
+  List<Map<String, dynamic>> _followedArtists = [];
 
   @override
   void initState() {
     super.initState();
-    _loadStats();
+    _load();
+  }
+
+  Future<void> _load() async {
+    await Future.wait([_loadStats(), _loadFollowedArtists()]);
   }
 
   Future<void> _loadStats() async {
@@ -35,9 +41,8 @@ class _ProfileTabState extends State<ProfileTab> {
       final data = await ApiService().getUserStats();
       if (!mounted) return;
       setState(() {
-        _songsCount = data['songs_count'] as int? ?? 0;
-        _thisMonthCount = data['this_month_count'] as int? ?? 0;
-        _friendsCount = data['friends_count'] as int? ?? 0;
+        _followersCount = data['followers_count'] as int? ?? 0;
+        _followingCount = data['following_count'] as int? ?? 0;
         _statsLoaded = true;
       });
     } catch (_) {
@@ -46,18 +51,64 @@ class _ProfileTabState extends State<ProfileTab> {
     }
   }
 
+  Future<void> _loadFollowedArtists() async {
+    try {
+      final list = await ApiService().getFollowedArtistsDetails();
+      if (!mounted) return;
+      setState(() {
+        _followedArtists = list.whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      });
+    } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().user;
     final displayName = user?['display_name'] ?? user?['username'] ?? 'User';
     final username = user?['username'] ?? '';
     final city = user?['city'] ?? '';
+    final bio = user?['bio'] as String? ?? '';
+    final avatarUrl = user?['avatar_url'] as String? ?? '';
+    final bannerUrl = user?['banner_url'] as String? ?? '';
+    final avatarPreset = user?['avatar_preset'] as int? ?? 0;
+    final bannerPreset = user?['banner_preset'] as int? ?? 0;
     final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U';
+
+    const avatarGradients = [
+      [Color(0xFF7C3AED), Color(0xFFDB2777)],
+      [Color(0xFF2563EB), Color(0xFF7C3AED)],
+      [Color(0xFF059669), Color(0xFF2563EB)],
+      [Color(0xFFD97706), Color(0xFFDC2626)],
+      [Color(0xFF7C3AED), Color(0xFF2563EB)],
+      [Color(0xFFDB2777), Color(0xFFEF4444)],
+      [Color(0xFF0891B2), Color(0xFF059669)],
+      [Color(0xFF6D28D9), Color(0xFF0891B2)],
+      [Color(0xFF374151), Color(0xFF6D28D9)],
+      [Color(0xFFB45309), Color(0xFF065F46)],
+      [Color(0xFF9D174D), Color(0xFF6D28D9)],
+      [Color(0xFF1E40AF), Color(0xFF065F46)],
+    ];
+
+    const bannerGradients = [
+      [Color(0xFF150825), Color(0xFF3d1a6e)],
+      [Color(0xFF1a1a3e), Color(0xFF7C3AED)],
+      [Color(0xFF0d1a3d), Color(0xFF2563EB)],
+      [Color(0xFF0d2618), Color(0xFF059669)],
+      [Color(0xFF3d1a1a), Color(0xFFDC2626)],
+      [Color(0xFF08080f), Color(0xFF374151)],
+    ];
+
+    final safeAvatarPreset = avatarPreset.clamp(0, avatarGradients.length - 1);
+    final safeBannerPreset = bannerPreset.clamp(0, bannerGradients.length - 1);
+    final avatarColors = avatarGradients[safeAvatarPreset];
+    final bannerColors = bannerGradients[safeBannerPreset];
 
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: RefreshIndicator(
-        onRefresh: _loadStats,
+        onRefresh: _load,
         color: AppColors.purpleLight,
         backgroundColor: AppColors.surface,
         child: SingleChildScrollView(
@@ -70,40 +121,49 @@ class _ProfileTabState extends State<ProfileTab> {
                 clipBehavior: Clip.none,
                 children: [
                   Container(
-                    height: 200,
-                    decoration: const BoxDecoration(
+                    height: 180,
+                    decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
-                        colors: [Color(0xFF2d0a5e), Color(0xFF1a0440), Color(0xFF0a1040)],
+                        colors: bannerColors.cast<Color>(),
                       ),
                     ),
                     child: Stack(
                       children: [
+                        if (bannerUrl.isNotEmpty)
+                          Positioned.fill(
+                            child: CachedNetworkImage(
+                              imageUrl: bannerUrl,
+                              fit: BoxFit.cover,
+                              placeholder: (_, __) => const SizedBox(),
+                              errorWidget: (_, __, ___) => const SizedBox(),
+                            ),
+                          ),
                         Center(
                           child: Container(
                             width: 200, height: 200,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               gradient: RadialGradient(colors: [
-                                AppColors.purple.withOpacity(0.25),
+                                AppColors.purple.withOpacity(0.2),
                                 Colors.transparent,
                               ]),
                             ),
                           ),
                         ),
-                        // Settings button
                         Positioned(
                           top: 0, right: 20,
                           child: SafeArea(
                             child: GestureDetector(
-                              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                              onTap: () => Navigator.push(context,
+                                  MaterialPageRoute(builder: (_) => const SettingsScreen())),
                               child: Container(
                                 width: 40, height: 40,
                                 decoration: BoxDecoration(
-                                  color: AppColors.glass,
+                                  color: Colors.black.withOpacity(0.3),
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: AppColors.border),
+                                  border: Border.all(color: Colors.white.withOpacity(0.15)),
                                 ),
                                 child: const Icon(Icons.settings_rounded, size: 20, color: Colors.white),
                               ),
@@ -113,9 +173,9 @@ class _ProfileTabState extends State<ProfileTab> {
                       ],
                     ),
                   ),
-                  // Avatar & Edit
+                  // Avatar & Edit row
                   Positioned(
-                    bottom: -36,
+                    bottom: -40,
                     left: 0, right: 0,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -124,19 +184,26 @@ class _ProfileTabState extends State<ProfileTab> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Container(
-                            width: 80, height: 80,
+                            width: 82, height: 82,
                             decoration: BoxDecoration(
-                              gradient: AppColors.gradMixed,
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: avatarColors.cast<Color>(),
+                              ),
                               shape: BoxShape.circle,
                               border: Border.all(color: AppColors.bg, width: 3),
                               boxShadow: [
-                                BoxShadow(color: AppColors.purpleDark.withOpacity(0.4), blurRadius: 24),
+                                BoxShadow(
+                                    color: AppColors.purpleDark.withOpacity(0.4),
+                                    blurRadius: 20),
                               ],
                             ),
                             child: Center(
                               child: Text(initial,
                                   style: GoogleFonts.outfit(
-                                      fontSize: 32, fontWeight: FontWeight.w800, color: Colors.white)),
+                                      fontSize: 32, fontWeight: FontWeight.w800,
+                                      color: Colors.white)),
                             ),
                           ),
                           GestureDetector(
@@ -147,6 +214,7 @@ class _ProfileTabState extends State<ProfileTab> {
                                   builder: (_) => EditProfileScreen(user: user),
                                 ),
                               );
+                              if (mounted) setState(() {});
                             },
                             child: Container(
                               margin: const EdgeInsets.only(bottom: 4),
@@ -158,7 +226,8 @@ class _ProfileTabState extends State<ProfileTab> {
                               ),
                               child: Text('Edit Profile',
                                   style: GoogleFonts.outfit(
-                                      fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text)),
+                                      fontSize: 13, fontWeight: FontWeight.w600,
+                                      color: AppColors.text)),
                             ),
                           ),
                         ],
@@ -167,9 +236,9 @@ class _ProfileTabState extends State<ProfileTab> {
                   ),
                 ],
               ),
-              const SizedBox(height: 44),
+              const SizedBox(height: 52),
 
-              // Name & handle
+              // Name, handle, bio
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Column(
@@ -178,7 +247,7 @@ class _ProfileTabState extends State<ProfileTab> {
                     Text(displayName,
                         style: GoogleFonts.outfit(
                             fontSize: 24, fontWeight: FontWeight.w800,
-                            color: AppColors.text, letterSpacing: -0.02 * 24)),
+                            color: AppColors.text, letterSpacing: -0.5)),
                     const SizedBox(height: 2),
                     Row(children: [
                       Text('@$username',
@@ -189,12 +258,17 @@ class _ProfileTabState extends State<ProfileTab> {
                             style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text3)),
                       ],
                     ]),
+                    if (bio.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(bio,
+                          style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2, height: 1.5)),
+                    ],
                   ],
                 ),
               ),
 
-              // Stats
-              const SizedBox(height: 16),
+              // Stats — Followers / Following
+              const SizedBox(height: 14),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Container(
@@ -206,85 +280,127 @@ class _ProfileTabState extends State<ProfileTab> {
                   child: Row(
                     children: [
                       Expanded(child: _StatCell(
-                        value: _statsLoaded ? '${_songsCount ?? 0}' : '—',
-                        label: 'Songs',
+                        value: _statsLoaded ? '${_followersCount ?? 0}' : '—',
+                        label: 'Followers',
                       )),
-                      Container(width: 1, height: 60, color: AppColors.border),
+                      Container(width: 1, height: 54, color: AppColors.border),
                       Expanded(child: _StatCell(
-                        value: _statsLoaded ? '${_thisMonthCount ?? 0}' : '—',
-                        label: 'This month',
-                      )),
-                      Container(width: 1, height: 60, color: AppColors.border),
-                      Expanded(child: _StatCell(
-                        value: _statsLoaded ? '${_friendsCount ?? 0}' : '—',
-                        label: 'Friends',
+                        value: _statsLoaded ? '${_followingCount ?? 0}' : '—',
+                        label: 'Following',
                       )),
                     ],
                   ),
                 ),
               ),
 
+              // Followed Artists
+              if (_followedArtists.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Text('Following',
+                      style: GoogleFonts.outfit(
+                          fontSize: 17, fontWeight: FontWeight.w700,
+                          color: AppColors.text)),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 88,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.only(left: 20),
+                    itemCount: _followedArtists.length,
+                    itemBuilder: (ctx, i) {
+                      final artist = _followedArtists[i];
+                      final pic = artist['picture_medium'] as String? ??
+                          artist['picture_xl'] as String? ?? '';
+                      final name = artist['name'] as String? ?? '';
+                      return GestureDetector(
+                        onTap: () {
+                          final id = artist['id'];
+                          if (id != null) {
+                            Navigator.push(ctx, MaterialPageRoute(
+                              builder: (_) => ArtistScreen(
+                                  artistId: id.toString(), artistName: name),
+                            ));
+                          }
+                        },
+                        child: Container(
+                          width: 68,
+                          margin: const EdgeInsets.only(right: 12),
+                          child: Column(children: [
+                            Container(
+                              width: 54, height: 54,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: AppColors.border, width: 1.5),
+                                gradient: AppColors.gradMixed,
+                              ),
+                              child: ClipOval(
+                                child: pic.isNotEmpty
+                                    ? CachedNetworkImage(
+                                        imageUrl: pic,
+                                        fit: BoxFit.cover,
+                                        placeholder: (_, __) => const SizedBox(),
+                                        errorWidget: (_, __, ___) => Center(
+                                            child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                                style: GoogleFonts.outfit(
+                                                    fontSize: 20, fontWeight: FontWeight.w700,
+                                                    color: Colors.white))))
+                                    : Center(
+                                        child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                            style: GoogleFonts.outfit(
+                                                fontSize: 20, fontWeight: FontWeight.w700,
+                                                color: Colors.white))),
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(name,
+                                textAlign: TextAlign.center,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 11, color: AppColors.text2)),
+                          ]),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+
               // Quick access
               const SizedBox(height: 20),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Text('My Pages', style: GoogleFonts.outfit(
-                    fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.text)),
+                child: Text('My Pages',
+                    style: GoogleFonts.outfit(
+                        fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.text)),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Column(children: [
                   _NavRow(icon: '📚', label: 'Library', sub: 'Your playlists & albums',
-                      color: AppColors.blue, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LibraryScreen()))),
-                  _NavRow(icon: '📊', label: 'Stats & Wrapped', sub: '2024 year in review',
-                      color: AppColors.purple, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StatsScreen()))),
+                      color: AppColors.blue,
+                      onTap: () => Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const LibraryScreen()))),
+                  _NavRow(icon: '🕐', label: 'Listening History', sub: 'Recently played by day',
+                      color: AppColors.cyan,
+                      onTap: () => Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const RecentHistoryScreen()))),
+                  _NavRow(icon: '📊', label: 'My Stats', sub: 'Top artists, genres & more',
+                      color: AppColors.purple,
+                      onTap: () => Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const StatsScreen()))),
                   _NavRow(icon: '🔔', label: 'Notifications', sub: 'Matches, friends, music',
-                      color: AppColors.pink, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()))),
-                  _NavRow(icon: '⚙️', label: 'Settings', sub: 'Account, playback, privacy',
-                      color: AppColors.text2, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()))),
+                      color: AppColors.pink,
+                      onTap: () => Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const NotificationsScreen()))),
                 ]),
               ),
 
-              // Logout button
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: GestureDetector(
-                  onTap: () async {
-                    await context.read<AuthProvider>().logout();
-                    if (context.mounted) {
-                      Navigator.of(context).pushAndRemoveUntil(
-                        MaterialPageRoute(builder: (_) => const LoginScreen()),
-                        (_) => false,
-                      );
-                    }
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF3d0000).withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFef4444).withOpacity(0.2)),
-                    ),
-                    child: Row(children: [
-                      Container(width: 38, height: 38,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFef4444).withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(10)),
-                        child: const Center(child: Text('🚪', style: TextStyle(fontSize: 18)))),
-                      const SizedBox(width: 14),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('Log Out', style: GoogleFonts.outfit(
-                            fontSize: 15, fontWeight: FontWeight.w600, color: const Color(0xFFef4444))),
-                        Text('Sign out of your account', style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-                      ])),
-                    ]),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -300,7 +416,7 @@ class _StatCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
       child: Column(
         children: [
           ShaderMask(
@@ -311,9 +427,10 @@ class _StatCell extends StatelessWidget {
                 style: GoogleFonts.outfit(
                     fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 2),
           Text(label,
-              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3, fontWeight: FontWeight.w500)),
+              textAlign: TextAlign.center,
+              style: GoogleFonts.outfit(fontSize: 10, color: AppColors.text3, fontWeight: FontWeight.w500)),
         ],
       ),
     );
@@ -331,7 +448,7 @@ class _NavRow extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
           color: AppColors.surface,

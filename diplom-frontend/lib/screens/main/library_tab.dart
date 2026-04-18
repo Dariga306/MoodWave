@@ -1,12 +1,13 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
+import '../artist_screen.dart';
 import '../playlist_screen.dart';
-import '../player_screen.dart';
 import '../profile_tab_screen.dart';
 
 class LibraryTab extends StatefulWidget {
@@ -20,7 +21,10 @@ class _LibraryTabState extends State<LibraryTab> {
   final _filters = ['All', 'Playlists', 'Artists'];
 
   List<dynamic> _playlists = [];
+  List<Map<String, dynamic>> _artists = [];
   bool _loading = true;
+  bool _artistsLoaded = false;
+  bool _artistsLoading = false;
 
   @override
   void initState() {
@@ -37,6 +41,29 @@ class _LibraryTabState extends State<LibraryTab> {
       if (!mounted) return;
       setState(() => _loading = false);
     }
+  }
+
+  Future<void> _loadArtists() async {
+    if (_artistsLoaded) return;
+    setState(() => _artistsLoading = true);
+    try {
+      final raw = await ApiService().getFollowedArtistsDetails();
+      if (!mounted) return;
+      setState(() {
+        _artists = raw.whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+        _artistsLoaded = true;
+        _artistsLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() { _artistsLoaded = true; _artistsLoading = false; });
+    }
+  }
+
+  void _onFilterChanged(int i) {
+    setState(() => _filter = i);
+    if (i == 2) _loadArtists();
   }
 
   Future<void> _createPlaylist() async {
@@ -143,7 +170,7 @@ class _LibraryTabState extends State<LibraryTab> {
                         scrollDirection: Axis.horizontal,
                         itemCount: _filters.length,
                         itemBuilder: (_, i) => GestureDetector(
-                          onTap: () => setState(() => _filter = i),
+                          onTap: () => _onFilterChanged(i),
                           child: Container(
                             margin: const EdgeInsets.only(right: 8),
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
@@ -170,6 +197,99 @@ class _LibraryTabState extends State<LibraryTab> {
               const SliverFillRemaining(
                 child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight)),
               )
+
+            // ── Artists filter ──────────────────────────────────────
+            else if (_filter == 2 && _artistsLoading)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight)),
+              )
+
+            else if (_filter == 2)
+              _artists.isEmpty
+                  ? SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: Center(
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          const Text('🎤', style: TextStyle(fontSize: 48)),
+                          const SizedBox(height: 12),
+                          Text('No followed artists yet',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.text)),
+                          const SizedBox(height: 6),
+                          Text('Follow artists to see them here',
+                              style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3)),
+                        ]),
+                      ),
+                    )
+                  : SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (ctx, i) {
+                          final artist = _artists[i];
+                          final name = (artist['name'] ?? 'Unknown Artist').toString();
+                          final pic = artist['picture_medium']?.toString()
+                              ?? artist['picture']?.toString();
+                          final fans = artist['nb_fan'] as int?;
+                          final artistId = artist['id'];
+                          final fansStr = fans != null
+                              ? (fans >= 1000000
+                                  ? '${(fans / 1000000).toStringAsFixed(1)}M fans'
+                                  : fans >= 1000
+                                      ? '${(fans / 1000).toStringAsFixed(0)}K fans'
+                                      : '$fans fans')
+                              : 'Artist';
+                          return GestureDetector(
+                            onTap: () {
+                              if (artistId != null) {
+                                Navigator.push(ctx, MaterialPageRoute(
+                                  builder: (_) => ArtistScreen(
+                                    artistId: artistId.toString(),
+                                    artistName: name,
+                                  ),
+                                ));
+                              }
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
+                              child: Row(children: [
+                                Container(
+                                  width: 56, height: 56,
+                                  decoration: BoxDecoration(
+                                    gradient: AppColors.gradPink,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: pic != null
+                                      ? ClipOval(
+                                          child: CachedNetworkImage(
+                                              imageUrl: pic, fit: BoxFit.cover,
+                                              errorWidget: (_, __, ___) => Center(
+                                                  child: Text(name[0].toUpperCase(),
+                                                      style: GoogleFonts.outfit(
+                                                          fontSize: 20, fontWeight: FontWeight.w700,
+                                                          color: Colors.white)))))
+                                      : Center(
+                                          child: Text(name[0].toUpperCase(),
+                                              style: GoogleFonts.outfit(
+                                                  fontSize: 20, fontWeight: FontWeight.w700,
+                                                  color: Colors.white))),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Text(name, style: GoogleFonts.outfit(
+                                      fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.text)),
+                                  Text(fansStr, style: GoogleFonts.outfit(
+                                      fontSize: 12, color: AppColors.text3)),
+                                ])),
+                                const Icon(Icons.chevron_right_rounded, color: AppColors.text3, size: 20),
+                              ]),
+                            ),
+                          );
+                        },
+                        childCount: _artists.length,
+                      ),
+                    )
+
+            // ── Playlists (All / Playlists filter) ─────────────────
             else if (_playlists.isEmpty)
               SliverFillRemaining(
                 child: Center(
@@ -197,7 +317,10 @@ class _LibraryTabState extends State<LibraryTab> {
             else
               SliverList(
                 delegate: SliverChildBuilderDelegate(
-                  (_, i) => _PlaylistItem(playlist: _playlists[i] as Map<String, dynamic>),
+                  (_, i) => _PlaylistItem(
+                    playlist: _playlists[i] as Map<String, dynamic>,
+                    onRefresh: _load,
+                  ),
                   childCount: _playlists.length,
                 ),
               ),
@@ -212,7 +335,157 @@ class _LibraryTabState extends State<LibraryTab> {
 
 class _PlaylistItem extends StatelessWidget {
   final Map<String, dynamic> playlist;
-  const _PlaylistItem({required this.playlist});
+  final VoidCallback onRefresh;
+  const _PlaylistItem({required this.playlist, required this.onRefresh});
+
+  void _showOptions(BuildContext context) {
+    final id = playlist['id'] as int? ?? 0;
+    final title = (playlist['title'] ?? 'Untitled').toString();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36, height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                child: Text(title,
+                    style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(height: 8),
+              _menuItem(context, Icons.edit_rounded, 'Rename', () {
+                Navigator.pop(context);
+                _renamePlaylist(context, id, title);
+              }),
+              _menuItem(context, Icons.share_rounded, 'Share', () {
+                Navigator.pop(context);
+                Clipboard.setData(ClipboardData(text: 'Playlist: $title'));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Link copied to clipboard')),
+                );
+              }),
+              _menuItem(context, Icons.delete_rounded, 'Delete', () {
+                Navigator.pop(context);
+                _deletePlaylist(context, id);
+              }, color: Colors.redAccent),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _menuItem(BuildContext context, IconData icon, String label,
+      VoidCallback onTap, {Color? color}) {
+    final c = color ?? AppColors.text;
+    return ListTile(
+      leading: Icon(icon, size: 22, color: c),
+      title: Text(label, style: GoogleFonts.outfit(fontSize: 15, color: c)),
+      onTap: onTap,
+    );
+  }
+
+  void _renamePlaylist(BuildContext context, int id, String currentTitle) {
+    final ctrl = TextEditingController(text: currentTitle);
+    showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Rename Playlist',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.w800, color: AppColors.text)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: GoogleFonts.outfit(color: AppColors.text),
+          decoration: InputDecoration(
+            hintText: 'Playlist name',
+            hintStyle: GoogleFonts.outfit(color: AppColors.text3),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppColors.border)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppColors.purple)),
+            filled: true, fillColor: AppColors.glass,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.purple,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: Text('Save',
+                style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    ).then((ok) async {
+      if (ok == true && ctrl.text.trim().isNotEmpty) {
+        try {
+          await ApiService().updatePlaylist(id, title: ctrl.text.trim());
+          onRefresh();
+        } catch (_) {}
+      }
+    });
+  }
+
+  void _deletePlaylist(BuildContext context, int id) {
+    showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Delete Playlist',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.w800, color: AppColors.text)),
+        content: Text('This action cannot be undone.',
+            style: GoogleFonts.outfit(color: AppColors.text2)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: Text('Delete',
+                style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    ).then((ok) async {
+      if (ok == true) {
+        try {
+          await ApiService().deletePlaylist(id);
+          onRefresh();
+        } catch (_) {}
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -254,7 +527,14 @@ class _PlaylistItem extends StatelessWidget {
                   style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
             ]),
           ),
-          const Icon(Icons.more_vert_rounded, size: 20, color: AppColors.text3),
+          GestureDetector(
+            onTap: () => _showOptions(context),
+            behavior: HitTestBehavior.opaque,
+            child: const Padding(
+              padding: EdgeInsets.all(8),
+              child: Icon(Icons.more_vert_rounded, size: 20, color: AppColors.text3),
+            ),
+          ),
         ]),
       ),
     );

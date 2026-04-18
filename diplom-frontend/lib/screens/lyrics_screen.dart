@@ -217,13 +217,22 @@ class _LyricsScreenState extends State<LyricsScreen> {
 
   void _scrollToActiveLine() {
     if (!_scrollController.hasClients || _activeIndex < 0) return;
+    final pos = _scrollController.position;
     final screenHeight = MediaQuery.of(context).size.height;
-    final centerOffset = screenHeight / 2 - 80;
-    final targetOffset = (_activeIndex * 58.0) - centerOffset;
-    _scrollController.animateTo(
-      targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeInOut,
+    // Top padding is 42% of full screen height (must match ListView padding)
+    final topPadding = screenHeight * 0.42;
+    // Each item: vertical padding 5+5=10px + font 17 * height 1.7 ≈ 29px text = ~39px
+    // But actual render with Padding widget adds widget overhead, so use 58px measured
+    const itemHeight = 58.0;
+    // Use the actual viewport height (scroll area) for centering
+    final viewH = pos.viewportDimension > 0 ? pos.viewportDimension : screenHeight;
+    // Center the active line vertically in the viewport
+    final targetOffset =
+        topPadding + (_activeIndex * itemHeight) - (viewH / 2) + (itemHeight / 2);
+    pos.animateTo(
+      targetOffset.clamp(0.0, pos.maxScrollExtent),
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOutCubic,
     );
   }
 
@@ -289,41 +298,26 @@ class _LyricsScreenState extends State<LyricsScreen> {
 
                         return GestureDetector(
                           onTap: canSeek ? () => _seekToLine(index) : null,
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 300),
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 4,
-                            ),
+                          child: Padding(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 10,
+                              horizontal: 20,
+                              vertical: 5,
                             ),
-                            decoration: isActive
-                                ? BoxDecoration(
-                                    color: Colors.white.withOpacity(0.12),
-                                    borderRadius: BorderRadius.circular(14),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.white.withOpacity(0.08),
-                                        blurRadius: 12,
-                                        spreadRadius: 1,
-                                      ),
-                                    ],
-                                  )
-                                : null,
-                            child: Text(
-                              _lyricsLines[index],
-                              textAlign: TextAlign.center,
+                            child: AnimatedDefaultTextStyle(
+                              duration: const Duration(milliseconds: 250),
                               style: GoogleFonts.outfit(
-                                fontSize: isActive ? 22 : 16,
+                                fontSize: 17,
                                 fontWeight: isActive
                                     ? FontWeight.w700
                                     : FontWeight.w400,
                                 color: isActive
                                     ? Colors.white
-                                    : Colors.white.withOpacity(0.3),
-                                height: 1.6,
+                                    : Colors.white.withOpacity(0.28),
+                                height: 1.7,
+                              ),
+                              child: Text(
+                                _lyricsLines[index],
+                                textAlign: TextAlign.center,
                               ),
                             ),
                           ),

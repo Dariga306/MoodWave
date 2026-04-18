@@ -9,10 +9,13 @@ from pydantic import BaseModel
 from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import asyncio
+
 from app.dependencies import get_current_user, get_db
-from app.models.social import ArtistFollow, Block, Friend, FriendStatus, Match, Report
+from app.models.social import ArtistFollow, Block, Friend, FriendStatus, Match, Report, UserFollow
 from app.models.user import User
 from app.services import cache as cache_svc
+from app.services import deezer as deezer_service
 from app.services import firebase as firebase_svc
 from app.services.security import users_are_blocked
 
@@ -426,6 +429,101 @@ async def get_notifications(
 
 
 @router.post(
+    "/users/{user_id}/follow",
+    summary="Follow user",
+    description="Follows a user (subscribe). Idempotent.",
+)
+async def follow_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot follow yourself")
+    target = await db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    existing = await db.scalar(
+        select(UserFollow).where(
+            UserFollow.follower_id == current_user.id,
+            UserFollow.following_id == user_id,
+        )
+    )
+    if not existing:
+        db.add(UserFollow(follower_id=current_user.id, following_id=user_id))
+        await db.commit()
+    return {"message": "Following"}
+
+
+@router.delete(
+    "/users/{user_id}/follow",
+    summary="Unfollow user",
+    description="Unfollows a user (unsubscribe).",
+)
+async def unfollow_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await db.execute(
+        delete(UserFollow).where(
+            UserFollow.follower_id == current_user.id,
+            UserFollow.following_id == user_id,
+        )
+    )
+    await db.commit()
+    return {"message": "Unfollowed"}
+
+
+@router.get(
+    "/users/{user_id}/followers",
+    summary="Get user followers",
+    description="Returns paginated list of followers for a user.",
+)
+async def get_user_followers(
+    user_id: int,
+    offset: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        await db.execute(
+            select(User)
+            .join(UserFollow, UserFollow.follower_id == User.id)
+            .where(UserFollow.following_id == user_id)
+            .offset(offset)
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [_friend_payload(u) for u in rows]
+
+
+@router.get(
+    "/users/{user_id}/following",
+    summary="Get user following",
+    description="Returns paginated list of users that a user is following.",
+)
+async def get_user_following(
+    user_id: int,
+    offset: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        await db.execute(
+            select(User)
+            .join(UserFollow, UserFollow.following_id == User.id)
+            .where(UserFollow.follower_id == user_id)
+            .offset(offset)
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [_friend_payload(u) for u in rows]
+
+
+@router.post(
     "/users/me/following/{deezer_artist_id}",
     summary="Follow artist",
     description="Follows a Deezer artist for the current user.",
@@ -484,3 +582,31 @@ async def list_followed_artists(
         )
     ).scalars().all()
     return list(rows)
+
+
+@router.get(
+    "/users/me/following/details",
+    summary="List followed artists with profiles",
+    description="Returns full Deezer artist profiles for the current user's followed artists (limit 10).",
+)
+async def list_followed_artists_details(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        await db.execute(
+            select(ArtistFollow.deezer_artist_id)
+            .where(ArtistFollow.user_id == current_user.id)
+            .order_by(ArtistFollow.created_at.desc())
+            .limit(10)
+        )
+    ).scalars().all()
+
+    if not rows:
+        return []
+
+    artists = await asyncio.gather(
+        *[deezer_service.get_artist(artist_id) for artist_id in rows],
+        return_exceptions=True,
+    )
+    return [a for a in artists if isinstance(a, dict) and a]

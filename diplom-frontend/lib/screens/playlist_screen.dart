@@ -1,9 +1,12 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../utils/show_snackbar.dart';
+import '../widgets/common_widgets.dart';
 import 'player_screen.dart';
 
 class PlaylistScreen extends StatefulWidget {
@@ -76,6 +79,158 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     );
   }
 
+  Future<void> _renamePlaylist() async {
+    if (widget.playlistId == null) return;
+    final current = _playlist?['title']?.toString() ?? '';
+    final ctrl = TextEditingController(text: current);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Rename Playlist',
+            style: GoogleFonts.outfit(
+                fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: GoogleFonts.outfit(color: AppColors.text, fontSize: 15),
+          decoration: InputDecoration(
+            hintText: 'Playlist name',
+            hintStyle: GoogleFonts.outfit(color: AppColors.text3),
+            filled: true,
+            fillColor: AppColors.surface3,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Save',
+                style: GoogleFonts.outfit(
+                    color: AppColors.purpleLight, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || ctrl.text.trim().isEmpty) return;
+    try {
+      await ApiService().updatePlaylist(widget.playlistId!, title: ctrl.text.trim());
+      if (mounted) {
+        showSuccessSnackBar(context, 'Renamed to "${ctrl.text.trim()}"');
+        _load();
+      }
+    } catch (_) {
+      if (mounted) showErrorSnackBar(context, 'Could not rename playlist');
+    }
+  }
+
+  Future<void> _deletePlaylistAndPop() async {
+    if (widget.playlistId == null) return;
+    final title = _playlist?['title']?.toString() ?? 'this playlist';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Delete Playlist?',
+            style: GoogleFonts.outfit(
+                fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.text)),
+        content: Text('This will permanently delete "$title".',
+            style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Delete',
+                style: GoogleFonts.outfit(
+                    color: const Color(0xFFef4444), fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ApiService().deletePlaylist(widget.playlistId!);
+      if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) showErrorSnackBar(context, 'Could not delete playlist');
+    }
+  }
+
+  void _showPlaylistMenu() {
+    final title = _playlist?['title']?.toString() ?? 'Playlist';
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a1a2e),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                  color: Colors.white24, borderRadius: BorderRadius.circular(100)),
+            ),
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text(title,
+                  style: GoogleFonts.outfit(
+                      fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white),
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            const SizedBox(height: 10),
+            const Divider(color: Colors.white10, height: 1),
+            ListTile(
+              leading: const Icon(Icons.edit_rounded, color: Colors.white70, size: 22),
+              title: Text('Rename', style: GoogleFonts.outfit(fontSize: 15, color: Colors.white)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _renamePlaylist();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.share_outlined, color: Colors.white70, size: 22),
+              title: Text('Share', style: GoogleFonts.outfit(fontSize: 15, color: Colors.white)),
+              onTap: () {
+                Navigator.pop(ctx);
+                Clipboard.setData(ClipboardData(text: 'Check out my playlist: $title on MoodWave'));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Copied to clipboard'),
+                  duration: Duration(seconds: 2),
+                ));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded, color: Color(0xFFef4444), size: 22),
+              title: Text('Delete', style: GoogleFonts.outfit(fontSize: 15, color: const Color(0xFFef4444))),
+              onTap: () {
+                Navigator.pop(ctx);
+                _deletePlaylistAndPop();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final tracks = (_playlist?['tracks'] as List?) ?? [];
@@ -130,16 +285,19 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                         fontSize: 15,
                                         fontWeight: FontWeight.w700,
                                         color: AppColors.text)),
-                                Container(
-                                  width: 40, height: 40,
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: List.generate(3, (_) => Container(
-                                      width: 4, height: 4,
-                                      margin: const EdgeInsets.symmetric(vertical: 1.5),
-                                      decoration: const BoxDecoration(
-                                          color: AppColors.text2, shape: BoxShape.circle),
-                                    )),
+                                GestureDetector(
+                                  onTap: _showPlaylistMenu,
+                                  child: Container(
+                                    width: 40, height: 40,
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: List.generate(3, (_) => Container(
+                                        width: 4, height: 4,
+                                        margin: const EdgeInsets.symmetric(vertical: 1.5),
+                                        decoration: const BoxDecoration(
+                                            color: AppColors.text2, shape: BoxShape.circle),
+                                      )),
+                                    ),
                                   ),
                                 ),
                               ],
@@ -399,9 +557,23 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                 Text(duration,
                                     style: GoogleFonts.outfit(
                                         fontSize: 12, color: AppColors.text3)),
-                              const SizedBox(width: 8),
-                              const Icon(Icons.more_vert_rounded,
-                                  size: 18, color: AppColors.text3),
+                              const SizedBox(width: 4),
+                              GestureDetector(
+                                onTap: () => showTrackMenu(
+                                  context,
+                                  track,
+                                  onPlayNow: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) => PlayerScreen(track: track)),
+                                  ),
+                                ),
+                                child: const Padding(
+                                  padding: EdgeInsets.all(6),
+                                  child: Icon(Icons.more_vert_rounded,
+                                      size: 18, color: AppColors.text3),
+                                ),
+                              ),
                             ]),
                           ),
                         );

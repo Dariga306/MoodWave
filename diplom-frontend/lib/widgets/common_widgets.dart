@@ -1,6 +1,8 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 
 // ── STATUS BAR ──
@@ -257,6 +259,277 @@ class _AnimatedMusicBarsState extends State<AnimatedMusicBars>
           ),
         );
       }),
+    );
+  }
+}
+
+// ── TRACK OPTIONS MENU ──────────────────────────────────────────────────────
+/// Show a shared bottom-sheet track menu.
+/// Navigation callbacks are provided by the caller to avoid circular imports.
+Future<void> _showAddToPlaylistDialog(
+    BuildContext context, Map<String, dynamic> track) async {
+  List<Map<String, dynamic>> playlists = [];
+  bool loading = true;
+  String? error;
+
+  await showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: const Color(0xFF1a1a2e),
+    shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setS) {
+        if (loading) {
+          ApiService().getPlaylists().then((raw) {
+            setS(() {
+              playlists = raw.whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .toList();
+              loading = false;
+            });
+          }).catchError((e) {
+            setS(() { error = 'Could not load playlists'; loading = false; });
+          });
+        }
+
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(width: 36, height: 4,
+                decoration: BoxDecoration(
+                    color: Colors.white24, borderRadius: BorderRadius.circular(100))),
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Text('Add to Playlist',
+                    style: GoogleFonts.outfit(
+                        fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+              ),
+              const SizedBox(height: 10),
+              const Divider(color: Colors.white10, height: 1),
+              if (loading)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.purpleLight),
+                )
+              else if (error != null)
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(error!,
+                      style: GoogleFonts.outfit(color: AppColors.text3)),
+                )
+              else if (playlists.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text('No playlists yet. Create one in Library.',
+                      style: GoogleFonts.outfit(color: AppColors.text3)),
+                )
+              else
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 280),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: playlists.length,
+                    itemBuilder: (_, i) {
+                      final pl = playlists[i];
+                      final name = pl['title'] as String? ?? 'Playlist';
+                      final count = pl['track_count'] as int? ?? 0;
+                      return ListTile(
+                        leading: Container(
+                          width: 40, height: 40,
+                          decoration: BoxDecoration(
+                            gradient: AppColors.gradMixed,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Center(
+                              child: Text('🎵', style: TextStyle(fontSize: 18))),
+                        ),
+                        title: Text(name,
+                            style: GoogleFonts.outfit(
+                                fontSize: 14, fontWeight: FontWeight.w600,
+                                color: Colors.white)),
+                        subtitle: Text('$count songs',
+                            style: GoogleFonts.outfit(
+                                fontSize: 12, color: AppColors.text3)),
+                        onTap: () async {
+                          final id = pl['id'] as int?;
+                          if (id == null) return;
+                          Navigator.pop(ctx);
+                          try {
+                            await ApiService().addTrackToPlaylist(id, {
+                              'spotify_track_id': track['spotify_id']?.toString() ??
+                                  track['deezer_id']?.toString() ?? '',
+                              'title': track['title']?.toString() ?? '',
+                              'artist': track['artist']?.toString() ?? '',
+                              'album': track['album']?.toString(),
+                              'cover_url': track['cover_url']?.toString(),
+                              'preview_url': track['preview_url']?.toString(),
+                              'duration_ms': track['duration_ms'] as int?,
+                            });
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                content: Text('Added to $name',
+                                    style: GoogleFonts.outfit(color: Colors.white)),
+                                backgroundColor: AppColors.purpleDark,
+                                behavior: SnackBarBehavior.floating,
+                                duration: const Duration(seconds: 2),
+                              ));
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                content: Text('Track already in playlist or error',
+                                    style: GoogleFonts.outfit(color: Colors.white)),
+                                backgroundColor: const Color(0xFF3d0000),
+                                behavior: SnackBarBehavior.floating,
+                                duration: const Duration(seconds: 2),
+                              ));
+                            }
+                          }
+                        },
+                      );
+                    },
+                  ),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
+/// [onPlayNow] – required, called when "Play now" is tapped.
+/// [onGoToArtist] – called when "Go to artist" is tapped; hidden if null.
+/// [onAddToPlaylist] – called when "Add to playlist" is tapped; hidden if null.
+/// [onDontPlay] – called when "Don't play this" is tapped; hidden if null.
+void showTrackMenu(
+  BuildContext context,
+  Map<String, dynamic> track, {
+  required VoidCallback onPlayNow,
+  VoidCallback? onGoToArtist,
+  VoidCallback? onAddToPlaylist, // kept for backward-compat, now handled internally
+  VoidCallback? onDontPlay,
+}) {
+  final title = track['title']?.toString() ?? 'Track';
+  final artist = track['artist']?.toString() ?? '';
+
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: const Color(0xFF1a1a2e),
+    shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 8),
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(100)),
+          ),
+          const SizedBox(height: 14),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: GoogleFonts.outfit(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                if (artist.isNotEmpty)
+                  Text(artist,
+                      style: GoogleFonts.outfit(
+                          fontSize: 12, color: AppColors.text3),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Divider(color: Colors.white10, height: 1),
+          _TrackMenuItem(
+            icon: Icons.play_circle_outline_rounded,
+            label: 'Play now',
+            onTap: () {
+              Navigator.pop(ctx);
+              onPlayNow();
+            },
+          ),
+          _TrackMenuItem(
+            icon: Icons.playlist_add_rounded,
+            label: 'Add to playlist',
+            onTap: () {
+              Navigator.pop(ctx);
+              _showAddToPlaylistDialog(context, track);
+            },
+          ),
+          if (onGoToArtist != null && artist.isNotEmpty)
+            _TrackMenuItem(
+              icon: Icons.person_rounded,
+              label: 'Go to artist',
+              onTap: () {
+                Navigator.pop(ctx);
+                onGoToArtist();
+              },
+            ),
+          _TrackMenuItem(
+            icon: Icons.share_outlined,
+            label: 'Share',
+            onTap: () {
+              Navigator.pop(ctx);
+              Clipboard.setData(ClipboardData(text: '$title — $artist'));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                    content: Text('Copied to clipboard'),
+                    duration: Duration(seconds: 2)),
+              );
+            },
+          ),
+          if (onDontPlay != null)
+            _TrackMenuItem(
+              icon: Icons.do_not_disturb_alt_outlined,
+              label: "Don't play this",
+              onTap: () {
+                Navigator.pop(ctx);
+                onDontPlay();
+              },
+              color: Colors.redAccent.withOpacity(0.85),
+            ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
+  );
+}
+
+class _TrackMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Color? color;
+  const _TrackMenuItem(
+      {required this.icon, required this.label, required this.onTap, this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? Colors.white70;
+    return ListTile(
+      leading: Icon(icon, color: c, size: 22),
+      title: Text(label,
+          style: GoogleFonts.outfit(fontSize: 15, color: color ?? Colors.white)),
+      onTap: onTap,
     );
   }
 }

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_current_user_optional, get_db
@@ -89,30 +89,94 @@ _ARTIST_CORRECTIONS: dict[str, str] = {
     "сиа": "sia",
     "халид": "khalid",
     "нас": "nas",
+    # Russian / CIS artists (Cyrillic native names → Deezer-searchable)
+    "кино": "Kino",
+    "цой": "Kino",
+    "виктор цой": "Kino",
+    "земфира": "Zemfira",
+    "земфира рамазанова": "Zemfira",
+    "гречка": "Grechka",
+    "монеточка": "Monetochka",
+    "ic3peak": "IC3PEAK",
+    "айс пик": "IC3PEAK",
+    "shortparis": "Shortparis",
+    "шортпарис": "Shortparis",
+    "аигел": "Aigel",
+    "аигел гайсина": "Aigel",
+    "сплин": "Splin",
+    "наутилус помпилиус": "Nautilus Pompilius",
+    "наутилус": "Nautilus Pompilius",
+    "агата кристи": "Agata Kristi",
+    "би-2": "Bi-2",
+    "би 2": "Bi-2",
+    "чиж": "Chizh",
+    "чиж и ко": "Chizh",
+    "ленинград": "Leningrad",
+    "шнуров": "Leningrad",
+    "ддт": "DDT",
+    "юрий шевчук": "DDT",
+    "алиса": "Alisa",
+    "кинчев": "Alisa",
+    "пикник": "Piknik",
+    "аукцыон": "Auktsyon",
+    "жуки": "Zhuki",
+    "мумий тролль": "Mumiy Troll",
+    "мумий": "Mumiy Troll",
+    "лагутенко": "Mumiy Troll",
+    "ляпис трубецкой": "Lyapis Trubetskoy",
+    "ляпис": "Lyapis Trubetskoy",
+    "тату": "t.A.T.u.",
+    "тату": "t.A.T.u.",
+    "нервы": "Nervy",
+    "gone.fludd": "gone.fludd",
+    "фейс": "Face",
+    "элджей": "Eljay",
+    "niletto": "Niletto",
+    "нилетто": "Niletto",
+    "клава кока": "Klava Koka",
+    "клава": "Klava Koka",
+    "morgenshtern": "Morgenshtern",
+    "морген": "Morgenshtern",
+    "morgenstern": "Morgenshtern",
+    "оксимирон": "Oxxxymiron",
+    "oxxxymiron": "Oxxxymiron",
+    "баста": "Basta",
+    "ноггано": "Noggano",
+    "тимати": "Timati",
+    "скриптонит": "Scriptonite",
+    "scriptonite": "Scriptonite",
+    "jah khalib": "Jah Khalib",
+    "джа халиб": "Jah Khalib",
+    "мот": "Mot",
+    "ханза": "Hanza",
+    "макс корж": "Max Korzh",
+    "корж": "Max Korzh",
+    "ария": "Aria",
+    "ария рок": "Aria",
+    "король и шут": "Korol i Shut",
+    "кис": "Korol i Shut",
+    "порнофильмы": "Pornophilms",
+    "рубль": "Rubl",
+    # Kazakh artists
+    "imanbek": "Imanbek",
+    "иманбек": "Imanbek",
+    "moldanazar": "Moldanazar",
+    "молданазар": "Moldanazar",
+    "dimash": "Dimash",
+    "димаш": "Dimash",
+    "dimash kudaibergen": "Dimash",
+    "димаш кудайберген": "Dimash",
 }
-
-_CYR_TO_LAT: dict[str, str] = {
-    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "yo",
-    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
-    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
-    "ф": "f", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch",
-    "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
-}
-
-
-def _transliterate(text: str) -> str:
-    return "".join(_CYR_TO_LAT.get(c, c) for c in text)
-
 
 def _normalize_query(q: str) -> str:
-    """Return the best search string: apply corrections dict first, then
-    transliterate any remaining Cyrillic to Latin so external APIs find a match."""
+    """Return the best search string.
+    Known artist aliases/corrections are applied from the dict.
+    All other queries (including Cyrillic) are passed as-is — Deezer has native
+    multilingual search and handles Cyrillic, Arabic, Japanese, etc. directly."""
     text = q.strip().lower()
     if text in _ARTIST_CORRECTIONS:
         return _ARTIST_CORRECTIONS[text]
-    if any("\u0400" <= c <= "\u04FF" for c in text):
-        return _transliterate(text)
-    return text
+    return q.strip()
 
 
 RECOMMENDATIONS_CACHE_TTL = 3600
@@ -138,6 +202,11 @@ class SkipTrackRequest(BaseModel):
     time_listened_ms: int = Field(default=0, ge=0)
     title: Optional[str] = None
     artist: Optional[str] = None
+
+
+class ProgressUpdateRequest(BaseModel):
+    progress_ms: int = Field(default=0, ge=0)
+    completed: bool = False
 
 
 def _extract_genres(track: Optional[TrackCache]) -> list[str]:
@@ -182,6 +251,57 @@ async def _ensure_track_cached(
 
 
 @router.get(
+    "/me/history",
+    summary="Get listening history grouped by day",
+    description="Returns the user's full listening history grouped into day sections (Today, Yesterday, or locale date).",
+)
+async def get_listening_history(
+    limit: int = Query(default=150, ge=1, le=300),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        await db.execute(
+            select(ListeningHistory, TrackCache)
+            .join(TrackCache, TrackCache.spotify_id == ListeningHistory.spotify_track_id, isouter=True)
+            .where(ListeningHistory.user_id == current_user.id)
+            .order_by(desc(ListeningHistory.created_at))
+            .limit(limit)
+        )
+    ).all()
+
+    today = datetime.utcnow().date()
+    yesterday = today - timedelta(days=1)
+
+    grouped: dict[str, list[dict]] = {}
+    for history, track in rows:
+        if track is None:
+            continue
+        event_date = history.created_at.date()
+        if event_date == today:
+            label = "Today"
+        elif event_date == yesterday:
+            label = "Yesterday"
+        else:
+            raw = history.created_at.strftime("%d %b %Y")
+            label = raw.lstrip("0")  # → "9 Apr"
+
+        if label not in grouped:
+            grouped[label] = []
+        grouped[label].append({
+            "spotify_id": track.spotify_id,
+            "title": track.title,
+            "artist": track.artist,
+            "cover_url": track.cover_url,
+            "preview_url": track.preview_url or None,
+            "duration_ms": track.duration_ms,
+            "played_at": history.created_at.isoformat(),
+        })
+
+    return [{"date": label, "tracks": tracks} for label, tracks in grouped.items()]
+
+
+@router.get(
     "/me/recent",
     summary="Get recently played tracks",
     description="Returns the user's last N uniquely played tracks with cover art.",
@@ -191,11 +311,10 @@ async def get_recent_tracks(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from sqlalchemy import desc, func as sa_func
     subq = (
         select(
             ListeningHistory.spotify_track_id,
-            sa_func.max(ListeningHistory.created_at).label("last_played"),
+            func.max(ListeningHistory.created_at).label("last_played"),
         )
         .where(ListeningHistory.user_id == current_user.id)
         .group_by(ListeningHistory.spotify_track_id)
@@ -216,11 +335,249 @@ async def get_recent_tracks(
             "title": track.title,
             "artist": track.artist,
             "cover_url": track.cover_url,
+            "preview_url": track.preview_url or None,
             "duration_ms": track.duration_ms,
             "played_at": played_at.isoformat() if played_at else None,
         }
         for track, played_at in rows
     ]
+
+
+@router.get(
+    "/me/liked",
+    summary="Get liked tracks",
+    description="Returns tracks the user has liked, deduplicated, most recently liked first.",
+)
+async def get_liked_tracks(
+    limit: int = Query(default=100, ge=1, le=300),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from sqlalchemy import desc as sa_desc, func as sa_func
+
+    subq = (
+        select(
+            ListeningHistory.spotify_track_id,
+            sa_func.max(ListeningHistory.created_at).label("liked_at"),
+        )
+        .where(
+            ListeningHistory.user_id == current_user.id,
+            ListeningHistory.action == "liked",
+        )
+        .group_by(ListeningHistory.spotify_track_id)
+        .order_by(sa_desc("liked_at"))
+        .limit(limit)
+        .subquery()
+    )
+    rows = (
+        await db.execute(
+            select(TrackCache, subq.c.liked_at)
+            .join(subq, TrackCache.spotify_id == subq.c.spotify_track_id)
+            .order_by(sa_desc(subq.c.liked_at))
+        )
+    ).all()
+    return [
+        {
+            "spotify_id": track.spotify_id,
+            "title": track.title,
+            "artist": track.artist,
+            "album": track.album,
+            "cover_url": track.cover_url,
+            "preview_url": track.preview_url or None,
+            "duration_ms": track.duration_ms,
+            "liked_at": liked_at.isoformat() if liked_at else None,
+        }
+        for track, liked_at in rows
+    ]
+
+
+@router.get(
+    "/me/on-repeat",
+    summary="Get on-repeat tracks",
+    description="Returns the user's most-played tracks in the last 30 days.",
+)
+async def get_on_repeat_tracks(
+    limit: int = Query(default=20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    rows = (
+        await db.execute(
+            select(
+                ListeningHistory.spotify_track_id,
+                func.count().label("play_count"),
+                func.max(ListeningHistory.created_at).label("last_played"),
+            )
+            .where(ListeningHistory.user_id == current_user.id)
+            .where(ListeningHistory.created_at >= cutoff)
+            .group_by(ListeningHistory.spotify_track_id)
+            .order_by(desc("play_count"), desc("last_played"))
+            .limit(limit)
+        )
+    ).all()
+
+    track_ids = [row.spotify_track_id for row in rows]
+    if not track_ids:
+        # Fall back to global recommendations when no history yet
+        return await music_service.get_recommendations_from_spotify(None, limit)
+
+    tracks = (
+        await db.execute(select(TrackCache).where(TrackCache.spotify_id.in_(track_ids)))
+    ).scalars().all()
+    track_map = {t.spotify_id: t for t in tracks}
+    result = []
+    row_map = {row.spotify_track_id: row for row in rows}
+    for tid in track_ids:
+        t = track_map.get(tid)
+        row = row_map.get(tid)
+        if t:
+            result.append({
+                "spotify_id": t.spotify_id,
+                "title": t.title,
+                "artist": t.artist,
+                "cover_url": t.cover_url,
+                "preview_url": t.preview_url,
+                "duration_ms": t.duration_ms,
+                "play_count": int(row.play_count) if row else 0,
+                "last_played": row.last_played.isoformat() if row and row.last_played else None,
+            })
+    return result
+
+
+@router.get(
+    "/me/flashbacks",
+    summary="Get flashback tracks",
+    description="Returns tracks the user played 60+ days ago but not in the last 30 days.",
+)
+async def get_flashback_tracks(
+    limit: int = Query(default=20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    old_cutoff = datetime.now(timezone.utc) - timedelta(days=60)
+
+    recent_ids_sq = (
+        select(ListeningHistory.spotify_track_id)
+        .where(ListeningHistory.user_id == current_user.id)
+        .where(ListeningHistory.created_at >= recent_cutoff)
+        .distinct()
+        .scalar_subquery()
+    )
+
+    rows = (
+        await db.execute(
+            select(
+                ListeningHistory.spotify_track_id,
+                func.count().label("play_count"),
+                func.max(ListeningHistory.created_at).label("last_played"),
+            )
+            .where(ListeningHistory.user_id == current_user.id)
+            .where(ListeningHistory.created_at <= old_cutoff)
+            .where(ListeningHistory.spotify_track_id.not_in(recent_ids_sq))
+            .group_by(ListeningHistory.spotify_track_id)
+            .order_by(asc("last_played"), desc("play_count"))
+            .limit(limit)
+        )
+    ).all()
+
+    track_ids = [row.spotify_track_id for row in rows]
+    if not track_ids:
+        return await music_service.get_recommendations_from_spotify(None, limit)
+
+    tracks = (
+        await db.execute(select(TrackCache).where(TrackCache.spotify_id.in_(track_ids)))
+    ).scalars().all()
+    track_map = {t.spotify_id: t for t in tracks}
+    result = []
+    row_map = {row.spotify_track_id: row for row in rows}
+    for tid in track_ids:
+        t = track_map.get(tid)
+        row = row_map.get(tid)
+        if t:
+            result.append({
+                "spotify_id": t.spotify_id,
+                "title": t.title,
+                "artist": t.artist,
+                "cover_url": t.cover_url,
+                "preview_url": t.preview_url,
+                "duration_ms": t.duration_ms,
+                "play_count": int(row.play_count) if row else 0,
+                "last_played": row.last_played.isoformat() if row and row.last_played else None,
+            })
+    return result
+
+
+@router.get(
+    "/me/genre-mixes",
+    summary="Get genre mixes",
+    description="Builds lightweight personalized genre mixes from the user's listening history and saved genres.",
+)
+async def get_genre_mixes(
+    limit: int = Query(default=6, ge=1, le=12),
+    tracks_per_mix: int = Query(default=12, ge=5, le=30),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    preferred_genres = (
+        await db.execute(
+            select(UserGenre.genre)
+            .where(UserGenre.user_id == current_user.id)
+            .order_by(desc(UserGenre.weight))
+            .limit(limit)
+        )
+    ).scalars().all()
+
+    if not preferred_genres:
+        return []
+
+    listening_rows = (
+        await db.execute(
+            select(TrackCache, func.count(ListeningHistory.id).label("play_count"))
+            .join(ListeningHistory, ListeningHistory.spotify_track_id == TrackCache.spotify_id)
+            .where(ListeningHistory.user_id == current_user.id)
+            .group_by(TrackCache.id)
+            .order_by(desc("play_count"), desc(func.max(ListeningHistory.created_at)))
+            .limit(400)
+        )
+    ).all()
+
+    mixes: list[dict] = []
+    used_track_ids: set[str] = set()
+    for genre in preferred_genres:
+        genre_key = genre.lower()
+        genre_tracks: list[dict] = []
+        for track, play_count in listening_rows:
+            track_genres = [g.lower() for g in (track.genres or []) if isinstance(g, str)]
+            if genre_key not in track_genres or track.spotify_id in used_track_ids:
+                continue
+            genre_tracks.append({
+                "spotify_id": track.spotify_id,
+                "title": track.title,
+                "artist": track.artist,
+                "cover_url": track.cover_url,
+                "preview_url": track.preview_url,
+                "duration_ms": track.duration_ms,
+                "play_count": int(play_count or 0),
+            })
+            used_track_ids.add(track.spotify_id)
+            if len(genre_tracks) >= tracks_per_mix:
+                break
+
+        if not genre_tracks:
+            continue
+
+        mixes.append({
+            "id": genre_key.replace(" ", "_"),
+            "title": f"{genre.title()} Mix",
+            "subtitle": f"{len(genre_tracks)} tracks built from your taste",
+            "genre": genre,
+            "cover_url": genre_tracks[0]["cover_url"],
+            "tracks": genre_tracks,
+        })
+
+    return mixes
 
 
 @router.get(
@@ -435,11 +792,21 @@ async def play_track(
         "cover_url": track.cover_url if track else None,
         "played_at": datetime.now(timezone.utc).isoformat(),
     }
-    await request.app.state.redis.setex(
+    redis = request.app.state.redis
+    await redis.setex(
         f"now_playing:{current_user.id}",
         NOW_PLAYING_TTL,
         json.dumps(now_playing),
     )
+
+    # Update trending sorted sets
+    city_key = (getattr(current_user, "city", None) or "unknown").lower().replace(" ", "_")
+    today_key = f"trending:snapshot:{datetime.now(timezone.utc).strftime('%Y%m%d')}"
+    await redis.zincrby("trending:global", 1, spotify_id)
+    await redis.zincrby(f"trending:city:{city_key}", 1, spotify_id)
+    await redis.zincrby(today_key, 1, spotify_id)
+    await redis.expire(today_key, 172800)  # keep 2 days
+
     return {"message": "ok", "action": action, "weight_applied": weight}
 
 
@@ -579,7 +946,7 @@ async def get_artist_profile(
     artist, top_tracks, albums, related_artists = await asyncio.gather(
         deezer_service.get_artist(deezer_id),
         deezer_service.get_artist_top_tracks(deezer_id),
-        deezer_service.get_artist_albums(deezer_id),
+        deezer_service.get_artist_albums(deezer_id, limit=50),
         deezer_service.get_related_artists(deezer_id),
     )
     if not artist:
@@ -591,6 +958,30 @@ async def get_artist_profile(
         "albums": albums,
         "related_artists": related_artists,
     }
+
+
+@artist_router.get(
+    "/{deezer_id}/discography",
+    summary="Get full artist discography",
+    description="Returns all releases grouped by type: albums, singles, eps, others.",
+)
+async def get_artist_discography(
+    deezer_id: int,
+    current_user: User | None = Depends(get_current_user_optional),
+):
+    all_releases = await deezer_service.get_artist_albums(deezer_id, limit=100)
+    by_type: dict[str, list] = {"albums": [], "singles": [], "eps": [], "others": []}
+    for release in all_releases:
+        rtype = (release.get("record_type") or "album").lower()
+        if rtype == "album":
+            by_type["albums"].append(release)
+        elif rtype == "single":
+            by_type["singles"].append(release)
+        elif rtype in ("ep", "ep_release"):
+            by_type["eps"].append(release)
+        else:
+            by_type["others"].append(release)
+    return by_type
 
 
 @album_router.get(
@@ -635,3 +1026,33 @@ async def get_album_tracks(
     current_user: User | None = Depends(get_current_user_optional),
 ):
     return await deezer_service.get_album_tracks(deezer_album_id)
+
+
+
+@router.post(
+    "/{spotify_id}/progress",
+    status_code=200,
+    summary="Update track progress",
+    description="Heartbeat endpoint called every 5s during playback to save listening position.",
+)
+async def update_track_progress(
+    spotify_id: str,
+    body: ProgressUpdateRequest = Body(default_factory=ProgressUpdateRequest),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Update most recent listening history entry for this user+track
+    from sqlalchemy import update as sa_update
+    latest = await db.scalar(
+        select(ListeningHistory)
+        .where(
+            ListeningHistory.user_id == current_user.id,
+            ListeningHistory.spotify_track_id == spotify_id,
+        )
+        .order_by(desc(ListeningHistory.created_at))
+        .limit(1)
+    )
+    if latest:
+        latest.time_listened_ms = body.progress_ms
+    await db.commit()
+    return {"ok": True}

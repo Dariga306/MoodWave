@@ -1,9 +1,13 @@
+import 'dart:math';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/common_widgets.dart';
+import 'artist_screen.dart';
 import 'player_screen.dart';
 
 class AlbumScreen extends StatefulWidget {
@@ -26,9 +30,7 @@ class _AlbumScreenState extends State<AlbumScreen> {
   Map<String, dynamic>? _album;
   bool _loading = true;
   bool _isLiked = false;
-
-  /// Track IDs the user has chosen to hide/ignore for this album session.
-  final Set<String> _ignoredTrackIds = {};
+  bool _downloadToggle = false;
 
   @override
   void initState() {
@@ -63,374 +65,299 @@ class _AlbumScreenState extends State<AlbumScreen> {
       (track['spotify_id'] ?? track['deezer_id'] ?? track['track_id'] ?? '')
           .toString();
 
-  void _toggleIgnore(Map<String, dynamic> track) {
-    final id = _trackId(track);
-    if (id.isEmpty) return;
-    setState(() {
-      if (_ignoredTrackIds.contains(id)) {
-        _ignoredTrackIds.remove(id);
-      } else {
-        _ignoredTrackIds.add(id);
-      }
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          _ignoredTrackIds.contains(id)
-              ? 'Track hidden — will be skipped'
-              : 'Track restored',
-          style: GoogleFonts.outfit(fontSize: 13),
-        ),
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: const Color(0xFF1a1a2e),
-      ),
-    );
+  void _playAll(List<dynamic> tracks) {
+    final list = tracks.whereType<Map>().map((t) => Map<String, dynamic>.from(t)).toList();
+    if (list.isEmpty) return;
+    final first = Map<String, dynamic>.from(list.first)..['queue'] = list;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => PlayerScreen(track: first)));
   }
 
-  void _playAll(List<dynamic> tracks) {
-    final active = tracks
-        .whereType<Map>()
-        .map((t) => Map<String, dynamic>.from(t))
-        .where((t) => !_ignoredTrackIds.contains(_trackId(t)))
-        .toList();
-    if (active.isEmpty) return;
-    final first = Map<String, dynamic>.from(active.first)..['queue'] = active;
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => PlayerScreen(track: first)),
-    );
+  void _shufflePlay(List<dynamic> tracks) {
+    final list = tracks.whereType<Map>().map((t) => Map<String, dynamic>.from(t)).toList();
+    if (list.isEmpty) return;
+    list.shuffle(Random());
+    final first = Map<String, dynamic>.from(list.first)..['queue'] = list;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => PlayerScreen(track: first)));
   }
 
   @override
   Widget build(BuildContext context) {
     final tracks = (_album?['tracks'] as List?) ?? [];
     final coverUrl = _album?['cover_xl']?.toString() ?? widget.initialCover;
-    final title =
-        _album?['title']?.toString() ?? widget.initialTitle ?? 'Album';
+    final title = _album?['title']?.toString() ?? widget.initialTitle ?? 'Album';
     final artist = _album?['artist']?.toString() ?? '';
+    final artistId = _album?['artist_id'];
     final year = _year(_album?['release_date']?.toString());
-    final nbTracks = _album?['nb_tracks'] ?? tracks.length;
+    final nbTracks = tracks.isNotEmpty ? tracks.length : (_album?['nb_tracks'] ?? 0);
 
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppColors.purpleLight,
-              ),
-            )
+          ? const Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight))
           : CustomScrollView(
               slivers: [
+                // ── Spotify-style large cover header ──────────────────────
                 SliverToBoxAdapter(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          const Color(0xFF1e0846).withOpacity(0.9),
-                          Colors.transparent,
+                  child: Column(
+                    children: [
+                      // Cover + back button
+                      Stack(
+                        children: [
+                          // Cover image
+                          Container(
+                            width: double.infinity,
+                            height: 300,
+                            color: const Color(0xFF1a0533),
+                            child: coverUrl != null
+                                ? CachedNetworkImage(
+                                    imageUrl: coverUrl,
+                                    fit: BoxFit.cover,
+                                    placeholder: (_, __) => const SizedBox(),
+                                    errorWidget: (_, __, ___) => const Center(
+                                        child: Text('💿', style: TextStyle(fontSize: 80))),
+                                  )
+                                : const Center(
+                                    child: Text('💿', style: TextStyle(fontSize: 80))),
+                          ),
+                          // Gradient scrim
+                          Container(
+                            height: 300,
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [Color(0x55000000), Color(0xCC08080F)],
+                              ),
+                            ),
+                          ),
+                          // Back button
+                          SafeArea(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: GestureDetector(
+                                onTap: () => Navigator.pop(context),
+                                child: Container(
+                                  width: 38,
+                                  height: 38,
+                                  decoration: BoxDecoration(
+                                    color: Colors.black45,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.arrow_back_ios_new_rounded,
+                                      size: 16, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
-                    ),
-                    child: SafeArea(
-                      bottom: false,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                      // ── Metadata ─────────────────────────────────────────
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
+                            Text(title,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 26,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppColors.text,
+                                    height: 1.1)),
+                            const SizedBox(height: 6),
+                            Row(children: [
+                              if (artist.isNotEmpty)
                                 GestureDetector(
-                                  onTap: () => Navigator.of(context).pop(),
-                                  child: Container(
-                                    width: 40,
-                                    height: 40,
-                                    decoration: BoxDecoration(
-                                      color: AppColors.glass,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border:
-                                          Border.all(color: AppColors.border),
-                                    ),
-                                    child: const Icon(Icons.arrow_back_rounded,
-                                        size: 18, color: Colors.white),
-                                  ),
-                                ),
-                                // Like album button
-                                GestureDetector(
-                                  onTap: () {
-                                    setState(() => _isLiked = !_isLiked);
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          _isLiked
-                                              ? 'Album saved to your library'
-                                              : 'Removed from library',
-                                          style:
-                                              GoogleFonts.outfit(fontSize: 13),
-                                        ),
-                                        duration: const Duration(seconds: 2),
-                                        behavior: SnackBarBehavior.floating,
-                                        backgroundColor:
-                                            const Color(0xFF1a1a2e),
-                                      ),
-                                    );
-                                  },
-                                  child: Container(
-                                    width: 40,
-                                    height: 40,
-                                    decoration: BoxDecoration(
-                                      color: AppColors.glass,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border:
-                                          Border.all(color: AppColors.border),
-                                    ),
-                                    child: Icon(
-                                      _isLiked
-                                          ? Icons.favorite_rounded
-                                          : Icons.favorite_border_rounded,
-                                      size: 20,
-                                      color: _isLiked
-                                          ? AppColors.pink
-                                          : Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 20),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Container(
-                                  width: 140,
-                                  height: 140,
-                                  decoration: BoxDecoration(
-                                    gradient: const LinearGradient(colors: [
-                                      Color(0xFF1a0533),
-                                      Color(0xFF7c3aed)
-                                    ]),
-                                    borderRadius: BorderRadius.circular(22),
-                                    boxShadow: [
-                                      BoxShadow(
-                                          color: Colors.black.withOpacity(0.5),
-                                          blurRadius: 40,
-                                          offset: const Offset(0, 20)),
-                                    ],
-                                  ),
-                                  child: coverUrl != null
-                                      ? ClipRRect(
-                                          borderRadius:
-                                              BorderRadius.circular(22),
-                                          child: CachedNetworkImage(
-                                            imageUrl: coverUrl,
-                                            fit: BoxFit.cover,
-                                            placeholder: (_, __) =>
-                                                const SizedBox(),
-                                            errorWidget: (_, __, ___) =>
-                                                const Center(
-                                              child: Text('💿',
-                                                  style: TextStyle(
-                                                      fontSize: 58)),
+                                  onTap: artistId == null
+                                      ? null
+                                      : () => Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) => ArtistScreen(
+                                                artistId: artistId.toString(),
+                                                artistName: artist,
+                                              ),
                                             ),
                                           ),
-                                        )
-                                      : const Center(
-                                          child: Text('💿',
-                                              style:
-                                                  TextStyle(fontSize: 58))),
-                                ),
-                                const SizedBox(width: 18),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Album${year.isNotEmpty ? ' · $year' : ''}',
-                                        style: GoogleFonts.outfit(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w700,
-                                          color: AppColors.purpleLight,
-                                          letterSpacing: 0.1,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        title,
-                                        style: GoogleFonts.outfit(
-                                          fontSize: 22,
-                                          fontWeight: FontWeight.w900,
-                                          color: AppColors.text,
-                                          height: 1.1,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      if (artist.isNotEmpty)
-                                        Text(
-                                          artist,
-                                          style: GoogleFonts.outfit(
-                                              fontSize: 14,
-                                              color: AppColors.text2),
-                                        ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '$nbTracks songs',
-                                        style: GoogleFonts.outfit(
-                                            fontSize: 12,
-                                            color: AppColors.text3),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 18),
-                            if (tracks.isNotEmpty)
-                              GestureDetector(
-                                onTap: () => _playAll(tracks),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 28, vertical: 14),
-                                  decoration: BoxDecoration(
-                                    gradient: AppColors.gradPurple,
-                                    borderRadius: BorderRadius.circular(14),
-                                    boxShadow: [
-                                      BoxShadow(
-                                          color: AppColors.purpleDark
-                                              .withOpacity(0.35),
-                                          blurRadius: 20)
-                                    ],
-                                  ),
-                                  child: Row(children: [
-                                    const Icon(Icons.play_arrow_rounded,
-                                        color: Colors.white, size: 18),
-                                    const SizedBox(width: 8),
-                                    Text('Play all',
-                                        style: GoogleFonts.outfit(
+                                  child: Text(artist,
+                                      style: GoogleFonts.outfit(
                                           fontSize: 15,
-                                          fontWeight: FontWeight.w700,
-                                          color: Colors.white,
-                                        )),
-                                    const Spacer(),
-                                    if (_ignoredTrackIds.isNotEmpty)
-                                      Text(
-                                        '(${_ignoredTrackIds.length} hidden)',
-                                        style: GoogleFonts.outfit(
-                                            fontSize: 11,
-                                            color: Colors.white60),
-                                      ),
-                                  ]),
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.purpleLight)),
+                                ),
+                              if (year.isNotEmpty) ...[
+                                Text('  ·  ',
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 14, color: AppColors.text3)),
+                                Text(year,
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 14, color: AppColors.text3)),
+                              ],
+                            ]),
+                            const SizedBox(height: 4),
+                            Text('$nbTracks songs',
+                                style: GoogleFonts.outfit(
+                                    fontSize: 12, color: AppColors.text3)),
+                            const SizedBox(height: 16),
+                            // ── Action buttons row ──────────────────────────
+                            Row(children: [
+                              // Heart
+                              GestureDetector(
+                                onTap: () => setState(() => _isLiked = !_isLiked),
+                                child: Icon(
+                                  _isLiked
+                                      ? Icons.favorite_rounded
+                                      : Icons.favorite_border_rounded,
+                                  color: _isLiked ? AppColors.pink : AppColors.text3,
+                                  size: 28,
                                 ),
                               ),
+                              const SizedBox(width: 16),
+                              // Download toggle
+                              GestureDetector(
+                                onTap: () => setState(() => _downloadToggle = !_downloadToggle),
+                                child: Icon(
+                                  _downloadToggle
+                                      ? Icons.download_done_rounded
+                                      : Icons.download_outlined,
+                                  color: _downloadToggle
+                                      ? AppColors.purpleLight
+                                      : AppColors.text3,
+                                  size: 26,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              // Three dots
+                              GestureDetector(
+                                onTap: () => _showAlbumMenu(tracks, artist, artistId),
+                                child: const Icon(Icons.more_vert_rounded,
+                                    color: AppColors.text3, size: 26),
+                              ),
+                              const Spacer(),
+                              // Shuffle
+                              if (tracks.isNotEmpty)
+                                GestureDetector(
+                                  onTap: () => _shufflePlay(tracks),
+                                  child: Container(
+                                    width: 44,
+                                    height: 44,
+                                    margin: const EdgeInsets.only(right: 14),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.surface,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: AppColors.border),
+                                    ),
+                                    child: const Icon(Icons.shuffle_rounded,
+                                        color: Colors.white, size: 20),
+                                  ),
+                                ),
+                              // Play
+                              if (tracks.isNotEmpty)
+                                GestureDetector(
+                                  onTap: () => _playAll(tracks),
+                                  child: Container(
+                                    width: 56,
+                                    height: 56,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF1DB954),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.play_arrow_rounded,
+                                        color: Colors.white, size: 30),
+                                  ),
+                                ),
+                            ]),
+                            const SizedBox(height: 8),
                           ],
                         ),
                       ),
-                    ),
+                      if (tracks.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 40),
+                          child: Center(
+                            child: Column(children: [
+                              const Text('💿', style: TextStyle(fontSize: 48)),
+                              const SizedBox(height: 16),
+                              Text('No tracks available',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.text)),
+                              const SizedBox(height: 8),
+                              Text('This album has no playable tracks yet.',
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 13, color: AppColors.text3)),
+                            ]),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
+                // ── Track list ────────────────────────────────────────────
                 SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
-                      final track = Map<String, dynamic>.from(
-                          tracks[index] as Map)
+                      final track = Map<String, dynamic>.from(tracks[index] as Map)
                         ..['queue'] = tracks;
-                      final id = _trackId(track);
-                      final ignored = _ignoredTrackIds.contains(id);
-                      final trackTitle =
-                          track['title']?.toString() ?? 'Unknown';
+                      final trackTitle = track['title']?.toString() ?? 'Unknown';
                       final duration = _fmt(track['duration_ms']);
-                      final rank = (index + 1).toString();
 
-                      return Opacity(
-                        opacity: ignored ? 0.35 : 1.0,
-                        child: InkWell(
-                          onTap: ignored
-                              ? null
-                              : () => Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                        builder: (_) =>
-                                            PlayerScreen(track: track)),
-                                  ),
-                          onLongPress: () => _showTrackOptions(track, ignored),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 20, vertical: 12),
-                            decoration: BoxDecoration(
-                                color: ignored
-                                    ? Colors.white.withOpacity(0.02)
-                                    : Colors.transparent,
-                                border: const Border(
-                                    bottom: BorderSide(
-                                        color: Color(0x0AFFFFFF)))),
-                            child: Row(children: [
-                              SizedBox(
-                                width: 22,
-                                child: Text(
-                                  rank,
-                                  textAlign: TextAlign.center,
-                                  style: GoogleFonts.outfit(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.text3),
-                                ),
+                      return InkWell(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => PlayerScreen(track: track)),
+                        ),
+                        onLongPress: () => _showTrackOptions(track, artist, artistId),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          decoration: const BoxDecoration(
+                            border: Border(
+                                bottom: BorderSide(color: Color(0x0AFFFFFF))),
+                          ),
+                          child: Row(children: [
+                            SizedBox(
+                              width: 24,
+                              child: Text(
+                                '${index + 1}',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.text3),
                               ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      trackTitle,
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(trackTitle,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: GoogleFonts.outfit(
                                           fontSize: 15,
                                           fontWeight: FontWeight.w600,
-                                          color: ignored
-                                              ? Colors.white38
-                                              : Colors.white,
-                                          decoration: ignored
-                                              ? TextDecoration.lineThrough
-                                              : null),
-                                    ),
-                                    Text(
-                                      artist,
+                                          color: Colors.white)),
+                                  Text(artist,
                                       style: GoogleFonts.outfit(
-                                          fontSize: 12,
-                                          color: AppColors.text3),
-                                    ),
-                                  ],
-                                ),
+                                          fontSize: 12, color: AppColors.text3)),
+                                ],
                               ),
-                              if (ignored)
-                                const Padding(
-                                  padding: EdgeInsets.only(right: 6),
-                                  child: Icon(Icons.visibility_off_outlined,
-                                      size: 14, color: AppColors.text3),
-                                ),
-                              Text(
-                                duration,
+                            ),
+                            Text(duration,
                                 style: GoogleFonts.outfit(
-                                    fontSize: 12, color: AppColors.text3),
+                                    fontSize: 12, color: AppColors.text3)),
+                            const SizedBox(width: 6),
+                            GestureDetector(
+                              onTap: () => _showTrackOptions(track, artist, artistId),
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(Icons.more_vert_rounded,
+                                    size: 18, color: AppColors.text3),
                               ),
-                              const SizedBox(width: 8),
-                              GestureDetector(
-                                onTap: () =>
-                                    _showTrackOptions(track, ignored),
-                                child: const Padding(
-                                  padding: EdgeInsets.all(4),
-                                  child: Icon(Icons.more_vert_rounded,
-                                      size: 18, color: AppColors.text3),
-                                ),
-                              ),
-                            ]),
-                          ),
+                            ),
+                          ]),
                         ),
                       );
                     },
@@ -443,7 +370,7 @@ class _AlbumScreenState extends State<AlbumScreen> {
     );
   }
 
-  void _showTrackOptions(Map<String, dynamic> track, bool isIgnored) {
+  void _showAlbumMenu(List<dynamic> tracks, String artist, dynamic artistId) {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1a1a2e),
@@ -455,61 +382,81 @@ class _AlbumScreenState extends State<AlbumScreen> {
           children: [
             const SizedBox(height: 8),
             Container(
-              width: 36,
-              height: 4,
+              width: 36, height: 4,
               decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(100)),
+                  color: Colors.white24, borderRadius: BorderRadius.circular(100)),
             ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                track['title']?.toString() ?? 'Track',
-                style: GoogleFonts.outfit(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            const SizedBox(height: 16),
+            _MenuItem(
+              icon: Icons.play_circle_outline_rounded,
+              label: 'Play all',
+              onTap: () { Navigator.pop(context); _playAll(tracks); },
+            ),
+            _MenuItem(
+              icon: Icons.shuffle_rounded,
+              label: 'Shuffle play',
+              onTap: () { Navigator.pop(context); _shufflePlay(tracks); },
+            ),
+            if (artist.isNotEmpty && artistId != null)
+              _MenuItem(
+                icon: Icons.person_rounded,
+                label: 'Go to artist',
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ArtistScreen(
+                        artistId: artistId.toString(),
+                        artistName: artist,
+                      ),
+                    ),
+                  );
+                },
               ),
-            ),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: Icon(
-                isIgnored
-                    ? Icons.visibility_rounded
-                    : Icons.visibility_off_outlined,
-                color: isIgnored ? AppColors.purpleLight : AppColors.text2,
-                size: 22,
-              ),
-              title: Text(
-                isIgnored ? 'Unhide track' : 'Hide track (skip in album)',
-                style: GoogleFonts.outfit(fontSize: 15, color: Colors.white),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _toggleIgnore(track);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.play_circle_outline_rounded,
-                  color: AppColors.text2, size: 22),
-              title: Text('Play now',
-                  style: GoogleFonts.outfit(fontSize: 15, color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => PlayerScreen(track: track)),
-                );
-              },
-            ),
             const SizedBox(height: 8),
           ],
         ),
       ),
+    );
+  }
+
+  void _showTrackOptions(Map<String, dynamic> track, String albumArtist, dynamic artistId) {
+    showTrackMenu(
+      context,
+      track,
+      onPlayNow: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => PlayerScreen(track: track)),
+      ),
+      onGoToArtist: artistId == null
+          ? null
+          : () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ArtistScreen(
+                    artistId: artistId.toString(),
+                    artistName: albumArtist,
+                  ),
+                ),
+              ),
+    );
+  }
+}
+
+class _MenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _MenuItem({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon, color: AppColors.text2, size: 22),
+      title: Text(label,
+          style: GoogleFonts.outfit(fontSize: 15, color: Colors.white)),
+      onTap: onTap,
     );
   }
 }

@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -5,25 +6,35 @@ import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/common_widgets.dart';
+import 'artist_screen.dart';
 import 'player_screen.dart';
 
 // ══════════════════════════════════════════
 // LISTENING PARTY
 // ══════════════════════════════════════════
 class ListeningPartyScreen extends StatefulWidget {
-  const ListeningPartyScreen({super.key});
+  final Map<String, dynamic> room;
+  const ListeningPartyScreen({super.key, required this.room});
   @override
   State<ListeningPartyScreen> createState() => _ListeningPartyScreenState();
 }
 
-class _ListeningPartyScreenState extends State<ListeningPartyScreen> with SingleTickerProviderStateMixin {
+class _ListeningPartyScreenState extends State<ListeningPartyScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _blinkCtrl;
+  Map<String, dynamic> _room = {};
+  bool _loading = true;
+  bool _joining = false;
+  bool _joinRequested = false;
 
   @override
   void initState() {
     super.initState();
-    _blinkCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))
+    _blinkCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1200))
       ..repeat(reverse: true);
+    _room = Map<String, dynamic>.from(widget.room);
+    _loadRoom();
   }
 
   @override
@@ -32,240 +43,409 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen> with Single
     super.dispose();
   }
 
+  Future<void> _loadRoom() async {
+    final roomId = _room['room_id'] as int?;
+    if (roomId == null) { setState(() => _loading = false); return; }
+    try {
+      final details = await ApiService().getRoomDetails(roomId);
+      if (mounted) setState(() { _room = details; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _sendJoinRequest() async {
+    final roomId = _room['room_id'] as int?;
+    if (roomId == null) return;
+    setState(() => _joining = true);
+    try {
+      await ApiService().sendJoinRequest(roomId);
+      if (!mounted) return;
+      setState(() { _joining = false; _joinRequested = true; });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Join request sent! Waiting for host approval.',
+              style: GoogleFonts.outfit(fontSize: 13)),
+          backgroundColor: AppColors.surface,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _joining = false);
+      final msg = e.toString().contains('Already in room')
+          ? 'You already have a pending or active request.'
+          : 'Could not send join request. Try again.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg, style: GoogleFonts.outfit(fontSize: 13)),
+          backgroundColor: const Color(0xFFef4444),
+        ),
+      );
+    }
+  }
+
+  String _fmtMs(dynamic ms) {
+    final v = ms is int ? ms : int.tryParse('$ms') ?? 0;
+    if (v <= 0) return '0:00';
+    return '${v ~/ 60000}:${((v % 60000) ~/ 1000).toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final name = (_room['name'] ?? 'Live Room').toString();
+    final host = (_room['host'] as Map?)?.cast<String, dynamic>() ?? {};
+    final hostName = (host['first_name'] ?? host['username'] ?? 'Host').toString();
+    final hostAvatar = host['avatar_url']?.toString();
+    final participantCount = _room['participant_count'] ?? 0;
+    final track = (_room['current_track'] as Map?)?.cast<String, dynamic>();
+    final trackTitle = track?['track_title']?.toString() ?? '';
+    final trackArtist = track?['track_artist']?.toString() ?? '';
+    final trackCover = track?['track_cover_url']?.toString();
+    final positionMs = (track?['position_ms'] as num?)?.toInt() ?? 0;
+    final isPlaying = track?['is_playing'] == true;
+
     return Scaffold(
       backgroundColor: AppColors.bg,
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      GestureDetector(
-                        onTap: () => Navigator.of(context).pop(),
-                        child: Container(
-                          width: 40, height: 40,
-                          decoration: BoxDecoration(
-                            color: AppColors.glass,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.border)),
-                          child: const Icon(Icons.arrow_back_rounded, size: 18, color: Colors.white)),
-                      ),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            AnimatedBuilder(
-                              animation: _blinkCtrl,
-                              builder: (_, __) => Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(
+              strokeWidth: 2, color: AppColors.purpleLight))
+          : SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Header ────────────────────────────────────────
+                  SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                      child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            GestureDetector(
+                              onTap: () => Navigator.of(context).pop(),
+                              child: Container(
+                                width: 40, height: 40,
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFef4444).withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(100),
-                                  border: Border.all(color: const Color(0xFFef4444).withOpacity(0.25)),
-                                ),
-                                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                  Opacity(opacity: 0.3 + 0.7 * _blinkCtrl.value,
-                                    child: Container(width: 7, height: 7,
-                                      decoration: const BoxDecoration(
-                                        color: Color(0xFFef4444), shape: BoxShape.circle))),
-                                  const SizedBox(width: 6),
-                                  Text('LIVE PARTY', style: GoogleFonts.outfit(
-                                      fontSize: 12, fontWeight: FontWeight.w700, color: const Color(0xFFf87171))),
-                                ]),
+                                    color: AppColors.glass,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: AppColors.border)),
+                                child: const Icon(Icons.arrow_back_rounded,
+                                    size: 18, color: Colors.white),
                               ),
                             ),
-                            const SizedBox(height: 4),
-                            Text('Winter Vibes Night', style: GoogleFonts.outfit(
-                                fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.text, letterSpacing: -0.02 * 20)),
-                            Text('Hosted by Aigerim', style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text2)),
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      AnimatedBuilder(
+                                        animation: _blinkCtrl,
+                                        builder: (_, __) => Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 10, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFef4444).withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(100),
+                                            border: Border.all(
+                                                color: const Color(0xFFef4444).withOpacity(0.25)),
+                                          ),
+                                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                            Opacity(
+                                              opacity: 0.3 + 0.7 * _blinkCtrl.value,
+                                              child: Container(
+                                                  width: 7, height: 7,
+                                                  decoration: const BoxDecoration(
+                                                      color: Color(0xFFef4444),
+                                                      shape: BoxShape.circle)),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text('LIVE PARTY',
+                                                style: GoogleFonts.outfit(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: const Color(0xFFf87171))),
+                                          ]),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: GoogleFonts.outfit(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.w800,
+                                              color: AppColors.text,
+                                              letterSpacing: -0.4)),
+                                      Text('Hosted by $hostName',
+                                          style: GoogleFonts.outfit(
+                                              fontSize: 12, color: AppColors.text2)),
+                                    ]),
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: _loadRoom,
+                              child: Container(
+                                width: 40, height: 40,
+                                decoration: BoxDecoration(
+                                    color: AppColors.glass,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: AppColors.border)),
+                                child: const Icon(Icons.refresh_rounded,
+                                    size: 18, color: AppColors.text2),
+                              ),
+                            ),
                           ]),
-                        ),
-                      ),
-                      Container(width: 40, height: 40,
-                        decoration: BoxDecoration(color: AppColors.glass,
-                            borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
-                        child: const Icon(Icons.local_bar_rounded, size: 18, color: AppColors.text2)),
-                    ]),
-                  ],
-                ),
-              ),
-            ),
-            // Cover area
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: Container(
-                height: 200,
-                decoration: BoxDecoration(
-                  gradient: AppColors.gradMixed, borderRadius: BorderRadius.circular(24)),
-                child: Stack(children: [
-                  Container(decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.2), borderRadius: BorderRadius.circular(24))),
-                  const Center(child: Text('🌨', style: TextStyle(fontSize: 80))),
-                  Positioned(bottom: 0, left: 0, right: 0,
+                    ),
+                  ),
+
+                  // ── Cover / visualiser ────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
                     child: Container(
-                      height: 40,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: List.generate(8, (i) => AnimatedMusicBars(
-                          color1: AppColors.purpleLight, color2: AppColors.pink,
-                          barCount: 1, barWidth: 4, maxHeight: 30)),
-                      ),
-                    )),
-                ]),
-              ),
-            ),
-            // Now playing
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: Row(children: [
-                Container(width: 52, height: 52,
-                  decoration: BoxDecoration(gradient: AppColors.gradMixed, borderRadius: BorderRadius.circular(13)),
-                  child: const Center(child: Text('🌨', style: TextStyle(fontSize: 24)))),
-                const SizedBox(width: 12),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Sweater Weather', style: GoogleFonts.outfit(
-                      fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text)),
-                  Text('The Neighbourhood', style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2)),
-                  const SizedBox(height: 6),
-                  Stack(children: [
-                    Container(height: 3, decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(100))),
-                    FractionallySizedBox(widthFactor: 0.42, child: Container(height: 3,
+                      height: 200,
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [AppColors.purple, AppColors.pink]),
-                        borderRadius: BorderRadius.circular(100)))),
-                  ]),
-                  const SizedBox(height: 4),
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    Text('1:24', style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
-                    Text('3:51', style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
-                  ]),
-                ])),
-              ]),
-            ),
-            // Listeners
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(20), border: Border.all(color: AppColors.border)),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('LISTENING TOGETHER · 8 PEOPLE', style: GoogleFonts.outfit(
-                      fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.text2, letterSpacing: 0.04)),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    ...[('A', AppColors.gradMixed, 6), ('D', AppColors.gradBlue, 5),
-                      ('M', AppColors.gradPink, 4), ('K', AppColors.gradTeal, 3),
-                      ('S', AppColors.gradOrange, 2)].map((p) => Transform.translate(
-                      offset: Offset(-8.0 * (6 - p.$3), 0),
-                      child: Container(width: 36, height: 36,
-                        decoration: BoxDecoration(gradient: p.$2, shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.bg, width: 2)),
-                        child: Center(child: Text(p.$1, style: GoogleFonts.outfit(
-                            fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)))))),
-                    Transform.translate(
-                      offset: const Offset(-40, 0),
-                      child: Container(width: 36, height: 36,
-                        decoration: BoxDecoration(color: AppColors.surface2, shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.bg, width: 2)),
-                        child: Center(child: Text('+3', style: GoogleFonts.outfit(
-                            fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.text2))))),
-                  ]),
-                  const SizedBox(height: 4),
-                  Text('All listening in sync 🎵', style: GoogleFonts.outfit(
-                      fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
-                ]),
-              ),
-            ),
-            // Live chat
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: Container(
-                decoration: BoxDecoration(color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
-                child: Column(children: [
-                  _PartyMsg('D', AppColors.gradBlue, 'Daniyar', 'this song is perfect for tonight ❄️'),
-                  _PartyMsg('M', AppColors.gradPink, 'Madi', 'omg yes!! 🥺🥺'),
-                  _PartyMsg('A', AppColors.gradMixed, 'Aigerim · Host', 'next up is Snowfall by NIKI 🌨',
-                      isHost: true),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    color: AppColors.surface2,
+                          gradient: AppColors.gradMixed,
+                          borderRadius: BorderRadius.circular(24)),
+                      child: Stack(children: [
+                        if (trackCover != null)
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(24),
+                            child: CachedNetworkImage(
+                              imageUrl: trackCover,
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                              height: double.infinity,
+                              color: Colors.black.withOpacity(0.35),
+                              colorBlendMode: BlendMode.darken,
+                              errorWidget: (_, __, ___) => const SizedBox(),
+                            ),
+                          )
+                        else
+                          Container(
+                            decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(24)),
+                          ),
+                        if (isPlaying)
+                          Positioned(
+                            bottom: 0, left: 0, right: 0,
+                            child: SizedBox(
+                              height: 40,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: List.generate(
+                                    8,
+                                    (i) => AnimatedMusicBars(
+                                        color1: AppColors.purpleLight,
+                                        color2: AppColors.pink,
+                                        barCount: 1,
+                                        barWidth: 4,
+                                        maxHeight: 30)),
+                              ),
+                            ),
+                          ),
+                        if (!isPlaying && trackTitle.isEmpty)
+                          Center(
+                            child: Text('🎙',
+                                style: const TextStyle(fontSize: 64)),
+                          ),
+                      ]),
+                    ),
+                  ),
+
+                  // ── Now playing ───────────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
                     child: Row(children: [
-                      Expanded(child: Text('React or type...', style: GoogleFonts.outfit(
-                          fontSize: 14, color: AppColors.text3))),
-                      Text('❤️ 🔥 😭', style: const TextStyle(fontSize: 18)),
+                      Container(
+                        width: 52, height: 52,
+                        decoration: BoxDecoration(
+                            gradient: AppColors.gradMixed,
+                            borderRadius: BorderRadius.circular(13)),
+                        child: trackCover != null
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(13),
+                                child: CachedNetworkImage(
+                                    imageUrl: trackCover,
+                                    fit: BoxFit.cover,
+                                    errorWidget: (_, __, ___) => const Center(
+                                        child: Text('🎵',
+                                            style: TextStyle(fontSize: 24)))))
+                            : const Center(
+                                child: Text('🎵',
+                                    style: TextStyle(fontSize: 24))),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                  trackTitle.isNotEmpty
+                                      ? trackTitle
+                                      : 'No track playing',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.text)),
+                              if (trackArtist.isNotEmpty)
+                                Text(trackArtist,
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 13, color: AppColors.text2)),
+                              if (positionMs > 0) ...[
+                                const SizedBox(height: 6),
+                                Container(
+                                  height: 3,
+                                  decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(100)),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(_fmtMs(positionMs),
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 11, color: AppColors.text3)),
+                              ],
+                            ]),
+                      ),
+                      if (isPlaying)
+                        const Icon(Icons.graphic_eq_rounded,
+                            color: AppColors.purpleLight, size: 22),
                     ]),
                   ),
-                ]),
+
+                  // ── Participants ──────────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: AppColors.border)),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                                'LISTENING TOGETHER · $participantCount ${participantCount == 1 ? 'PERSON' : 'PEOPLE'}',
+                                style: GoogleFonts.outfit(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.text2,
+                                    letterSpacing: 0.04)),
+                            const SizedBox(height: 12),
+                            Row(children: [
+                              // Host avatar
+                              Container(
+                                width: 36, height: 36,
+                                decoration: BoxDecoration(
+                                    gradient: AppColors.gradMixed,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: AppColors.bg, width: 2)),
+                                child: hostAvatar != null
+                                    ? ClipOval(
+                                        child: CachedNetworkImage(
+                                            imageUrl: hostAvatar,
+                                            fit: BoxFit.cover,
+                                            errorWidget: (_, __, ___) => Center(
+                                                child: Text(
+                                                    hostName[0].toUpperCase(),
+                                                    style: GoogleFonts.outfit(
+                                                        fontSize: 13,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: Colors.white)))))
+                                    : Center(
+                                        child: Text(hostName[0].toUpperCase(),
+                                            style: GoogleFonts.outfit(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                color: Colors.white))),
+                              ),
+                              if (participantCount > 1) ...[
+                                const SizedBox(width: 6),
+                                Text(
+                                    '+${participantCount - 1} listener${participantCount - 1 == 1 ? '' : 's'}',
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 13, color: AppColors.text2)),
+                              ],
+                            ]),
+                            const SizedBox(height: 8),
+                            Text('All listening in sync 🎵',
+                                style: GoogleFonts.outfit(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.text)),
+                          ]),
+                    ),
+                  ),
+
+                  // ── Join button ───────────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                    child: GestureDetector(
+                      onTap: (_joining || _joinRequested) ? null : _sendJoinRequest,
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          gradient: (_joinRequested || _joining)
+                              ? null
+                              : AppColors.gradPurple,
+                          color: (_joinRequested || _joining)
+                              ? AppColors.surface
+                              : null,
+                          borderRadius: BorderRadius.circular(16),
+                          border: (_joinRequested || _joining)
+                              ? Border.all(color: AppColors.border)
+                              : null,
+                          boxShadow: (_joinRequested || _joining)
+                              ? null
+                              : [
+                                  BoxShadow(
+                                      color: AppColors.purpleDark.withOpacity(0.4),
+                                      blurRadius: 20,
+                                      offset: const Offset(0, 4))
+                                ],
+                        ),
+                        child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              if (_joining)
+                                const SizedBox(
+                                    width: 16, height: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2, color: AppColors.purpleLight))
+                              else
+                                Icon(
+                                    _joinRequested
+                                        ? Icons.hourglass_empty_rounded
+                                        : Icons.headphones_rounded,
+                                    size: 18,
+                                    color: _joinRequested
+                                        ? AppColors.text2
+                                        : Colors.white),
+                              const SizedBox(width: 10),
+                              Text(
+                                  _joinRequested
+                                      ? 'Request sent — waiting for host'
+                                      : _joining
+                                          ? 'Sending request…'
+                                          : 'Request to Join',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                      color: _joinRequested
+                                          ? AppColors.text2
+                                          : Colors.white)),
+                            ]),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            // Controls
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: Row(children: [
-                Expanded(child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: AppColors.glass,
-                      borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    const Icon(Icons.queue_music_rounded, size: 16, color: AppColors.text),
-                    const SizedBox(width: 8),
-                    Text('Add Song', style: GoogleFonts.outfit(
-                        fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.text)),
-                  ]))),
-                const SizedBox(width: 10),
-                Expanded(child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(gradient: AppColors.gradPurple,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: [BoxShadow(color: AppColors.purpleDark.withOpacity(0.35), blurRadius: 16)]),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    const Icon(Icons.person_add_rounded, size: 16, color: Colors.white),
-                    const SizedBox(width: 8),
-                    Text('Invite Friends', style: GoogleFonts.outfit(
-                        fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
-                  ]))),
-              ]),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PartyMsg extends StatelessWidget {
-  final String letter, name, text;
-  final LinearGradient gradient;
-  final bool isHost;
-  const _PartyMsg(this.letter, this.gradient, this.name, this.text, {this.isHost = false});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0x08FFFFFF)))),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(width: 28, height: 28, decoration: BoxDecoration(gradient: gradient, shape: BoxShape.circle),
-          child: Center(child: Text(letter, style: GoogleFonts.outfit(
-              fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)))),
-        const SizedBox(width: 8),
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(name, style: GoogleFonts.outfit(fontSize: 11, fontWeight: FontWeight.w700,
-              color: isHost ? AppColors.pink : AppColors.purpleLight)),
-          Text(text, style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text)),
-        ]),
-      ]),
     );
   }
 }
@@ -1003,6 +1183,398 @@ class _RadioCard extends StatelessWidget {
                   shape: BoxShape.circle),
                 child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 20))),
           ]),
+        ),
+      ),
+    );
+  }
+}
+
+
+// ══════════════════════════════════════════
+// RECENT HISTORY
+// ══════════════════════════════════════════
+class RecentHistoryScreen extends StatefulWidget {
+  const RecentHistoryScreen({super.key});
+
+  @override
+  State<RecentHistoryScreen> createState() => _RecentHistoryScreenState();
+}
+
+class _RecentHistoryScreenState extends State<RecentHistoryScreen> {
+  List<dynamic> _sections = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final data = await ApiService().getListeningHistory();
+    if (!mounted) return;
+    setState(() {
+      _sections = data;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              child: Row(children: [
+                GestureDetector(
+                  onTap: () => Navigator.of(context).pop(),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: AppColors.glass,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: const Icon(Icons.arrow_back_rounded,
+                        size: 18, color: Colors.white),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Text(
+                  'Listening History',
+                  style: GoogleFonts.outfit(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.text,
+                      letterSpacing: -0.5),
+                ),
+              ]),
+            ),
+          ),
+          if (_loading)
+            const Expanded(
+              child: Center(
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppColors.purpleLight),
+              ),
+            )
+          else if (_sections.isEmpty)
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.history_rounded,
+                        size: 48, color: AppColors.text3),
+                    const SizedBox(height: 12),
+                    Text('No listening history yet',
+                        style: GoogleFonts.outfit(
+                            fontSize: 15, color: AppColors.text3)),
+                  ],
+                ),
+              ),
+            )
+          else
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _load,
+                color: AppColors.purpleLight,
+                backgroundColor: AppColors.surface,
+                child: ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 80),
+                  itemCount: _sections.length,
+                  itemBuilder: (context, i) {
+                    final section = _sections[i] as Map<String, dynamic>;
+                    final label = section['date'] as String? ?? '';
+                    final tracks = (section['tracks'] as List?) ?? [];
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+                          child: Text(
+                            label,
+                            style: GoogleFonts.outfit(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.text),
+                          ),
+                        ),
+                        ...tracks.map((t) =>
+                            _HistoryTrackRow(track: t as Map<String, dynamic>)),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryTrackRow extends StatelessWidget {
+  final Map<String, dynamic> track;
+  const _HistoryTrackRow({required this.track});
+
+  Future<void> _openArtist(BuildContext context) async {
+    final artistName = track['artist']?.toString() ?? '';
+    final directId = track['artist_id']?.toString();
+    if (directId != null && directId.isNotEmpty) {
+      Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) =>
+                  ArtistScreen(artistId: directId, artistName: artistName)));
+      return;
+    }
+    try {
+      final result = await ApiService().searchArtist(artistName);
+      final a = result['artist'] as Map<String, dynamic>?;
+      if (!context.mounted || a == null) return;
+      Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => ArtistScreen(
+                    artistId: a['id'].toString(),
+                    artistName: a['name']?.toString() ?? artistName,
+                  )));
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final coverUrl = track['cover_url'] as String?;
+    final title = track['title'] as String? ?? 'Unknown';
+    final artist = track['artist'] as String? ?? '';
+    return InkWell(
+      onTap: () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => PlayerScreen(track: track))),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+        child: Row(children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: coverUrl != null && coverUrl.isNotEmpty
+                ? CachedNetworkImage(
+                    imageUrl: coverUrl,
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) => const SizedBox(),
+                    errorWidget: (_, __, ___) => _coverFallback(),
+                  )
+                : _coverFallback(),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text(artist,
+                    style: GoogleFonts.outfit(
+                        fontSize: 12, color: AppColors.text3),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: () => showTrackMenu(
+              context,
+              track,
+              onPlayNow: () => Navigator.push(context,
+                  MaterialPageRoute(
+                      builder: (_) => PlayerScreen(track: track))),
+              onGoToArtist: artist.isNotEmpty
+                  ? () => _openArtist(context)
+                  : null,
+            ),
+            child: const Padding(
+              padding: EdgeInsets.all(6),
+              child: Icon(Icons.more_vert_rounded,
+                  size: 20, color: AppColors.text3),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _coverFallback() => Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: AppColors.glass,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(Icons.music_note_rounded,
+            color: Colors.white54, size: 20),
+      );
+}
+
+// ══════════════════════════════════════════
+// BROWSE ROOMS
+// ══════════════════════════════════════════
+class BrowseRoomsScreen extends StatefulWidget {
+  const BrowseRoomsScreen({super.key});
+  @override
+  State<BrowseRoomsScreen> createState() => _BrowseRoomsScreenState();
+}
+
+class _BrowseRoomsScreenState extends State<BrowseRoomsScreen> {
+  List<dynamic> _rooms = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final data = await ApiService().getActiveRooms();
+      if (!mounted) return;
+      setState(() { _rooms = data; _loading = false; });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+              child: Row(children: [
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(
+                      color: AppColors.glass,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: const Icon(Icons.arrow_back_rounded, size: 18, color: Colors.white),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Listening Rooms', style: GoogleFonts.outfit(
+                      fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.text)),
+                  Text('Join a live session', style: GoogleFonts.outfit(
+                      fontSize: 12, color: AppColors.text3)),
+                ])),
+                GestureDetector(
+                  onTap: _load,
+                  child: Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(
+                        color: AppColors.glass,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.border)),
+                    child: const Icon(Icons.refresh_rounded, size: 18, color: AppColors.text2),
+                  ),
+                ),
+              ]),
+            ),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.purpleLight))
+                  : _rooms.isEmpty
+                      ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          const Text('🎧', style: TextStyle(fontSize: 52)),
+                          const SizedBox(height: 14),
+                          Text('No active rooms', style: GoogleFonts.outfit(
+                              fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.text)),
+                          const SizedBox(height: 6),
+                          Text('Check back later or create one from the Home tab',
+                              style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3),
+                              textAlign: TextAlign.center),
+                        ]))
+                      : RefreshIndicator(
+                          onRefresh: _load,
+                          color: AppColors.purpleLight,
+                          backgroundColor: AppColors.surface,
+                          child: ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            itemCount: _rooms.length,
+                            itemBuilder: (_, i) {
+                              final room = Map<String, dynamic>.from(_rooms[i] as Map);
+                              final name = (room['name'] ?? 'Live Room').toString();
+                              final host = (room['host'] as Map?)?.cast<String, dynamic>() ?? {};
+                              final hostName = (host['first_name'] ?? host['username'] ?? 'Host').toString();
+                              final count = room['participant_count'] ?? 0;
+                              final track = (room['current_track'] as Map?)?.cast<String, dynamic>();
+                              final trackTitle = track?['track_title']?.toString() ?? '';
+                              return GestureDetector(
+                                onTap: () => Navigator.push(context, MaterialPageRoute(
+                                    builder: (_) => ListeningPartyScreen(room: room))),
+                                child: Container(
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.surface,
+                                    borderRadius: BorderRadius.circular(18),
+                                    border: Border.all(color: AppColors.border),
+                                  ),
+                                  child: Row(children: [
+                                    Container(
+                                      width: 46, height: 46,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFef4444).withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(color: const Color(0xFFef4444).withOpacity(0.25)),
+                                      ),
+                                      child: const Center(child: Text('🎉', style: TextStyle(fontSize: 22))),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                      Text(name, style: GoogleFonts.outfit(
+                                          fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text),
+                                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                                      Text('Host: $hostName · $count listening',
+                                          style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+                                      if (trackTitle.isNotEmpty)
+                                        Text('Now: $trackTitle',
+                                            style: GoogleFonts.outfit(fontSize: 11, color: AppColors.purpleLight),
+                                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    ])),
+                                    const Icon(Icons.chevron_right_rounded,
+                                        color: AppColors.text3, size: 20),
+                                  ]),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+            ),
+          ],
         ),
       ),
     );

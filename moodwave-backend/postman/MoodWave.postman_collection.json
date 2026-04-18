@@ -2,74 +2,34 @@
   "info": {
     "_postman_id": "7b932f29-65b3-4f3a-81ff-9a56af8d8750",
     "name": "MoodWave API",
-    "description": "Complete Postman collection for the MoodWave backend API.",
+    "description": "Complete Postman collection for the MoodWave backend API. Base URL: http://localhost:8000",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
     "type": "bearer",
     "bearer": [
-      {
-        "key": "token",
-        "value": "{{access_token}}",
-        "type": "string"
-      }
+      { "key": "token", "value": "{{access_token}}", "type": "string" }
     ]
   },
   "variable": [
-    {
-      "key": "base_url",
-      "value": "http://localhost:8000"
-    },
-    {
-      "key": "access_token",
-      "value": ""
-    },
-    {
-      "key": "refresh_token",
-      "value": ""
-    },
-    {
-      "key": "user_id",
-      "value": ""
-    },
-    {
-      "key": "match_id",
-      "value": ""
-    },
-    {
-      "key": "room_id",
-      "value": ""
-    },
-    {
-      "key": "target_user_id",
-      "value": "2"
-    },
-    {
-      "key": "playlist_id",
-      "value": ""
-    },
-    {
-      "key": "spotify_track_id",
-      "value": "123"
-    },
-    {
-      "key": "message_id",
-      "value": ""
-    },
-    {
-      "key": "verification_code",
-      "value": "123456"
-    },
-    {
-      "key": "reset_code",
-      "value": "123456"
-    },
-    {
-      "key": "reset_token",
-      "value": ""
-    }
+    { "key": "base_url",         "value": "http://localhost:8000" },
+    { "key": "access_token",     "value": "" },
+    { "key": "refresh_token",    "value": "" },
+    { "key": "user_id",          "value": "" },
+    { "key": "target_user_id",   "value": "2" },
+    { "key": "playlist_id",      "value": "" },
+    { "key": "spotify_track_id", "value": "" },
+    { "key": "album_id",         "value": "" },
+    { "key": "artist_id",        "value": "" },
+    { "key": "match_id",         "value": "" },
+    { "key": "room_id",          "value": "" },
+    { "key": "message_id",       "value": "" },
+    { "key": "verification_code","value": "123456" },
+    { "key": "reset_code",       "value": "123456" },
+    { "key": "reset_token",      "value": "" }
   ],
   "item": [
+
     {
       "name": "Auth",
       "item": [
@@ -77,780 +37,242 @@
           "name": "Register",
           "request": {
             "method": "POST",
-            "description": "Creates a new user account and sends an email verification code.",
             "url": "{{base_url}}/auth/register",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"test@example.com\",\n  \"username\": \"testuser\",\n  \"password\": \"password123\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"User\",\n  \"birth_date\": \"2000-01-01\",\n  \"city\": \"Astana\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "options": { "raw": { "language": "json" } }
             }
           }
         },
         {
           "name": "Login",
-          "request": {
-            "method": "POST",
-            "description": "Authenticates a user and stores returned tokens in the active Postman environment.",
-            "url": "{{base_url}}/auth/login",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
           "event": [
             {
               "listen": "test",
               "script": {
-                "type": "text/javascript",
                 "exec": [
-                  "pm.environment.set(\"access_token\", pm.response.json().access_token);",
-                  "pm.environment.set(\"refresh_token\", pm.response.json().refresh_token);",
-                  "pm.environment.set(\"user_id\", pm.response.json().user.id);"
+                  "var json = pm.response.json();",
+                  "if (json.access_token) {",
+                  "  pm.collectionVariables.set('access_token', json.access_token);",
+                  "  pm.collectionVariables.set('refresh_token', json.refresh_token);",
+                  "}"
                 ]
               }
             }
-          ]
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/auth/login",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
         },
         {
           "name": "Refresh Token",
           "request": {
             "method": "POST",
-            "description": "Uses the saved refresh token to request a fresh access token pair.",
             "url": "{{base_url}}/auth/refresh",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "options": { "raw": { "language": "json" } }
             }
           }
+        },
+        {
+          "name": "Get Me",
+          "request": { "method": "GET", "url": "{{base_url}}/auth/me" }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "url": "{{base_url}}/auth/me",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"display_name\": \"My Name\",\n  \"bio\": \"I love music\",\n  \"city\": \"Astana\",\n  \"show_followers\": true,\n  \"show_recently_played\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Get My Stats",
+          "request": { "method": "GET", "url": "{{base_url}}/auth/me/stats" }
+        },
+        {
+          "name": "Get Privacy Settings",
+          "request": { "method": "GET", "url": "{{base_url}}/users/me/privacy-settings" }
+        },
+        {
+          "name": "Update Privacy Settings",
+          "request": {
+            "method": "PUT",
+            "url": "{{base_url}}/users/me/privacy-settings",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_public\": true,\n  \"show_activity\": true,\n  \"show_recently_played\": true,\n  \"show_followers\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Get Notification Settings",
+          "request": { "method": "GET", "url": "{{base_url}}/users/me/notification-settings" }
+        },
+        {
+          "name": "Update Notification Settings",
+          "request": {
+            "method": "PUT",
+            "url": "{{base_url}}/users/me/notification-settings",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"new_follower\": true,\n  \"friend_request\": true,\n  \"match_found\": true,\n  \"room_invite\": true,\n  \"promotions\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Clear My Cache",
+          "request": { "method": "POST", "url": "{{base_url}}/users/me/cache-clear" }
         },
         {
           "name": "Verify Email",
           "request": {
             "method": "POST",
-            "description": "Confirms the six-digit verification code that was sent after registration.",
             "url": "{{base_url}}/auth/verify-email",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"test@example.com\",\n  \"code\": \"{{verification_code}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "raw": "{\n  \"code\": \"{{verification_code}}\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
           }
         },
         {
-          "name": "Resend Verification",
+          "name": "Request Password Reset",
           "request": {
             "method": "POST",
-            "description": "Requests a new verification code for an unverified account.",
-            "url": "{{base_url}}/auth/resend-verification",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "url": "{{base_url}}/auth/request-reset",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"test@example.com\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "options": { "raw": { "language": "json" } }
             }
           }
         },
         {
-          "name": "Forgot Password",
+          "name": "Confirm Password Reset",
           "request": {
             "method": "POST",
-            "description": "Starts the password reset flow by emailing a reset code.",
-            "url": "{{base_url}}/auth/forgot-password",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "url": "{{base_url}}/auth/confirm-reset",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"test@example.com\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Verify Reset Code",
-          "request": {
-            "method": "POST",
-            "description": "Validates the reset code and returns a reset token.",
-            "url": "{{base_url}}/auth/verify-reset-code",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"test@example.com\",\n  \"code\": \"{{reset_code}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  pm.environment.set(\"reset_token\", pm.response.json().reset_token);",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Reset Password",
-          "request": {
-            "method": "POST",
-            "description": "Sets a new password using the short-lived reset token.",
-            "url": "{{base_url}}/auth/reset-password",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"reset_token\": \"{{reset_token}}\",\n  \"new_password\": \"newpassword123\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Sign In with Google",
-          "request": {
-            "method": "POST",
-            "description": "Authenticates via Google ID token. Returns tokens + user (creates account on first sign-in).",
-            "url": "{{base_url}}/auth/google",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"id_token\": \"<GOOGLE_ID_TOKEN>\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  pm.environment.set('access_token', pm.response.json().access_token);",
-                  "  pm.environment.set('refresh_token', pm.response.json().refresh_token);",
-                  "  pm.environment.set('user_id', pm.response.json().user.id);",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Sign In with Apple",
-          "request": {
-            "method": "POST",
-            "description": "Authenticates via Apple identity token. Returns tokens + user (creates account on first sign-in).",
-            "url": "{{base_url}}/auth/apple",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"identity_token\": \"<APPLE_IDENTITY_TOKEN>\",\n  \"full_name\": \"Jane Doe\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  pm.environment.set('access_token', pm.response.json().access_token);",
-                  "  pm.environment.set('refresh_token', pm.response.json().refresh_token);",
-                  "  pm.environment.set('user_id', pm.response.json().user.id);",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Sign In with Phone (Firebase)",
-          "request": {
-            "method": "POST",
-            "description": "Authenticates via Firebase phone auth token. Pass the Firebase ID token obtained after SMS verification.",
-            "url": "{{base_url}}/auth/firebase-phone",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"firebase_token\": \"<FIREBASE_ID_TOKEN>\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  pm.environment.set('access_token', pm.response.json().access_token);",
-                  "  pm.environment.set('refresh_token', pm.response.json().refresh_token);",
-                  "  pm.environment.set('user_id', pm.response.json().user.id);",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "[DEV] Get Verification Code",
-          "request": {
-            "method": "GET",
-            "description": "Returns the current verification code for testing. Only works when APP_ENV=development.",
-            "url": {
-              "raw": "{{base_url}}/auth/debug-code?email=test@example.com",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "auth",
-                "debug-code"
-              ],
-              "query": [
-                {
-                  "key": "email",
-                  "value": "test@example.com"
-                }
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  pm.environment.set('verification_code', pm.response.json().verification_code);",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Check Username",
-          "request": {
-            "method": "GET",
-            "description": "Checks whether a username is available before registration.",
-            "url": {
-              "raw": "{{base_url}}/auth/check-username?username=testuser",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "auth",
-                "check-username"
-              ],
-              "query": [
-                {
-                  "key": "username",
-                  "value": "testuser"
-                }
-              ]
+              "raw": "{\n  \"token\": \"{{reset_token}}\",\n  \"new_password\": \"newpassword123\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
           }
         }
       ]
     },
-    {
-      "name": "Profile",
-      "item": [
-        {
-          "name": "Get Me",
-          "request": {
-            "method": "GET",
-            "description": "Returns the authenticated user's full profile with genres and moods.",
-            "url": "{{base_url}}/users/me"
-          }
-        },
-        {
-          "name": "Update Me",
-          "request": {
-            "method": "PUT",
-            "description": "Updates editable profile fields for the current user.",
-            "url": "{{base_url}}/users/me",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"first_name\": \"Test\",\n  \"display_name\": \"Test User\",\n  \"bio\": \"I love late-night playlists.\",\n  \"city\": \"Astana\",\n  \"is_public\": true,\n  \"show_activity\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Save Genres",
-          "request": {
-            "method": "POST",
-            "description": "Stores onboarding genre selections for the current user.",
-            "url": "{{base_url}}/users/me/genres",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"genres\": [\"indie_rock\", \"pop\", \"electronic\", \"lo_fi\", \"ambient\"]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Save Moods",
-          "request": {
-            "method": "POST",
-            "description": "Stores onboarding mood selections for the current user.",
-            "url": "{{base_url}}/users/me/moods",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"moods\": [\"study\", \"late_night\", \"sad\"]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Update FCM Token",
-          "request": {
-            "method": "PUT",
-            "description": "Stores the current device FCM token used for push notifications.",
-            "url": "{{base_url}}/users/me/fcm-token",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"fcm_token\": \"example-device-fcm-token\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Get Profile Stats",
-          "request": {
-            "method": "GET",
-            "description": "Returns current listening and friend stats for the authenticated user.",
-            "url": "{{base_url}}/users/me/stats"
-          }
-        },
-        {
-          "name": "Get User By ID",
-          "request": {
-            "method": "GET",
-            "description": "Fetches another user's public profile when visible to the requester.",
-            "url": "{{base_url}}/users/{{target_user_id}}"
-          }
-        },
-        {
-          "name": "Delete Account",
-          "request": {
-            "method": "DELETE",
-            "description": "Deletes the authenticated account and clears linked data.",
-            "url": "{{base_url}}/users/me"
-          }
-        }
-      ]
-    },
-    {
-      "name": "Notifications",
-      "item": [
-        {
-          "name": "Get Notifications",
-          "request": {
-            "method": "GET",
-            "description": "Returns unread and recent notifications for the current user.",
-            "url": "{{base_url}}/notifications"
-          }
-        }
-      ]
-    },
-    {
-      "name": "Search",
-      "item": [
-        {
-          "name": "Global Search",
-          "request": {
-            "method": "GET",
-            "description": "Searches tracks, users, and playlists in one request.",
-            "url": {
-              "raw": "{{base_url}}/search?q=radiohead&type=all&limit=10",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "search"
-              ],
-              "query": [
-                {
-                  "key": "q",
-                  "value": "radiohead"
-                },
-                {
-                  "key": "type",
-                  "value": "all"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Search Tracks",
-          "request": {
-            "method": "GET",
-            "description": "Searches tracks through the dedicated music search endpoint.",
-            "url": {
-              "raw": "{{base_url}}/tracks/search?q=radiohead&limit=20",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tracks",
-                "search"
-              ],
-              "query": [
-                {
-                  "key": "q",
-                  "value": "radiohead"
-                },
-                {
-                  "key": "limit",
-                  "value": "20"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Search Users",
-          "request": {
-            "method": "GET",
-            "description": "Searches public users through the search router.",
-            "url": {
-              "raw": "{{base_url}}/search/users?q=test&limit=10",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "search",
-                "users"
-              ],
-              "query": [
-                {
-                  "key": "q",
-                  "value": "test"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Search Users (Profile Route)",
-          "request": {
-            "method": "GET",
-            "description": "Searches public users through the profile router endpoint.",
-            "url": {
-              "raw": "{{base_url}}/users/search?q=test&limit=10",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "users",
-                "search"
-              ],
-              "query": [
-                {
-                  "key": "q",
-                  "value": "test"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Search Playlists",
-          "request": {
-            "method": "GET",
-            "description": "Searches public playlists using the search router endpoint.",
-            "url": {
-              "raw": "{{base_url}}/search/playlists?q=chill&limit=10",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "search",
-                "playlists"
-              ],
-              "query": [
-                {
-                  "key": "q",
-                  "value": "chill"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Search Playlists (Playlist Route)",
-          "request": {
-            "method": "GET",
-            "description": "Searches public playlists using the playlist router endpoint.",
-            "url": {
-              "raw": "{{base_url}}/playlists/search?q=chill&limit=10",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "playlists",
-                "search"
-              ],
-              "query": [
-                {
-                  "key": "q",
-                  "value": "chill"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Trending Searches",
-          "request": {
-            "method": "GET",
-            "description": "Returns trending search terms tracked in Redis.",
-            "url": "{{base_url}}/search/trending"
-          }
-        }
-      ]
-    },
+
     {
       "name": "Music",
       "item": [
         {
-          "name": "Get Recommendations",
+          "name": "Search Tracks",
           "request": {
             "method": "GET",
-            "description": "Returns personalized track recommendations with optional mood filtering.",
             "url": {
-              "raw": "{{base_url}}/tracks/recommendations?mood=late_night&limit=10",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tracks",
-                "recommendations"
-              ],
+              "raw": "{{base_url}}/tracks/search?q=billie+eilish&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["tracks", "search"],
               "query": [
-                {
-                  "key": "mood",
-                  "value": "late_night"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
+                { "key": "q", "value": "billie eilish" },
+                { "key": "limit", "value": "10" }
               ]
             }
           }
         },
         {
-          "name": "Play Track",
+          "name": "Get Charts",
           "request": {
-            "method": "POST",
-            "description": "Records a play event and updates the current user's taste data.",
-            "url": "{{base_url}}/tracks/{{spotify_track_id}}/play",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"completion_pct\": 95,\n  \"title\": \"Creep\",\n  \"artist\": \"Radiohead\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/tracks/charts?genre=pop&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["tracks", "charts"],
+              "query": [
+                { "key": "genre", "value": "pop" },
+                { "key": "limit", "value": "20" }
+              ]
             }
           }
         },
         {
-          "name": "Like Track",
+          "name": "Get Recommendations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/tracks/recommendations?mood=happy&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["tracks", "recommendations"],
+              "query": [
+                { "key": "mood", "value": "happy" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get YouTube Video ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/tracks/{{spotify_track_id}}/youtube?title=Song+Name&artist=Artist+Name",
+              "host": ["{{base_url}}"],
+              "path": ["tracks", "{{spotify_track_id}}", "youtube"],
+              "query": [
+                { "key": "title", "value": "Song Name" },
+                { "key": "artist", "value": "Artist Name" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Record Track Play",
           "request": {
             "method": "POST",
-            "description": "Records a like or dislike event for the specified track.",
-            "url": "{{base_url}}/tracks/{{spotify_track_id}}/like",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "url": "{{base_url}}/tracks/{{spotify_track_id}}/play",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action\": \"liked\",\n  \"title\": \"Creep\",\n  \"artist\": \"Radiohead\",\n  \"genre\": \"rock\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "raw": "{\n  \"completion_pct\": 85.0,\n  \"mood\": \"happy\",\n  \"title\": \"Song Name\",\n  \"artist\": \"Artist Name\",\n  \"genre\": \"pop\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Like / Dislike Track",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/tracks/{{spotify_track_id}}/like",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"liked\",\n  \"title\": \"Song Name\",\n  \"artist\": \"Artist Name\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
           }
         },
@@ -858,101 +280,196 @@
           "name": "Skip Track",
           "request": {
             "method": "POST",
-            "description": "Records a skip event for the specified track.",
             "url": "{{base_url}}/tracks/{{spotify_track_id}}/skip",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"time_listened_ms\": 5000,\n  \"title\": \"Creep\",\n  \"artist\": \"Radiohead\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "raw": "{\n  \"time_listened_ms\": 15000\n}",
+              "options": { "raw": { "language": "json" } }
             }
           }
         },
         {
-          "name": "Track Charts",
+          "name": "Get Listening History",
           "request": {
             "method": "GET",
-            "description": "Returns track charts, optionally filtered by genre.",
             "url": {
-              "raw": "{{base_url}}/tracks/charts?genre=pop&limit=10",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tracks",
-                "charts"
-              ],
+              "raw": "{{base_url}}/tracks/me/history?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["tracks", "me", "history"],
+              "query": [{ "key": "limit", "value": "50" }]
+            }
+          }
+        },
+        {
+          "name": "Get Recently Played",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/tracks/me/recent?limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["tracks", "me", "recent"],
+              "query": [{ "key": "limit", "value": "10" }]
+            }
+          }
+        },
+        {
+          "name": "Get On Repeat",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/tracks/me/on-repeat?limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["tracks", "me", "on-repeat"],
+              "query": [{ "key": "limit", "value": "20" }]
+            }
+          }
+        },
+        {
+          "name": "Get Flashbacks",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/tracks/me/flashbacks?limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["tracks", "me", "flashbacks"],
+              "query": [{ "key": "limit", "value": "20" }]
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Artists",
+      "item": [
+        {
+          "name": "Search Artist",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/artists/search?q=taylor+swift",
+              "host": ["{{base_url}}"],
+              "path": ["artists", "search"],
+              "query": [{ "key": "q", "value": "taylor swift" }]
+            }
+          }
+        },
+        {
+          "name": "Search Artists List",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/artists/search/list?q=taylor&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["artists", "search", "list"],
               "query": [
-                {
-                  "key": "genre",
-                  "value": "pop"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
+                { "key": "q", "value": "taylor" },
+                { "key": "limit", "value": "10" }
               ]
             }
           }
         },
         {
-          "name": "List Playlists",
+          "name": "Get Artist Profile",
           "request": {
             "method": "GET",
-            "description": "Returns playlists that belong to the current user or are shared with them.",
-            "url": "{{base_url}}/playlists"
+            "url": "{{base_url}}/artists/{{artist_id}}/profile"
+          }
+        },
+        {
+          "name": "Get Artist Discography",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/artists/{{artist_id}}/discography"
+          }
+        },
+        {
+          "name": "Follow Artist",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/social/artists/{{artist_id}}/follow"
+          }
+        },
+        {
+          "name": "Unfollow Artist",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/social/artists/{{artist_id}}/follow"
+          }
+        },
+        {
+          "name": "Get Followed Artists",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/social/artists/followed"
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Albums",
+      "item": [
+        {
+          "name": "Search Albums",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/albums/search?q=thriller&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["albums", "search"],
+              "query": [
+                { "key": "q", "value": "thriller" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Album Detail",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/albums/{{album_id}}"
+          }
+        },
+        {
+          "name": "Get Album Tracks",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/albums/{{album_id}}/tracks"
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Playlists",
+      "item": [
+        {
+          "name": "List My Playlists",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/playlists/"
           }
         },
         {
           "name": "Create Playlist",
           "request": {
             "method": "POST",
-            "description": "Creates a new playlist for the current user.",
-            "url": "{{base_url}}/playlists",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "url": "{{base_url}}/playlists/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Late Night Mix\",\n  \"description\": \"Indie and ambient favorites.\",\n  \"visibility\": \"public\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "raw": "{\n  \"title\": \"My Playlist\",\n  \"description\": \"My favourite tracks\",\n  \"visibility\": \"private\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 201) {",
-                  "  pm.environment.set(\"playlist_id\", pm.response.json().id);",
-                  "}"
-                ]
-              }
-            }
-          ]
+          }
         },
         {
           "name": "Get Playlist",
           "request": {
             "method": "GET",
-            "description": "Returns metadata and track entries for a specific playlist.",
             "url": "{{base_url}}/playlists/{{playlist_id}}"
           }
         },
@@ -960,76 +477,12 @@
           "name": "Update Playlist",
           "request": {
             "method": "PUT",
-            "description": "Updates playlist metadata for a playlist owned by the current user.",
             "url": "{{base_url}}/playlists/{{playlist_id}}",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Late Night Mix Updated\",\n  \"visibility\": \"friends\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Add Track To Playlist",
-          "request": {
-            "method": "POST",
-            "description": "Adds a track to the selected playlist.",
-            "url": "{{base_url}}/playlists/{{playlist_id}}/tracks",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"spotify_track_id\": \"{{spotify_track_id}}\",\n  \"title\": \"Sweater Weather\",\n  \"artist\": \"The Neighbourhood\",\n  \"album\": \"I Love You.\",\n  \"genre\": \"indie rock\",\n  \"cover_url\": \"\",\n  \"preview_url\": \"\",\n  \"duration_ms\": 240000\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Remove Track From Playlist",
-          "request": {
-            "method": "DELETE",
-            "description": "Removes a track from the selected playlist.",
-            "url": "{{base_url}}/playlists/{{playlist_id}}/tracks/{{spotify_track_id}}"
-          }
-        },
-        {
-          "name": "Add Collaborator",
-          "request": {
-            "method": "POST",
-            "description": "Adds a collaborator to the selected playlist.",
-            "url": "{{base_url}}/playlists/{{playlist_id}}/collaborate",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"collab_user_id\": {{target_user_id}}\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "raw": "{\n  \"title\": \"Updated Title\",\n  \"visibility\": \"public\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
           }
         },
@@ -1037,864 +490,451 @@
           "name": "Delete Playlist",
           "request": {
             "method": "DELETE",
-            "description": "Deletes the selected playlist.",
             "url": "{{base_url}}/playlists/{{playlist_id}}"
           }
         },
         {
-          "name": "City Charts",
+          "name": "Add Track to Playlist",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/playlists/{{playlist_id}}/tracks",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"spotify_track_id\": \"{{spotify_track_id}}\",\n  \"title\": \"Track Title\",\n  \"artist\": \"Artist Name\",\n  \"album\": \"Album Name\",\n  \"cover_url\": \"\",\n  \"duration_ms\": 210000\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Remove Track from Playlist",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/playlists/{{playlist_id}}/tracks/{{spotify_track_id}}"
+          }
+        },
+        {
+          "name": "Search Public Playlists",
           "request": {
             "method": "GET",
-            "description": "Returns the most-played tracks for a city in the last 24 hours.",
             "url": {
-              "raw": "{{base_url}}/charts/city?city=Astana&limit=10",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "charts",
-                "city"
-              ],
+              "raw": "{{base_url}}/playlists/search?q=chill&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["playlists", "search"],
               "query": [
-                {
-                  "key": "city",
-                  "value": "Astana"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
+                { "key": "q", "value": "chill" },
+                { "key": "limit", "value": "10" }
               ]
             }
           }
         },
         {
-          "name": "Taste Vector",
+          "name": "Add Collaborator",
           "request": {
-            "method": "GET",
-            "description": "Returns the current user's taste vector with top genres and artists.",
-            "url": "{{base_url}}/taste-vector/me"
-          }
-        }
-      ]
-    },
-    {
-      "name": "Weather",
-      "item": [
-        {
-          "name": "Current Weather",
-          "request": {
-            "method": "GET",
-            "description": "Returns current weather conditions, mood tag, and listener count for the specified city.",
-            "url": {
-              "raw": "{{base_url}}/weather/current?city=Astana",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "weather",
-                "current"
-              ],
-              "query": [
-                {
-                  "key": "city",
-                  "value": "Astana"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Weather Playlist",
-          "request": {
-            "method": "GET",
-            "description": "Returns three playlists chosen for the current weather conditions in the specified city.",
-            "url": {
-              "raw": "{{base_url}}/weather/playlist?city=Astana",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "weather",
-                "playlist"
-              ],
-              "query": [
-                {
-                  "key": "city",
-                  "value": "Astana"
-                }
-              ]
+            "method": "POST",
+            "url": "{{base_url}}/playlists/{{playlist_id}}/collaborate",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"collab_user_id\": {{target_user_id}}\n}",
+              "options": { "raw": { "language": "json" } }
             }
           }
         }
       ]
     },
-    {
-      "name": "Match",
-      "item": [
-        {
-          "name": "Match Candidates",
-          "request": {
-            "method": "GET",
-            "description": "Returns paginated match candidates scored by taste similarity.",
-            "url": {
-              "raw": "{{base_url}}/matches/candidates?limit=10",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "matches",
-                "candidates"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Get Candidates",
-          "request": {
-            "method": "GET",
-            "description": "Returns match candidates for the verified user.",
-            "url": {
-              "raw": "{{base_url}}/matches?city=Astana&limit=10",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "matches"
-              ],
-              "query": [
-                {
-                  "key": "city",
-                  "value": "Astana"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Like User",
-          "request": {
-            "method": "POST",
-            "description": "Likes a candidate and stores match_id when a mutual match is created.",
-            "url": "{{base_url}}/matches/{{target_user_id}}/like"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200 && pm.response.json().match_id) {",
-                  "  pm.environment.set(\"match_id\", pm.response.json().match_id);",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Skip User",
-          "request": {
-            "method": "POST",
-            "description": "Skips a candidate and hides them temporarily from future results.",
-            "url": "{{base_url}}/matches/{{target_user_id}}/skip"
-          }
-        },
-        {
-          "name": "Confirmed Matches",
-          "request": {
-            "method": "GET",
-            "description": "Returns mutual matches for the current verified user.",
-            "url": "{{base_url}}/matches/confirmed"
-          }
-        },
-        {
-          "name": "Match Taste Vector",
-          "request": {
-            "method": "GET",
-            "description": "Returns the raw taste vector used by the match engine.",
-            "url": "{{base_url}}/matches/taste-vector"
-          }
-        },
-        {
-          "name": "Decide (Like/Skip)",
-          "request": {
-            "method": "POST",
-            "description": "Send a like or skip decision for a candidate.",
-            "url": "{{base_url}}/matches/decide/{{target_user_id}}",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"action\": \"like\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200 && pm.response.json().match_id) {",
-                  "  pm.environment.set('match_id', pm.response.json().match_id);",
-                  "}"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Chat",
-      "item": [
-        {
-          "name": "List Chats",
-          "request": {
-            "method": "GET",
-            "description": "Returns match chats with partner details and Firebase chat IDs.",
-            "url": "{{base_url}}/chats"
-          }
-        },
-        {
-          "name": "Get Chat Messages",
-          "request": {
-            "method": "GET",
-            "description": "Returns recent Firebase-backed messages for a match chat.",
-            "url": {
-              "raw": "{{base_url}}/chats/{{match_id}}/messages?limit=50",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "chats",
-                "{{match_id}}",
-                "messages"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "50"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Send Text",
-          "request": {
-            "method": "POST",
-            "description": "Sends a text message in the specified match chat.",
-            "url": "{{base_url}}/chats/{{match_id}}/send-text",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"text\": \"Hey! Your music taste is amazing.\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  pm.environment.set(\"message_id\", pm.response.json().message_id);",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Send Track",
-          "request": {
-            "method": "POST",
-            "description": "Sends a track share message in the specified match chat.",
-            "url": "{{base_url}}/chats/{{match_id}}/send-track",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"track_id\": \"123\",\n  \"title\": \"Sweater Weather\",\n  \"artist\": \"The Neighbourhood\",\n  \"cover_url\": \"\",\n  \"preview_url\": \"\",\n  \"phrase\": \"Напомнило о тебе\",\n  \"phrase_emoji\": \"💭\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  pm.environment.set(\"message_id\", pm.response.json().message_id);",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "React To Message",
-          "request": {
-            "method": "POST",
-            "description": "Adds an emoji reaction to a chat message.",
-            "url": "{{base_url}}/chats/{{match_id}}/react",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message_id\": \"{{message_id}}\",\n  \"emoji\": \"❤️\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
+
     {
       "name": "Social",
       "item": [
         {
-          "name": "Friends",
-          "request": {
-            "method": "GET",
-            "description": "Returns accepted friends for the current user.",
-            "url": "{{base_url}}/friends"
-          }
+          "name": "Get Match Candidates",
+          "request": { "method": "GET", "url": "{{base_url}}/matches/candidates" }
         },
         {
-          "name": "Friends Activity",
-          "request": {
-            "method": "GET",
-            "description": "Returns accepted friends and their current now-playing state when visible.",
-            "url": "{{base_url}}/friends/activity"
-          }
-        },
-        {
-          "name": "Send Friend Request",
+          "name": "Accept Match",
           "request": {
             "method": "POST",
-            "description": "Creates a pending friend request for the target user.",
-            "url": "{{base_url}}/friends/{{target_user_id}}/request"
+            "url": "{{base_url}}/matches/{{match_id}}/accept"
           }
         },
         {
-          "name": "Accept Friend Request",
+          "name": "Decline Match",
           "request": {
             "method": "POST",
-            "description": "Accepts a pending friend request from the specified user.",
-            "url": "{{base_url}}/friends/{{target_user_id}}/accept"
+            "url": "{{base_url}}/matches/{{match_id}}/decline"
           }
         },
         {
-          "name": "Remove Friend",
+          "name": "Follow User",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/users/{{target_user_id}}/follow"
+          }
+        },
+        {
+          "name": "Unfollow User",
           "request": {
             "method": "DELETE",
-            "description": "Removes the friendship relationship with the target user.",
-            "url": "{{base_url}}/friends/{{target_user_id}}"
+            "url": "{{base_url}}/users/{{target_user_id}}/follow"
           }
         },
         {
-          "name": "Block User",
+          "name": "Get User Followers",
           "request": {
-            "method": "POST",
-            "description": "Blocks the target user and invalidates affected caches.",
-            "url": "{{base_url}}/users/{{target_user_id}}/block"
+            "method": "GET",
+            "url": "{{base_url}}/users/{{target_user_id}}/followers"
           }
+        },
+        {
+          "name": "Get User Following",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/users/{{target_user_id}}/following"
+          }
+        },
+        {
+          "name": "Get Friends",
+          "request": { "method": "GET", "url": "{{base_url}}/social/friends" }
         },
         {
           "name": "Report User",
           "request": {
             "method": "POST",
-            "description": "Submits a moderation report for the target user.",
-            "url": "{{base_url}}/users/{{target_user_id}}/report",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "url": "{{base_url}}/social/report",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"reason\": \"spam\",\n  \"details\": \"Repeated unwanted messages.\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "raw": "{\n  \"reported_id\": {{target_user_id}},\n  \"reason\": \"spam\",\n  \"details\": \"This user is spamming\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
           }
         }
       ]
     },
+
     {
-      "name": "Rooms",
+      "name": "Listening Rooms",
       "item": [
+        {
+          "name": "List Public Rooms",
+          "request": { "method": "GET", "url": "{{base_url}}/rooms/" }
+        },
         {
           "name": "Create Room",
           "request": {
             "method": "POST",
-            "description": "Creates a listening room for the authenticated host and returns WebSocket connection details.",
-            "url": "{{base_url}}/rooms/create",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "url": "{{base_url}}/rooms/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Late Night Listening Party\",\n  \"is_public\": true,\n  \"max_guests\": 10\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "raw": "{\n  \"title\": \"Chill Session\",\n  \"is_public\": true,\n  \"max_guests\": 10\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 201) {",
-                  "  pm.environment.set(\"room_id\", pm.response.json().room_id);",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Active Rooms",
-          "request": {
-            "method": "GET",
-            "description": "Returns active public listening rooms.",
-            "url": "{{base_url}}/rooms/active"
           }
         },
         {
           "name": "Get Room",
-          "request": {
-            "method": "GET",
-            "description": "Returns details for a specific active listening room.",
-            "url": "{{base_url}}/rooms/{{room_id}}"
-          }
-        },
-        {
-          "name": "Join Request",
-          "request": {
-            "method": "POST",
-            "description": "Requests approval to join the selected room.",
-            "url": "{{base_url}}/rooms/{{room_id}}/join-request"
-          }
-        },
-        {
-          "name": "Join Approve",
-          "request": {
-            "method": "POST",
-            "description": "Approves a pending join request for the selected room.",
-            "url": "{{base_url}}/rooms/{{room_id}}/join-approve",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"user_id\": {{target_user_id}}\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Join Decline",
-          "request": {
-            "method": "POST",
-            "description": "Declines a pending join request for the selected room.",
-            "url": "{{base_url}}/rooms/{{room_id}}/join-decline",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"user_id\": {{target_user_id}}\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
+          "request": { "method": "GET", "url": "{{base_url}}/rooms/{{room_id}}" }
         },
         {
           "name": "Close Room",
+          "request": { "method": "DELETE", "url": "{{base_url}}/rooms/{{room_id}}" }
+        },
+        {
+          "name": "Join Room (WebSocket)",
           "request": {
-            "method": "POST",
-            "description": "Closes the selected room as the host.",
-            "url": "{{base_url}}/rooms/{{room_id}}/close"
+            "method": "GET",
+            "url": "ws://localhost:8000/rooms/{{room_id}}/ws?token={{access_token}}",
+            "description": "WebSocket endpoint — use Postman WebSocket or wscat client."
           }
         }
       ]
     },
+
+    {
+      "name": "Chat",
+      "item": [
+        {
+          "name": "Get Chats",
+          "request": { "method": "GET", "url": "{{base_url}}/chat/chats" }
+        },
+        {
+          "name": "Get Chat Messages",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/chat/chats/{{match_id}}/messages?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["chat", "chats", "{{match_id}}", "messages"],
+              "query": [{ "key": "limit", "value": "50" }]
+            }
+          }
+        },
+        {
+          "name": "Send Message",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/chat/chats/{{match_id}}/messages",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Hello!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Chat WebSocket",
+          "request": {
+            "method": "GET",
+            "url": "ws://localhost:8000/chat/ws?token={{access_token}}",
+            "description": "WebSocket endpoint for real-time chat."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Weather & Mood",
+      "item": [
+        {
+          "name": "Get Weather",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/weather?city=Astana",
+              "host": ["{{base_url}}"],
+              "path": ["weather"],
+              "query": [{ "key": "city", "value": "Astana" }]
+            }
+          }
+        }
+      ]
+    },
+
     {
       "name": "Admin",
       "item": [
         {
-          "name": "Stats",
-          "request": {
-            "method": "GET",
-            "description": "Returns aggregate platform statistics (users, matches, tracks, rooms).",
-            "url": "{{base_url}}/admin/stats"
-          }
+          "name": "Dashboard Stats",
+          "request": { "method": "GET", "url": "{{base_url}}/admin/stats" }
+        },
+        {
+          "name": "Analytics",
+          "request": { "method": "GET", "url": "{{base_url}}/admin/analytics" }
         },
         {
           "name": "System Info",
-          "request": {
-            "method": "GET",
-            "description": "Returns server environment, uptime, and service health.",
-            "url": "{{base_url}}/admin/system"
-          }
+          "request": { "method": "GET", "url": "{{base_url}}/admin/system" }
         },
         {
-          "name": "Clear Cache",
-          "request": {
-            "method": "POST",
-            "description": "Clears all Redis caches (admin only).",
-            "url": "{{base_url}}/admin/system/clear-cache"
-          }
+          "name": "Clear Redis Cache",
+          "request": { "method": "POST", "url": "{{base_url}}/admin/system/clear-cache" }
         },
         {
           "name": "List Users",
           "request": {
             "method": "GET",
-            "description": "Returns paginated list of all users with status.",
             "url": {
-              "raw": "{{base_url}}/admin/users?limit=50&offset=0",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "admin",
-                "users"
-              ],
+              "raw": "{{base_url}}/admin/users?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "users"],
               "query": [
-                {
-                  "key": "limit",
-                  "value": "50"
-                },
-                {
-                  "key": "offset",
-                  "value": "0"
-                }
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "is_active", "value": "true", "disabled": true }
               ]
             }
           }
         },
         {
-          "name": "Get User",
+          "name": "Get User Detail",
+          "request": { "method": "GET", "url": "{{base_url}}/admin/users/{{target_user_id}}" }
+        },
+        {
+          "name": "Get User Listening History",
           "request": {
             "method": "GET",
-            "description": "Returns full profile and history for a specific user.",
-            "url": "{{base_url}}/admin/users/{{target_user_id}}"
+            "url": {
+              "raw": "{{base_url}}/admin/users/{{target_user_id}}/history?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "users", "{{target_user_id}}", "history"],
+              "query": [{ "key": "limit", "value": "50" }]
+            }
           }
+        },
+        {
+          "name": "Block / Unblock User",
+          "request": { "method": "PUT", "url": "{{base_url}}/admin/users/{{target_user_id}}/block" }
+        },
+        {
+          "name": "Toggle Admin Role",
+          "request": { "method": "PUT", "url": "{{base_url}}/admin/users/{{target_user_id}}/admin" }
         },
         {
           "name": "Delete User",
-          "request": {
-            "method": "DELETE",
-            "description": "Permanently deletes a user account.",
-            "url": "{{base_url}}/admin/users/{{target_user_id}}"
-          }
+          "request": { "method": "DELETE", "url": "{{base_url}}/admin/users/{{target_user_id}}" }
         },
         {
-          "name": "Set Admin Role",
-          "request": {
-            "method": "PUT",
-            "description": "Grants or revokes admin role.",
-            "url": "{{base_url}}/admin/users/{{target_user_id}}/admin",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"is_admin\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Block User (Admin)",
-          "request": {
-            "method": "PUT",
-            "description": "Blocks or unblocks a user.",
-            "url": "{{base_url}}/admin/users/{{target_user_id}}/block",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"is_blocked\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "User History",
+          "name": "List Tracks (Cache)",
           "request": {
             "method": "GET",
-            "description": "Returns listening history for a specific user.",
             "url": {
-              "raw": "{{base_url}}/admin/users/{{target_user_id}}/history?limit=20",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "admin",
-                "users",
-                "{{target_user_id}}",
-                "history"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "20"
-                }
-              ]
+              "raw": "{{base_url}}/admin/tracks?search=",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "tracks"],
+              "query": [{ "key": "search", "value": "", "disabled": true }]
             }
           }
         },
         {
-          "name": "Analytics",
+          "name": "Delete Track from Cache",
+          "request": { "method": "DELETE", "url": "{{base_url}}/admin/tracks/{{spotify_track_id}}" }
+        },
+        {
+          "name": "List Playlists",
           "request": {
             "method": "GET",
-            "description": "Returns platform-wide analytics (DAU, top tracks, genres).",
-            "url": "{{base_url}}/admin/analytics"
+            "url": {
+              "raw": "{{base_url}}/admin/playlists?visibility=public",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "playlists"],
+              "query": [{ "key": "visibility", "value": "public", "disabled": true }]
+            }
           }
+        },
+        {
+          "name": "Get Playlist Tracks (Admin)",
+          "request": { "method": "GET", "url": "{{base_url}}/admin/playlists/{{playlist_id}}/tracks" }
+        },
+        {
+          "name": "Delete Playlist (Admin)",
+          "request": { "method": "DELETE", "url": "{{base_url}}/admin/playlists/{{playlist_id}}" }
         },
         {
           "name": "List Matches",
           "request": {
             "method": "GET",
-            "description": "Returns all matches with user pairs and status.",
-            "url": "{{base_url}}/admin/matches"
+            "url": {
+              "raw": "{{base_url}}/admin/matches?sim_min=80",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "matches"],
+              "query": [
+                { "key": "sim_min", "value": "80", "disabled": true },
+                { "key": "sim_max", "value": "100", "disabled": true }
+              ]
+            }
           }
         },
         {
           "name": "Delete Match",
-          "request": {
-            "method": "DELETE",
-            "description": "Deletes a specific match by ID.",
-            "url": "{{base_url}}/admin/matches/{{match_id}}"
-          }
-        },
-        {
-          "name": "List Rooms",
-          "request": {
-            "method": "GET",
-            "description": "Returns all rooms with participant counts.",
-            "url": "{{base_url}}/admin/rooms"
-          }
-        },
-        {
-          "name": "Delete Room (Admin)",
-          "request": {
-            "method": "DELETE",
-            "description": "Force-closes a listening room.",
-            "url": "{{base_url}}/admin/rooms/{{room_id}}"
-          }
-        },
-        {
-          "name": "List Playlists (Admin)",
-          "request": {
-            "method": "GET",
-            "description": "Returns all playlists with owner info.",
-            "url": "{{base_url}}/admin/playlists"
-          }
-        },
-        {
-          "name": "Playlist Tracks (Admin)",
-          "request": {
-            "method": "GET",
-            "description": "Returns tracks for a specific playlist.",
-            "url": {
-              "raw": "{{base_url}}/admin/playlists/{{playlist_id}}/tracks",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "admin",
-                "playlists",
-                "{{playlist_id}}",
-                "tracks"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "Delete Playlist (Admin)",
-          "request": {
-            "method": "DELETE",
-            "description": "Deletes a playlist.",
-            "url": "{{base_url}}/admin/playlists/{{playlist_id}}"
-          }
-        },
-        {
-          "name": "List Tracks",
-          "request": {
-            "method": "GET",
-            "description": "Returns most-played tracks across the platform.",
-            "url": "{{base_url}}/admin/tracks"
-          }
-        },
-        {
-          "name": "Delete Track",
-          "request": {
-            "method": "DELETE",
-            "description": "Removes a track from the platform history.",
-            "url": "{{base_url}}/admin/tracks/{{spotify_track_id}}"
-          }
+          "request": { "method": "DELETE", "url": "{{base_url}}/admin/matches/{{match_id}}" }
         },
         {
           "name": "List Reports",
+          "request": { "method": "GET", "url": "{{base_url}}/admin/reports" }
+        },
+        {
+          "name": "Dismiss Report",
+          "request": { "method": "DELETE", "url": "{{base_url}}/admin/reports/1" }
+        },
+        {
+          "name": "List Rooms (Admin)",
+          "request": { "method": "GET", "url": "{{base_url}}/admin/rooms" }
+        },
+        {
+          "name": "Close Room (Admin)",
+          "request": { "method": "DELETE", "url": "{{base_url}}/admin/rooms/{{room_id}}" }
+        }
+      ]
+    },
+
+    {
+      "name": "Radio",
+      "item": [
+        {
+          "name": "List Radio Stations",
+          "request": { "method": "GET", "url": "{{base_url}}/radio/stations" }
+        },
+        {
+          "name": "Get Radio Tracks",
           "request": {
             "method": "GET",
-            "description": "Returns open user moderation reports.",
-            "url": "{{base_url}}/admin/reports"
+            "url": "{{base_url}}/radio/late_night/tracks",
+            "description": "station_id: late_night | morning_boost | deep_focus | workout | road_trip | sad_hours | party_mode | chill_vibes"
           }
         },
         {
-          "name": "Delete Report",
-          "request": {
-            "method": "DELETE",
-            "description": "Resolves and removes a moderation report.",
-            "url": "{{base_url}}/admin/reports/{{report_id}}"
-          }
-        }
-      ]
-    },
-    {
-      "name": "Debug",
-      "item": [
-        {
-          "name": "Seed Demo Match",
+          "name": "Get Next Radio Track",
           "request": {
             "method": "POST",
-            "description": "Creates a demo match for the current user. Development only.",
-            "url": "{{base_url}}/debug/seed-demo-match",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "url": "{{base_url}}/radio/late_night/next",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "raw": "{\n  \"current_track_id\": \"deezer_12345\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200 && pm.response.json().match_id) {",
-                  "  pm.environment.set('match_id', pm.response.json().match_id);",
-                  "}"
-                ]
-              }
-            }
-          ]
+          }
         }
       ]
     },
+
     {
-      "name": "System",
+      "name": "Trending",
       "item": [
         {
-          "name": "Health",
+          "name": "Hot Right Now",
           "request": {
             "method": "GET",
-            "description": "Checks API, database, Redis, and Firebase health.",
-            "url": "{{base_url}}/health"
+            "url": {
+              "raw": "{{base_url}}/trending/tracks?limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["trending", "tracks"],
+              "query": [
+                { "key": "limit", "value": "20" },
+                { "key": "city", "value": "astana", "disabled": true }
+              ]
+            }
           }
+        },
+        {
+          "name": "Home Feed",
+          "request": { "method": "GET", "url": "{{base_url}}/trending/feed" }
+        }
+      ]
+    },
+
+    {
+      "name": "Tracks (new)",
+      "item": [
+        {
+          "name": "Update Track Progress",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/tracks/{{spotify_track_id}}/progress",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"progress_ms\": 45000,\n  \"completed\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": { "method": "GET", "url": "{{base_url}}/health" }
         }
       ]
     }
+
   ]
 }

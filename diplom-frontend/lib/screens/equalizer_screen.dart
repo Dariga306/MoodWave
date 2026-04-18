@@ -1,5 +1,9 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../providers/player_provider.dart';
 import '../theme/app_colors.dart';
 import '../widgets/common_widgets.dart';
 
@@ -16,8 +20,59 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
   bool _normalize = true;
   int _preset = 1;
   final _presets = ['Flat', 'Bass Boost', 'Treble Boost', 'Rock', 'Classical', 'Electronic', 'Vocal'];
-  final List<double> _bands = [4, 6, 2, 0, -2, 3, 5];
   final List<String> _hz = ['60', '150', '400', '1K', '3K', '8K', '16K'];
+
+  // Band values per preset [60Hz, 150Hz, 400Hz, 1kHz, 3kHz, 8kHz, 16kHz]
+  static const _presetBands = <List<double>>[
+    [0, 0, 0, 0, 0, 0, 0],         // Flat
+    [6, 5, 2, 0, -1, -2, -3],      // Bass Boost
+    [-2, -1, 0, 2, 4, 6, 6],       // Treble Boost
+    [4, 3, 0, -1, 2, 4, 5],        // Rock
+    [3, 2, 0, -2, -1, 2, 3],       // Classical
+    [4, 2, 0, 3, 2, 4, 5],         // Electronic
+    [0, 2, 4, 4, 2, 1, 0],         // Vocal
+  ];
+
+  late List<double> _bands;
+
+  @override
+  void initState() {
+    super.initState();
+    _bands = List<double>.from(_presetBands[_preset]);
+    _loadPrefs();
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    final savedPreset = prefs.getInt('eq_preset') ?? 1;
+    setState(() {
+      _preset = savedPreset;
+      _bands = List<double>.from(_presetBands[savedPreset]);
+      _eqOn = prefs.getBool('eq_on') ?? true;
+      _bassBoost = prefs.getBool('eq_bass_boost') ?? (savedPreset == 1);
+      _surround = prefs.getBool('eq_surround') ?? false;
+      _normalize = prefs.getBool('eq_normalize') ?? true;
+    });
+  }
+
+  Future<void> _savePrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('eq_preset', _preset);
+    await prefs.setBool('eq_on', _eqOn);
+    await prefs.setBool('eq_bass_boost', _bassBoost);
+    await prefs.setBool('eq_surround', _surround);
+    await prefs.setBool('eq_normalize', _normalize);
+  }
+
+  void _applyPreset(int index) {
+    setState(() {
+      _preset = index;
+      _bands = List<double>.from(_presetBands[index]);
+      _bassBoost = index == 1;
+    });
+    _savePrefs();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -67,7 +122,10 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                             color1: AppColors.purpleLight, color2: AppColors.purple,
                             barCount: 3, barWidth: 3, maxHeight: 20),
                           const SizedBox(width: 8),
-                          _SmallToggle(value: _eqOn, onChanged: (v) => setState(() => _eqOn = v)),
+                          _SmallToggle(value: _eqOn, onChanged: (v) {
+                            setState(() => _eqOn = v);
+                            _savePrefs();
+                          }),
                           const SizedBox(width: 6),
                           Text('On', style: GoogleFonts.outfit(
                               fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.purpleLight)),
@@ -75,32 +133,64 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                       ]),
                     ),
                     // Now playing bar
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.05),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white.withOpacity(0.08)),
+                    Builder(builder: (ctx) {
+                      final player = ctx.watch<PlayerProvider>();
+                      final track = player.track;
+                      final title = track?['title']?.toString()
+                          ?? track?['trackName']?.toString()
+                          ?? 'Nothing playing';
+                      final artist = track?['artist']?.toString()
+                          ?? track?['artistName']?.toString()
+                          ?? 'Open the player to start';
+                      final cover = track?['cover_url']?.toString()
+                          ?? track?['artworkUrl100']?.toString();
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.white.withOpacity(0.08)),
+                          ),
+                          child: Row(children: [
+                            Container(
+                              width: 44, height: 44,
+                              decoration: BoxDecoration(
+                                  gradient: AppColors.gradMixed,
+                                  borderRadius: BorderRadius.circular(10)),
+                              child: cover != null
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: CachedNetworkImage(
+                                          imageUrl: cover,
+                                          fit: BoxFit.cover,
+                                          errorWidget: (_, __, ___) => const Center(
+                                              child: Text('🎵',
+                                                  style: TextStyle(fontSize: 20)))))
+                                  : const Center(
+                                      child: Text('🎵', style: TextStyle(fontSize: 20))),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 14, fontWeight: FontWeight.w700,
+                                      color: AppColors.text)),
+                              Text(artist, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 12, color: AppColors.text2)),
+                            ])),
+                            if (player.isPlaying)
+                              AnimatedMusicBars(
+                                  color1: AppColors.purpleLight, color2: AppColors.pink,
+                                  barCount: 3, barWidth: 3, maxHeight: 20),
+                          ]),
                         ),
-                        child: Row(children: [
-                          Container(width: 44, height: 44,
-                            decoration: BoxDecoration(gradient: AppColors.gradMixed,
-                                borderRadius: BorderRadius.circular(10)),
-                            child: const Center(child: Text('🌨', style: TextStyle(fontSize: 20)))),
-                          const SizedBox(width: 12),
-                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text('Sweater Weather', style: GoogleFonts.outfit(
-                                fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.text)),
-                            Text('The Neighbourhood', style: GoogleFonts.outfit(
-                                fontSize: 12, color: AppColors.text2)),
-                          ])),
-                          AnimatedMusicBars(color1: AppColors.purpleLight, color2: AppColors.pink,
-                              barCount: 3, barWidth: 3, maxHeight: 20),
-                        ]),
-                      ),
-                    ),
+                      );
+                    }),
                     // EQ Bands
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -191,7 +281,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                         padding: const EdgeInsets.only(left: 20),
                         itemCount: _presets.length,
                         itemBuilder: (_, i) => GestureDetector(
-                          onTap: () => setState(() => _preset = i),
+                          onTap: () => _applyPreset(i),
                           child: Container(
                             margin: const EdgeInsets.only(right: 8),
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -217,17 +307,17 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                         _EqRow(emoji: '🔊', bg: AppColors.purple.withOpacity(0.15),
                             name: 'Bass Boost', sub: 'Enhance low frequencies',
                             toggle: _SmallToggle(value: _bassBoost,
-                                onChanged: (v) => setState(() => _bassBoost = v))),
+                                onChanged: (v) { setState(() => _bassBoost = v); _savePrefs(); })),
                         const SizedBox(height: 8),
                         _EqRow(emoji: '🎧', bg: AppColors.blue.withOpacity(0.15),
                             name: '3D Surround', sub: 'Virtual spatial audio',
                             toggle: _SmallToggle(value: _surround,
-                                onChanged: (v) => setState(() => _surround = v))),
+                                onChanged: (v) { setState(() => _surround = v); _savePrefs(); })),
                         const SizedBox(height: 8),
                         _EqRow(emoji: '🔇', bg: const Color(0xFF22c55e).withOpacity(0.15),
                             name: 'Loudness Normalize', sub: 'Consistent volume across songs',
                             toggle: _SmallToggle(value: _normalize,
-                                onChanged: (v) => setState(() => _normalize = v))),
+                                onChanged: (v) { setState(() => _normalize = v); _savePrefs(); })),
                       ]),
                     ),
                     const SizedBox(height: 32),

@@ -104,6 +104,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   Timer? _sleepTimer;
   int? _sleepMinutesLeft;
 
+  // Progress heartbeat
+  Timer? _progressTimer;
+
   String get _title =>
       (_track['title'] ?? _track['trackName'] ?? 'Unknown').toString();
   String get _artist =>
@@ -167,9 +170,22 @@ class _PlayerScreenState extends State<PlayerScreen>
     unawaited(_ensureQueue());
   }
 
+  void _startProgressHeartbeat() {
+    _progressTimer?.cancel();
+    _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (_isPlaying && _trackId.isNotEmpty) {
+        final progressMs = _position.inMilliseconds;
+        final completed = _duration.inMilliseconds > 0 &&
+            progressMs >= _duration.inMilliseconds - 5000;
+        ApiService().updateTrackProgress(_trackId, progressMs, completed);
+      }
+    });
+  }
+
   @override
   void dispose() {
     _sleepTimer?.cancel();
+    _progressTimer?.cancel();
     _floatController.dispose();
     _ytStateSubscription?.cancel();
     _ytPositionSubscription?.cancel();
@@ -349,6 +365,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
 
     _syncQueueIndex();
+    _startProgressHeartbeat();
     await Future.wait([
       _initPlayer(),
       _fetchLyrics(),
@@ -850,18 +867,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                       _controls(),
                       const SizedBox(height: 28),
                       _extraActions(),
-                      if (_noPreview)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 18),
-                          child: Text(
-                            'Playback source unavailable for this track.',
-                            style: GoogleFonts.outfit(
-                              fontSize: 12,
-                              color: AppColors.text3,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
                       const SizedBox(height: 16),
                     ],
                   ),
@@ -1306,6 +1311,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                     currentCover: _coverUrl,
                     queue: _queue,
                     currentIndex: _queueIndex,
+                    shuffle: _shuffle,
+                    repeatMode: _repeatMode,
+                    onToggleShuffle: () => setState(() => _shuffle = !_shuffle),
+                    onChangeRepeat: (v) => setState(() => _repeatMode = v),
                   ),
                 ),
               ),

@@ -96,6 +96,7 @@ class UserResponse(BaseModel):
     last_name: Optional[str]
     display_name: Optional[str]
     avatar_url: Optional[str]
+    banner_url: Optional[str] = None
     bio: Optional[str]
     birth_date: Optional[date]
     city: Optional[str]
@@ -104,11 +105,15 @@ class UserResponse(BaseModel):
     banner_preset: int = 0
     is_public: bool
     show_activity: bool
+    show_followers: bool = True
+    show_recently_played: bool = True
     is_verified: bool
     is_active: bool
     is_admin: bool = False
     genres: list[str] = []
     moods: list[str] = []
+    followers_count: int = 0
+    following_count: int = 0
     created_at: datetime
 
 

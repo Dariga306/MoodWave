@@ -1,21 +1,25 @@
 import logging
 from contextlib import asynccontextmanager
 import asyncio
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from sqlalchemy import text
+from sqlalchemy import delete, text
 
 from app.config import settings
 from app.database import AsyncSessionLocal, Base, engine
-from app.routers import auth, music, weather, match, chat, social, rooms, playlists, search, charts, debug, admin
+from app.models.music import ListeningHistory
+from app.routers import auth, music, weather, match, chat, social, rooms, playlists, search, charts, debug, admin, radio, trending
 from app.services import firebase as firebase_svc
 from app.services.matching import recalculate_all_vectors
 from app.services.email_service import send_account_deletion_email
@@ -25,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 limiter = Limiter(key_func=get_remote_address)
 scheduler = AsyncIOScheduler()
+UPLOADS_DIR = Path(__file__).resolve().parents[1] / "uploads"
+LISTENING_HISTORY_TTL_DAYS = 60
 
 
 @asynccontextmanager
@@ -32,6 +38,7 @@ async def lifespan(app: FastAPI):
     # Startup
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     app.state.redis = await aioredis.from_url(settings.REDIS_URL, decode_responses=True)
     app.state.firebase_ready = firebase_svc.init_firebase()
     app.state.limiter = limiter
@@ -48,7 +55,26 @@ async def lifespan(app: FastAPI):
             id="auto_delete_expired_accounts",
             replace_existing=True,
         )
+        scheduler.add_job(
+            func=lambda: asyncio.create_task(_run_history_cleanup()),
+            trigger=CronTrigger(minute=15),
+            id="cleanup_old_listening_history",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            func=lambda: asyncio.create_task(_run_trending_cleanup(app)),
+            trigger=CronTrigger(hour=3, minute=30),
+            id="trending_cleanup",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            func=lambda: asyncio.create_task(_run_trending_trim(app)),
+            trigger=CronTrigger(minute=30),
+            id="trending_trim",
+            replace_existing=True,
+        )
         scheduler.start()
+    await _run_history_cleanup()
     logger.info("MoodWave API started (firebase_ready=%s)", app.state.firebase_ready)
     yield
     # Shutdown
@@ -126,6 +152,30 @@ async def _run_auto_delete(app: FastAPI) -> None:
         logger.info("Auto-delete job: processed %d expired accounts", len(expired))
 
 
+async def _run_trending_cleanup(app: FastAPI) -> None:
+    """Remove tracks with score < 5 from trending sets to keep them fresh."""
+    redis = app.state.redis
+    await redis.zremrangebyscore("trending:global", "-inf", 4)
+
+
+async def _run_trending_trim(app: FastAPI) -> None:
+    """Every 30 min: trim trending sets to top 100."""
+    redis = app.state.redis
+    await redis.zremrangebyrank("trending:global", 0, -101)
+
+
+async def _run_history_cleanup() -> None:
+    cutoff = datetime.utcnow() - timedelta(days=LISTENING_HISTORY_TTL_DAYS)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            delete(ListeningHistory).where(ListeningHistory.created_at < cutoff)
+        )
+        await db.commit()
+        deleted_count = result.rowcount or 0
+        if deleted_count:
+            logger.info("Listening history cleanup removed %d records older than %d days", deleted_count, LISTENING_HISTORY_TTL_DAYS)
+
+
 app = FastAPI(
     title="MoodWave API",
     version="1.0.0",
@@ -140,6 +190,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5001",
         "http://127.0.0.1:5001",
+        "http://localhost:5002",
+        "http://127.0.0.1:5002",
         "http://localhost:5004",
         "http://127.0.0.1:5004",
         "http://localhost:3000",
@@ -162,10 +214,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
 app.include_router(auth.router, tags=["auth"])
 app.include_router(music.router, prefix="/tracks", tags=["music"])
 app.include_router(music.artist_router, tags=["artists"])
-app.include_router(music.album_router, prefix="/albums", tags=["albums"])
+app.include_router(music.album_router, tags=["albums"])
 app.include_router(weather.router, prefix="/weather", tags=["weather"])
 app.include_router(match.router, prefix="/matches", tags=["match"])
 app.include_router(chat.router, prefix="/chats", tags=["chat"])
@@ -176,6 +230,8 @@ app.include_router(charts.router, prefix="/charts", tags=["charts"])
 app.include_router(rooms.router, tags=["rooms"])
 app.include_router(debug.router, tags=["debug"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
+app.include_router(radio.router, prefix="/radio", tags=["radio"])
+app.include_router(trending.router, prefix="/trending", tags=["trending"])
 
 
 @app.get(

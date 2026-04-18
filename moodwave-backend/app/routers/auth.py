@@ -2,9 +2,11 @@ import logging
 import os
 from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -15,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 from app.dependencies import get_db, get_current_user
 from app.models.rooms import ListeningRoom, RoomParticipant, RoomParticipantStatus
-from app.models.music import ListeningHistory
-from app.models.social import Friend, FriendStatus
+from app.models.music import ListeningHistory, TrackCache, Playlist
+from app.models.social import Friend, FriendStatus, UserFollow
 from app.models.user import User, UserGenre, UserMood, TasteVector
 from app.schemas.auth import (
     ChangePasswordRequest,
@@ -75,6 +77,8 @@ GENRE_ALIASES = {
 
 CODE_TTL_MINUTES = 15
 MAX_RESENDS_PER_HOUR = 3
+UPLOADS_DIR = Path(__file__).resolve().parents[2] / "uploads"
+PROFILE_UPLOADS_DIR = UPLOADS_DIR / "profiles"
 
 
 # ---------------------------------------------------------------------------
@@ -93,11 +97,14 @@ class UpdateProfileRequest(BaseModel):
     bio: Optional[str] = Field(default=None, max_length=150)
     city: Optional[str] = Field(default=None, max_length=100)
     avatar_url: Optional[str] = Field(default=None, max_length=1000)
+    banner_url: Optional[str] = Field(default=None, max_length=1000)
     gender: Optional[str] = Field(default=None, max_length=20)
     avatar_preset: Optional[int] = Field(default=None, ge=0, le=11)
     banner_preset: Optional[int] = Field(default=None, ge=0, le=5)
     is_public: Optional[bool] = None
     show_activity: Optional[bool] = None
+    show_followers: Optional[bool] = None
+    show_recently_played: Optional[bool] = None
 
 
 class FCMTokenRequest(BaseModel):
@@ -163,7 +170,135 @@ def _normalize_mood(mood: str) -> str:
     return "_".join(mood.strip().lower().replace("-", " ").split())
 
 
-def _serialize_user(user: User, genres: list[UserGenre], moods: list[UserMood]) -> UserResponse:
+def _coerce_bool(value: object) -> bool | None:
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return None
+
+
+def _coerce_int(value: object) -> int | None:
+    if value is None or isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
+    return None
+
+
+def _build_absolute_upload_url(request: Request, relative_path: str) -> str:
+    return str(request.url_for("uploads", path=relative_path))
+
+
+async def _save_profile_image(
+    request: Request,
+    upload: UploadFile,
+    *,
+    user_id: int,
+    kind: str,
+) -> str:
+    content_type = (upload.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail=f"{kind.title()} must be an image")
+
+    ext = os.path.splitext(upload.filename or "")[1].lower()
+    if not ext:
+        guessed_ext = content_type.split("/")[-1]
+        ext = ".jpg" if guessed_ext == "jpeg" else f".{guessed_ext}"
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported {kind} format")
+
+    data = await upload.read()
+    if not data:
+        raise HTTPException(status_code=400, detail=f"{kind.title()} file is empty")
+
+    PROFILE_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    file_name = f"user_{user_id}_{kind}_{int(datetime.utcnow().timestamp())}_{uuid4().hex[:10]}{ext}"
+    file_path = PROFILE_UPLOADS_DIR / file_name
+    file_path.write_bytes(data)
+    relative_path = f"profiles/{file_name}".replace("\\", "/")
+    return _build_absolute_upload_url(request, relative_path)
+
+
+async def _parse_profile_update_request(request: Request) -> tuple[dict[str, object], UploadFile | None, UploadFile | None]:
+    content_type = request.headers.get("content-type", "").lower()
+    avatar_file: UploadFile | None = None
+    banner_file: UploadFile | None = None
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        raw_data: dict[str, object] = {}
+        for key in (
+            "username",
+            "first_name",
+            "last_name",
+            "display_name",
+            "bio",
+            "city",
+            "avatar_url",
+            "banner_url",
+            "gender",
+            "avatar_preset",
+            "banner_preset",
+            "is_public",
+            "show_activity",
+            "show_followers",
+            "show_recently_played",
+        ):
+            value = form.get(key)
+            if value is not None:
+                raw_data[key] = value
+
+        avatar_candidate = form.get("avatar")
+        banner_candidate = form.get("banner")
+        if isinstance(avatar_candidate, UploadFile) and avatar_candidate.filename:
+            avatar_file = avatar_candidate
+        if isinstance(banner_candidate, UploadFile) and banner_candidate.filename:
+            banner_file = banner_candidate
+
+        for bool_key in ("is_public", "show_activity", "show_followers", "show_recently_played"):
+            if bool_key in raw_data:
+                parsed = _coerce_bool(raw_data[bool_key])
+                if parsed is not None:
+                    raw_data[bool_key] = parsed
+
+        for int_key in ("avatar_preset", "banner_preset"):
+            if int_key in raw_data:
+                parsed = _coerce_int(raw_data[int_key])
+                if parsed is not None:
+                    raw_data[int_key] = parsed
+                else:
+                    raw_data.pop(int_key, None)
+
+        if raw_data.get("gender") == "":
+            raw_data["gender"] = None
+    else:
+        raw_json = await request.json()
+        if not isinstance(raw_json, dict):
+            raise HTTPException(status_code=400, detail="Invalid profile payload")
+        raw_data = dict(raw_json)
+
+    validated = UpdateProfileRequest.model_validate(raw_data).model_dump(exclude_none=True)
+    return validated, avatar_file, banner_file
+
+
+def _serialize_user(
+    user: User,
+    genres: list[UserGenre],
+    moods: list[UserMood],
+    followers_count: int = 0,
+    following_count: int = 0,
+) -> UserResponse:
     return UserResponse.model_validate({
         "id": user.id,
         "email": user.email,
@@ -172,6 +307,7 @@ def _serialize_user(user: User, genres: list[UserGenre], moods: list[UserMood]) 
         "last_name": user.last_name,
         "display_name": user.display_name,
         "avatar_url": user.avatar_url,
+        "banner_url": getattr(user, "banner_url", None),
         "bio": user.bio,
         "birth_date": user.birth_date,
         "city": user.city,
@@ -180,11 +316,15 @@ def _serialize_user(user: User, genres: list[UserGenre], moods: list[UserMood]) 
         "banner_preset": getattr(user, "banner_preset", 0) or 0,
         "is_public": user.is_public,
         "show_activity": user.show_activity,
+        "show_followers": getattr(user, "show_followers", True),
+        "show_recently_played": getattr(user, "show_recently_played", True),
         "is_verified": user.is_verified,
         "is_active": user.is_active,
         "is_admin": getattr(user, "is_admin", False),
         "genres": [item.genre for item in genres],
         "moods": [item.mood for item in moods],
+        "followers_count": followers_count,
+        "following_count": following_count,
         "created_at": user.created_at,
     })
 
@@ -567,7 +707,13 @@ async def get_me(
 ):
     genres = (await db.execute(select(UserGenre).where(UserGenre.user_id == current_user.id))).scalars().all()
     moods = (await db.execute(select(UserMood).where(UserMood.user_id == current_user.id))).scalars().all()
-    return _serialize_user(current_user, genres, moods)
+    followers_count = await db.scalar(
+        select(func.count(UserFollow.id)).where(UserFollow.following_id == current_user.id)
+    ) or 0
+    following_count = await db.scalar(
+        select(func.count(UserFollow.id)).where(UserFollow.follower_id == current_user.id)
+    ) or 0
+    return _serialize_user(current_user, genres, moods, followers_count, following_count)
 
 
 @router.put(
@@ -577,18 +723,32 @@ async def get_me(
     description="Updates editable profile fields such as name, bio, city, privacy, and activity visibility.",
 )
 async def update_me(
-    body: UpdateProfileRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    data = body.model_dump(exclude_none=True)
+    data, avatar_file, banner_file = await _parse_profile_update_request(request)
     if "username" in data and data["username"] != current_user.username:
         existing = await db.scalar(
             select(User).where(User.username == data["username"], User.id != current_user.id)
         )
         if existing:
             raise HTTPException(status_code=400, detail="Username already taken")
+
+    if avatar_file is not None:
+        data["avatar_url"] = await _save_profile_image(
+            request,
+            avatar_file,
+            user_id=current_user.id,
+            kind="avatar",
+        )
+    if banner_file is not None:
+        data["banner_url"] = await _save_profile_image(
+            request,
+            banner_file,
+            user_id=current_user.id,
+            kind="banner",
+        )
 
     for key, value in data.items():
         setattr(current_user, key, value)
@@ -599,7 +759,13 @@ async def update_me(
 
     genres = (await db.execute(select(UserGenre).where(UserGenre.user_id == current_user.id))).scalars().all()
     moods = (await db.execute(select(UserMood).where(UserMood.user_id == current_user.id))).scalars().all()
-    return _serialize_user(current_user, genres, moods)
+    followers_count = await db.scalar(
+        select(func.count(UserFollow.id)).where(UserFollow.following_id == current_user.id)
+    ) or 0
+    following_count = await db.scalar(
+        select(func.count(UserFollow.id)).where(UserFollow.follower_id == current_user.id)
+    ) or 0
+    return _serialize_user(current_user, genres, moods, followers_count, following_count)
 
 
 @router.put(
@@ -870,16 +1036,19 @@ async def deactivate_account(
 @router.get(
     "/users/me/stats",
     summary="Get profile stats",
-    description="Returns listening, monthly activity, and friend-count statistics for the authenticated user.",
+    description="Returns listening, monthly activity, top artists and friend-count statistics for the authenticated user.",
 )
 async def get_me_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    from sqlalchemy import desc as sa_desc
+
     songs_count = await db.scalar(
         select(func.count(ListeningHistory.id)).where(ListeningHistory.user_id == current_user.id)
     )
     month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    year_start = datetime.utcnow().replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     this_month_count = await db.scalar(
         select(func.count(ListeningHistory.id)).where(
             ListeningHistory.user_id == current_user.id,
@@ -892,11 +1061,173 @@ async def get_me_stats(
             Friend.status == FriendStatus.accepted,
         )
     )
+    followers_count = await db.scalar(
+        select(func.count(UserFollow.id)).where(UserFollow.following_id == current_user.id)
+    )
+    following_count = await db.scalar(
+        select(func.count(UserFollow.id)).where(UserFollow.follower_id == current_user.id)
+    )
+    # Unique artists from listening history
+    unique_artists_count = await db.scalar(
+        select(func.count(func.distinct(TrackCache.artist)))
+        .join(ListeningHistory, ListeningHistory.spotify_track_id == TrackCache.spotify_id)
+        .where(ListeningHistory.user_id == current_user.id)
+        .where(TrackCache.artist.isnot(None))
+        .where(TrackCache.artist != "")
+    )
+    # Playlists created
+    playlists_count = await db.scalar(
+        select(func.count(Playlist.id)).where(Playlist.user_id == current_user.id)
+    )
+    # Total listening time (sum of track durations) this year
+    total_ms = await db.scalar(
+        select(func.sum(TrackCache.duration_ms))
+        .join(ListeningHistory, ListeningHistory.spotify_track_id == TrackCache.spotify_id)
+        .where(ListeningHistory.user_id == current_user.id)
+        .where(ListeningHistory.created_at >= year_start)
+        .where(TrackCache.duration_ms.isnot(None))
+    )
+    total_hours = round((total_ms or 0) / 3_600_000, 1)
+    # Top 3 artists by play count
+    top_artists_rows = (await db.execute(
+        select(TrackCache.artist, func.count(ListeningHistory.id).label("plays"))
+        .join(ListeningHistory, ListeningHistory.spotify_track_id == TrackCache.spotify_id)
+        .where(ListeningHistory.user_id == current_user.id)
+        .where(TrackCache.artist.isnot(None))
+        .where(TrackCache.artist != "")
+        .group_by(TrackCache.artist)
+        .order_by(sa_desc("plays"))
+        .limit(3)
+    )).all()
+    top_artists = [{"name": r.artist, "plays": r.plays} for r in top_artists_rows]
+    # User genre preferences
+    genres = (await db.execute(
+        select(UserGenre.genre).where(UserGenre.user_id == current_user.id).limit(5)
+    )).scalars().all()
+
     return {
         "songs_count": songs_count or 0,
         "this_month_count": this_month_count or 0,
         "friends_count": friends_count or 0,
+        "followers_count": followers_count or 0,
+        "following_count": following_count or 0,
+        "unique_artists_count": unique_artists_count or 0,
+        "playlists_count": playlists_count or 0,
+        "total_hours": total_hours,
+        "top_artists": top_artists,
+        "genres": list(genres),
     }
+
+
+@router.get(
+    "/users/me/privacy-settings",
+    summary="Get privacy settings",
+    description="Returns the current user's privacy settings.",
+)
+async def get_privacy_settings(
+    current_user: User = Depends(get_current_user),
+):
+    return {
+        "is_public": current_user.is_public,
+        "show_activity": current_user.show_activity,
+        "show_followers": getattr(current_user, "show_followers", True),
+        "show_recently_played": getattr(current_user, "show_recently_played", True),
+    }
+
+
+class PrivacySettingsRequest(BaseModel):
+    is_public: Optional[bool] = None
+    show_activity: Optional[bool] = None
+    show_followers: Optional[bool] = None
+    show_recently_played: Optional[bool] = None
+
+
+@router.put(
+    "/users/me/privacy-settings",
+    summary="Update privacy settings",
+    description="Updates the current user's privacy settings.",
+)
+async def update_privacy_settings(
+    body: PrivacySettingsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    data = body.model_dump(exclude_none=True)
+    for key, value in data.items():
+        setattr(current_user, key, value)
+    await db.commit()
+    return {
+        "is_public": current_user.is_public,
+        "show_activity": current_user.show_activity,
+        "show_followers": getattr(current_user, "show_followers", True),
+        "show_recently_played": getattr(current_user, "show_recently_played", True),
+    }
+
+
+_DEFAULT_NOTIF_SETTINGS = {
+    "new_follower": True,
+    "friend_request": True,
+    "match_found": True,
+    "room_invite": True,
+    "promotions": False,
+}
+
+
+@router.get(
+    "/users/me/notification-settings",
+    summary="Get notification settings",
+    description="Returns the current user's notification preferences.",
+)
+async def get_notification_settings(
+    current_user: User = Depends(get_current_user),
+):
+    stored = getattr(current_user, "notif_settings_json", None) or {}
+    return {**_DEFAULT_NOTIF_SETTINGS, **stored}
+
+
+class NotificationSettingsRequest(BaseModel):
+    new_follower: Optional[bool] = None
+    friend_request: Optional[bool] = None
+    match_found: Optional[bool] = None
+    room_invite: Optional[bool] = None
+    promotions: Optional[bool] = None
+
+
+@router.put(
+    "/users/me/notification-settings",
+    summary="Update notification settings",
+    description="Updates the current user's notification preferences.",
+)
+async def update_notification_settings(
+    body: NotificationSettingsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    existing = dict(getattr(current_user, "notif_settings_json", None) or {})
+    updates = body.model_dump(exclude_none=True)
+    existing.update(updates)
+    current_user.notif_settings_json = existing
+    await db.commit()
+    return {**_DEFAULT_NOTIF_SETTINGS, **existing}
+
+
+@router.post(
+    "/users/me/cache-clear",
+    summary="Clear user cache",
+    description="Clears cached recommendations and taste vector data for the current user.",
+)
+async def clear_user_cache(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    redis = request.app.state.redis
+    await cache_svc.invalidate_recommendations(redis, current_user.id)
+    await redis.delete(
+        f"taste_vector:{current_user.id}",
+        f"now_playing:{current_user.id}",
+        f"match_candidates:{current_user.id}",
+    )
+    return {"message": "Cache cleared"}
 
 
 @router.get(
