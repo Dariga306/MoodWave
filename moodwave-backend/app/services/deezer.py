@@ -174,6 +174,13 @@ async def get_artist_top_tracks(deezer_artist_id: int, limit: int = 10) -> list[
     return [_map_track(item, index + 1) for index, item in enumerate(items[:limit])]
 
 
+async def get_artist_radio(deezer_artist_id: int, limit: int = 25) -> list[dict]:
+    """Returns artist radio tracks (similar/related) from Deezer."""
+    data = await _get_json(f"/artist/{deezer_artist_id}/radio", params={"limit": min(limit, 25)})
+    items = data.get("data") or []
+    return [_map_track(item, index + 1) for index, item in enumerate(items[:limit])]
+
+
 async def get_artist_albums(deezer_artist_id: int, limit: int = 50) -> list[dict]:
     data = await _get_json(f"/artist/{deezer_artist_id}/albums", params={"limit": min(limit, 100)})
     items = data.get("data") or []
@@ -213,30 +220,35 @@ async def get_album_detail(album_id: int) -> dict:
         except Exception:
             pass
 
-    # Fallback 2: search by "artist album_title" to populate the track list
-    if not tracks_data and artist_name and data.get("title"):
-        try:
-            searched = await search_tracks(
-                f"{artist_name} {data['title']}", limit=min(nb_tracks or 20, 25)
-            )
-            tracks_data = searched  # already mapped by search_tracks
-            # Mark as pre-mapped so the loop below skips _map_track
-            tracks = [
-                {**t, "cover_url": t.get("cover_url") or album_cover, "artist": t.get("artist") or artist_name}
-                for t in tracks_data
-            ]
-            return {
-                "id": data.get("id"),
-                "title": data.get("title", ""),
-                "cover_xl": album_cover,
-                "artist": artist_name,
-                "artist_id": artist.get("id"),
-                "release_date": data.get("release_date", ""),
-                "nb_tracks": nb_tracks or len(tracks),
-                "tracks": tracks,
-            }
-        except Exception:
-            pass
+    # Fallback 2: multiple search strategies to populate the track list
+    if not tracks_data and artist_name:
+        album_title = data.get("title", "")
+        search_queries = []
+        if album_title:
+            search_queries.append(f"{artist_name} {album_title}")
+            search_queries.append(album_title)
+        search_queries.append(artist_name)
+
+        for query in search_queries:
+            try:
+                searched = await search_tracks(query, limit=min(nb_tracks or 20, 25))
+                if searched:
+                    tracks = [
+                        {**t, "cover_url": t.get("cover_url") or album_cover, "artist": t.get("artist") or artist_name}
+                        for t in searched
+                    ]
+                    return {
+                        "id": data.get("id"),
+                        "title": album_title,
+                        "cover_xl": album_cover,
+                        "artist": artist_name,
+                        "artist_id": artist.get("id"),
+                        "release_date": data.get("release_date", ""),
+                        "nb_tracks": nb_tracks or len(tracks),
+                        "tracks": tracks,
+                    }
+            except Exception:
+                pass
 
     tracks = []
     for i, t in enumerate(tracks_data):

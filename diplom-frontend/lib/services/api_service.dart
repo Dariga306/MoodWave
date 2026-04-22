@@ -505,6 +505,7 @@ class ApiService {
     String? title,
     String? artist,
     String? genre,
+    String? coverUrl,
   }) async {
     await _dio.post('/tracks/${Uri.encodeComponent(spotifyId)}/play', data: {
       'completion_pct': completionPct,
@@ -512,6 +513,7 @@ class ApiService {
       if (title != null) 'title': title,
       if (artist != null) 'artist': artist,
       if (genre != null) 'genre': genre,
+      if (coverUrl != null) 'cover_url': coverUrl,
     });
   }
 

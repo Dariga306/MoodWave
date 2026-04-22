@@ -189,6 +189,7 @@ class PlayTrackRequest(BaseModel):
     title: Optional[str] = None
     artist: Optional[str] = None
     genre: Optional[str] = None
+    cover_url: Optional[str] = None
 
 
 class LikeTrackRequest(BaseModel):
@@ -232,16 +233,21 @@ async def _ensure_track_cached(
     title: Optional[str],
     artist: Optional[str],
     genre: Optional[str],
+    cover_url: Optional[str] = None,
 ) -> Optional[TrackCache]:
-    """Return existing TrackCache or create a minimal one from body data."""
+    """Return existing TrackCache or create/update a minimal one from body data."""
     track = await db.scalar(select(TrackCache).where(TrackCache.spotify_id == spotify_id))
     if track:
+        # Update cover_url if it was missing and we now have it
+        if cover_url and not track.cover_url:
+            track.cover_url = cover_url
         return track
-    if title and artist:
+    if title:
         track = TrackCache(
             spotify_id=spotify_id,
             title=title,
-            artist=artist,
+            artist=artist or "",
+            cover_url=cover_url,
             genres=[genre] if genre else [],
             audio_features={},
         )
@@ -758,7 +764,7 @@ async def play_track(
     action = "completed" if body.completion_pct > 80 else "played"
     weight = float(ACTION_WEIGHTS[action])
 
-    track = await _ensure_track_cached(db, spotify_id, body.title, body.artist, body.genre)
+    track = await _ensure_track_cached(db, spotify_id, body.title, body.artist, body.genre, body.cover_url)
     genres = _extract_genres(track)
 
     db.add(
@@ -952,6 +958,20 @@ async def get_artist_profile(
     if not artist:
         raise HTTPException(status_code=404, detail="Artist not found")
 
+    seen_ids: set[str] = {str(t.get("spotify_id") or t.get("deezer_id") or "") for t in top_tracks if t.get("spotify_id") or t.get("deezer_id")}
+
+    # Pad with radio tracks when top_tracks is sparse (< 20)
+    if len(top_tracks) < 20:
+        try:
+            radio_tracks = await deezer_service.get_artist_radio(deezer_id, limit=25)
+            for t in radio_tracks:
+                tid = str(t.get("spotify_id") or t.get("deezer_id") or "")
+                if tid and tid not in seen_ids:
+                    seen_ids.add(tid)
+                    top_tracks.append(t)
+        except Exception:
+            pass
+
     # Fallback when the /top endpoint returns nothing (common for K-pop solo artists, etc.)
     if not top_tracks:
         fallback: list[dict] = []
@@ -962,13 +982,12 @@ async def get_artist_profile(
                     *[deezer_service.get_album_detail(aid) for aid in album_ids],
                     return_exceptions=True,
                 )
-                seen: set[str] = set()
                 for res in album_results:
                     if isinstance(res, dict):
                         for t in res.get("tracks") or []:
                             tid = str(t.get("spotify_id") or t.get("deezer_id") or "")
-                            if tid and tid not in seen:
-                                seen.add(tid)
+                            if tid and tid not in seen_ids:
+                                seen_ids.add(tid)
                                 fallback.append(t)
         if not fallback:
             fallback = await deezer_service.search_tracks(artist["name"], limit=50)
@@ -976,7 +995,7 @@ async def get_artist_profile(
 
     return {
         "artist": artist,
-        "top_tracks": top_tracks,
+        "top_tracks": top_tracks[:50],
         "albums": albums,
         "related_artists": related_artists,
     }

@@ -439,6 +439,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               title: _title,
               artist: _artist,
               genre: _track['genre']?.toString(),
+              coverUrl: _coverUrl,
             )
             .catchError((_) {});
         return;
@@ -502,6 +503,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             title: _title,
             artist: _artist,
             genre: _track['genre']?.toString(),
+            coverUrl: _coverUrl,
           )
           .catchError((_) {});
       if (mounted) {
