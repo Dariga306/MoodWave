@@ -283,80 +283,50 @@ class _HomeTabState extends State<HomeTab> {
                 _RecentHorizontal(tracks: _recentlyPlayed.take(10).toList()),
               ],
 
-              // ─── You Might Like ───────────────────────────────
-              if (_youMightLike.isNotEmpty) ...[
+              // ─── Following ────────────────────────────────────
+              if (_followedArtists.isNotEmpty) ...[
                 const SizedBox(height: 22),
-                const SectionHeader(title: 'You Might Like', action: 'See all →'),
+                const SectionHeader(title: 'Following'),
                 const SizedBox(height: 12),
                 SizedBox(
-                  height: 120,
+                  height: 110,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(left: 20),
-                    itemCount: _youMightLike.length.clamp(0, 12),
-                    itemBuilder: (ctx, i) {
-                      final a = _youMightLike[i] as Map<String, dynamic>;
-                      return _YouMightLikeItem(artist: a);
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    itemCount: _followedArtists.length.clamp(0, 10),
+                    itemBuilder: (context, i) {
+                      final artist = _followedArtists[i] as Map<String, dynamic>;
+                      return _FollowingItem(artist: artist);
                     },
                   ),
                 ),
               ],
 
-              // ─── Mood tiles ────────────────────────────────────
-              const SizedBox(height: 22),
-              const SectionHeader(title: 'Choose Your Mood', action: 'All →'),
-              const SizedBox(height: 12),
-              SizedBox(
-                  height: 130,
-                  child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.only(left: 20),
-                      children: [
-                        _MoodTile(
-                            emoji: '📚',
-                            name: 'Study',
-                            gradient: AppColors.gradBlue,
-                            onTap: () =>
-                                _showMoodTracks('study', '📚', 'Study')),
-                        _MoodTile(
-                            emoji: '🏃',
-                            name: 'Sport',
-                            gradient: const LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: [Color(0xFF7c3d12), Color(0xFFf59e0b)]),
-                            onTap: () =>
-                                _showMoodTracks('workout', '🏃', 'Sport')),
-                        _MoodTile(
-                            emoji: '🚗',
-                            name: 'Drive',
-                            gradient: AppColors.gradPurple,
-                            onTap: () =>
-                                _showMoodTracks('driving', '🚗', 'Drive')),
-                        _MoodTile(
-                            emoji: '😴',
-                            name: 'Sleep',
-                            gradient: const LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: [Color(0xFF0f172a), Color(0xFF312e81)]),
-                            onTap: () =>
-                                _showMoodTracks('sleep', '😴', 'Sleep')),
-                        _MoodTile(
-                            emoji: '🎉',
-                            name: 'Party',
-                            gradient: AppColors.gradPink,
-                            onTap: () =>
-                                _showMoodTracks('party', '🎉', 'Party')),
-                        _MoodTile(
-                            emoji: '💔',
-                            name: 'Sad',
-                            gradient: const LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: [Color(0xFF1a0a2e), Color(0xFF4c1d95)]),
-                            onTap: () => _showMoodTracks('sad', '💔', 'Sad')),
-                      ])),
+              // ─── Fresh Wave ────────────────────────────────────
+              if (_freshWave.isNotEmpty) ...[
+                const SizedBox(height: 22),
+                SectionHeader(
+                  title: 'Fresh Wave 🌊',
+                  action: 'All →',
+                  onAction: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const CityChartsScreen())),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 200,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.only(left: 20),
+                    itemCount: _freshWave.length.clamp(0, 10),
+                    itemBuilder: (context, i) {
+                      final track = _freshWave[i] as Map<String, dynamic>;
+                      return _TrackCard(track: track);
+                    },
+                  ),
+                ),
+              ],
 
               // ─── Top in City ───────────────────────────────────
               const SizedBox(height: 22),
@@ -470,21 +440,20 @@ class _HomeTabState extends State<HomeTab> {
                 ),
               ],
 
-              // ─── Following ────────────────────────────────────
-              if (_followedArtists.isNotEmpty) ...[
+              // ─── You Might Like ───────────────────────────────
+              if (_youMightLike.isNotEmpty) ...[
                 const SizedBox(height: 22),
-                const SectionHeader(title: 'Following'),
+                const SectionHeader(title: 'You Might Like', action: 'See all →'),
                 const SizedBox(height: 12),
                 SizedBox(
-                  height: 110,
+                  height: 120,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    itemCount: _followedArtists.length.clamp(0, 6),
-                    itemBuilder: (context, i) {
-                      final artist =
-                          _followedArtists[i] as Map<String, dynamic>;
-                      return _FollowingItem(artist: artist);
+                    padding: const EdgeInsets.only(left: 20),
+                    itemCount: _youMightLike.length.clamp(0, 12),
+                    itemBuilder: (ctx, i) {
+                      final a = _youMightLike[i] as Map<String, dynamic>;
+                      return _YouMightLikeItem(artist: a);
                     },
                   ),
                 ),
@@ -509,31 +478,61 @@ class _HomeTabState extends State<HomeTab> {
                 ),
               ],
 
-              // ─── Fresh Wave ────────────────────────────────────
-              if (_freshWave.isNotEmpty) ...[
-                const SizedBox(height: 22),
-                SectionHeader(
-                  title: 'Fresh Wave 🌊',
-                  action: 'All →',
-                  onAction: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const CityChartsScreen())),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 200,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(left: 20),
-                    itemCount: _freshWave.length.clamp(0, 10),
-                    itemBuilder: (context, i) {
-                      final track = _freshWave[i] as Map<String, dynamic>;
-                      return _TrackCard(track: track);
-                    },
-                  ),
-                ),
-              ],
+              // ─── Mood tiles ────────────────────────────────────
+              const SizedBox(height: 22),
+              const SectionHeader(title: 'Choose Your Mood', action: 'All →'),
+              const SizedBox(height: 12),
+              SizedBox(
+                  height: 130,
+                  child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.only(left: 20),
+                      children: [
+                        _MoodTile(
+                            emoji: '📚',
+                            name: 'Study',
+                            gradient: AppColors.gradBlue,
+                            onTap: () =>
+                                _showMoodTracks('study', '📚', 'Study')),
+                        _MoodTile(
+                            emoji: '🏃',
+                            name: 'Sport',
+                            gradient: const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [Color(0xFF7c3d12), Color(0xFFf59e0b)]),
+                            onTap: () =>
+                                _showMoodTracks('workout', '🏃', 'Sport')),
+                        _MoodTile(
+                            emoji: '🚗',
+                            name: 'Drive',
+                            gradient: AppColors.gradPurple,
+                            onTap: () =>
+                                _showMoodTracks('driving', '🚗', 'Drive')),
+                        _MoodTile(
+                            emoji: '😴',
+                            name: 'Sleep',
+                            gradient: const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [Color(0xFF0f172a), Color(0xFF312e81)]),
+                            onTap: () =>
+                                _showMoodTracks('sleep', '😴', 'Sleep')),
+                        _MoodTile(
+                            emoji: '🎉',
+                            name: 'Party',
+                            gradient: AppColors.gradPink,
+                            onTap: () =>
+                                _showMoodTracks('party', '🎉', 'Party')),
+                        _MoodTile(
+                            emoji: '💔',
+                            name: 'Sad',
+                            gradient: const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [Color(0xFF1a0a2e), Color(0xFF4c1d95)]),
+                            onTap: () => _showMoodTracks('sad', '💔', 'Sad')),
+                      ])),
 
               const SizedBox(height: 32),
             ],
