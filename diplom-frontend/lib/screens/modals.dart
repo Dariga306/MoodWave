@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import 'album_screen.dart';
+import 'artist_screen.dart';
+import 'player_screen.dart';
 
 /// Shows Add to Playlist bottom sheet
 void showAddToPlaylist(BuildContext context, {Map<String, dynamic>? track}) {
@@ -604,6 +607,143 @@ class _ShareTrackSheetState extends State<_ShareTrackSheet> {
       ),
     );
   }
+}
+
+// ── Full Track Context Menu ─────────────────────────────────────────────────
+
+void showTrackMenu(
+  BuildContext context, {
+  required Map<String, dynamic> track,
+  int? playlistId,
+  VoidCallback? onRemoveFromPlaylist,
+  List<Map<String, dynamic>>? queue,
+  int? currentQueueIndex,
+}) {
+  final title = track['title'] ?? track['trackName'] ?? 'Unknown';
+  final artist = track['artist'] ?? track['artistName'] ?? '';
+  final coverUrl = track['cover_url'] ?? track['artworkUrl100'];
+
+  void snack(String msg) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, style: GoogleFonts.outfit(fontSize: 13)),
+      backgroundColor: AppColors.surface,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      duration: const Duration(seconds: 2),
+    ));
+  }
+
+  Widget menuItem(IconData icon, String label, VoidCallback onTap, {Color? color}) {
+    return ListTile(
+      leading: Icon(icon, size: 22, color: color ?? AppColors.text3),
+      title: Text(label, style: GoogleFonts.outfit(fontSize: 15, color: color ?? AppColors.text)),
+      onTap: onTap,
+      dense: true,
+    );
+  }
+
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: AppColors.surface,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    isScrollControlled: true,
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 36, height: 4, margin: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2))),
+          // Track preview
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            child: Row(children: [
+              Container(
+                width: 52, height: 52,
+                decoration: BoxDecoration(gradient: AppColors.gradMixed, borderRadius: BorderRadius.circular(10)),
+                child: coverUrl != null
+                    ? ClipRRect(borderRadius: BorderRadius.circular(10),
+                        child: Image.network(coverUrl.toString(), fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Center(child: Text('🎵', style: TextStyle(fontSize: 22)))))
+                    : const Center(child: Text('🎵', style: TextStyle(fontSize: 22))),
+              ),
+              const SizedBox(width: 14),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title.toString(), maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text)),
+                Text(artist.toString(),
+                    style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3)),
+              ])),
+            ]),
+          ),
+          const Divider(color: AppColors.border, height: 1),
+          menuItem(Icons.share_outlined, 'Share', () {
+            Navigator.pop(ctx);
+            showShareTrack(context, track: track);
+          }),
+          menuItem(Icons.playlist_add_rounded, 'Add to playlist', () {
+            Navigator.pop(ctx);
+            showAddToPlaylist(context, track: track);
+          }),
+          menuItem(Icons.block_rounded, 'Exclude from recommendations', () {
+            Navigator.pop(ctx);
+            snack('Track excluded from recommendations');
+            final trackId = track['spotify_id'] ?? track['deezer_id'] ?? track['track_id'] ?? '';
+            if (trackId.toString().isNotEmpty) {
+              ApiService().skipTrack(trackId.toString()).catchError((_) {});
+            }
+          }),
+          if (playlistId != null && onRemoveFromPlaylist != null)
+            menuItem(Icons.remove_circle_outline_rounded, 'Remove from playlist', () {
+              Navigator.pop(ctx);
+              onRemoveFromPlaylist();
+            }, color: Colors.redAccent),
+          menuItem(Icons.queue_music_rounded, 'Go to queue', () {
+            Navigator.pop(ctx);
+            snack('Open the player to see the queue');
+          }),
+          menuItem(Icons.person_outline_rounded, 'Go to artist', () async {
+            Navigator.pop(ctx);
+            final directId = track['artist_id']?.toString();
+            if (directId != null && directId.isNotEmpty) {
+              if (context.mounted) {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ArtistScreen(artistId: directId, artistName: artist.toString()),
+                ));
+              }
+              return;
+            }
+            if (artist.toString().isEmpty) return;
+            try {
+              final result = await ApiService().searchArtist(artist.toString());
+              final a = result['artist'] as Map<String, dynamic>?;
+              if (a == null || !context.mounted) return;
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => ArtistScreen(artistId: a['id'].toString(), artistName: a['name']?.toString() ?? artist.toString()),
+              ));
+            } catch (_) {
+              if (context.mounted) snack('Artist not found');
+            }
+          }),
+          menuItem(Icons.album_rounded, 'Go to album', () {
+            Navigator.pop(ctx);
+            final albumId = track['album_id'];
+            if (albumId != null) {
+              final id = albumId is int ? albumId : int.tryParse(albumId.toString());
+              if (id != null && context.mounted) {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => AlbumScreen(albumId: id),
+                ));
+                return;
+              }
+            }
+            snack('Album not found');
+          }),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
+  );
 }
 
 class _ShareApp extends StatelessWidget {

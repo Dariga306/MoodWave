@@ -23,6 +23,7 @@ class ProfileTab extends StatefulWidget {
 class _ProfileTabState extends State<ProfileTab> {
   int? _followersCount;
   int? _followingCount;
+  int? _userId;
   bool _statsLoaded = false;
   List<Map<String, dynamic>> _followedArtists = [];
 
@@ -43,12 +44,35 @@ class _ProfileTabState extends State<ProfileTab> {
       setState(() {
         _followersCount = data['followers_count'] as int? ?? 0;
         _followingCount = data['following_count'] as int? ?? 0;
+        _userId = data['user_id'] as int?;
         _statsLoaded = true;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() => _statsLoaded = true);
     }
+  }
+
+  void _openFollowersList() {
+    if (_userId == null) return;
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => _UsersListScreen(
+        title: 'Followers',
+        userId: _userId!,
+        mode: 'followers',
+      ),
+    ));
+  }
+
+  void _openFollowingList() {
+    if (_userId == null) return;
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => _UsersListScreen(
+        title: 'Following',
+        userId: _userId!,
+        mode: 'following',
+      ),
+    ));
   }
 
   Future<void> _loadFollowedArtists() async {
@@ -209,12 +233,18 @@ class _ProfileTabState extends State<ProfileTab> {
                           GestureDetector(
                             onTap: () async {
                               if (user == null) return;
-                              await Navigator.of(context).push<bool>(
+                              final saved = await Navigator.of(context).push<bool>(
                                 MaterialPageRoute(
-                                  builder: (_) => EditProfileScreen(user: user),
+                                  builder: (_) => EditProfileScreen(
+                                    user: Map<String, dynamic>.from(user),
+                                  ),
                                 ),
                               );
-                              if (mounted) setState(() {});
+                              if (mounted && saved == true) {
+                                _load();
+                              } else if (mounted) {
+                                setState(() {});
+                              }
                             },
                             child: Container(
                               margin: const EdgeInsets.only(bottom: 4),
@@ -267,7 +297,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 ),
               ),
 
-              // Stats — Followers / Following
+              // Stats — Followers / Following (clickable)
               const SizedBox(height: 14),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -279,14 +309,20 @@ class _ProfileTabState extends State<ProfileTab> {
                   ),
                   child: Row(
                     children: [
-                      Expanded(child: _StatCell(
-                        value: _statsLoaded ? '${_followersCount ?? 0}' : '—',
-                        label: 'Followers',
+                      Expanded(child: GestureDetector(
+                        onTap: _openFollowersList,
+                        child: _StatCell(
+                          value: _statsLoaded ? '${_followersCount ?? 0}' : '—',
+                          label: 'Followers',
+                        ),
                       )),
                       Container(width: 1, height: 54, color: AppColors.border),
-                      Expanded(child: _StatCell(
-                        value: _statsLoaded ? '${_followingCount ?? 0}' : '—',
-                        label: 'Following',
+                      Expanded(child: GestureDetector(
+                        onTap: _openFollowingList,
+                        child: _StatCell(
+                          value: _statsLoaded ? '${_followingCount ?? 0}' : '—',
+                          label: 'Following',
+                        ),
                       )),
                     ],
                   ),
@@ -298,75 +334,72 @@ class _ProfileTabState extends State<ProfileTab> {
                 const SizedBox(height: 20),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Text('Following',
-                      style: GoogleFonts.outfit(
-                          fontSize: 17, fontWeight: FontWeight.w700,
-                          color: AppColors.text)),
+                  child: Row(children: [
+                    Text('Following',
+                        style: GoogleFonts.outfit(
+                            fontSize: 17, fontWeight: FontWeight.w700,
+                            color: AppColors.text)),
+                    const Spacer(),
+                    Text('${_followedArtists.length}',
+                        style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text3)),
+                  ]),
                 ),
                 const SizedBox(height: 10),
-                SizedBox(
-                  height: 88,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(left: 20),
-                    itemCount: _followedArtists.length,
-                    itemBuilder: (ctx, i) {
-                      final artist = _followedArtists[i];
-                      final pic = artist['picture_medium'] as String? ??
-                          artist['picture_xl'] as String? ?? '';
-                      final name = artist['name'] as String? ?? '';
-                      return GestureDetector(
-                        onTap: () {
-                          final id = artist['id'];
-                          if (id != null) {
-                            Navigator.push(ctx, MaterialPageRoute(
-                              builder: (_) => ArtistScreen(
-                                  artistId: id.toString(), artistName: name),
-                            ));
-                          }
-                        },
-                        child: Container(
-                          width: 68,
-                          margin: const EdgeInsets.only(right: 12),
-                          child: Column(children: [
-                            Container(
-                              width: 54, height: 54,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(color: AppColors.border, width: 1.5),
-                                gradient: AppColors.gradMixed,
-                              ),
-                              child: ClipOval(
-                                child: pic.isNotEmpty
-                                    ? CachedNetworkImage(
-                                        imageUrl: pic,
-                                        fit: BoxFit.cover,
-                                        placeholder: (_, __) => const SizedBox(),
-                                        errorWidget: (_, __, ___) => Center(
-                                            child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
-                                                style: GoogleFonts.outfit(
-                                                    fontSize: 20, fontWeight: FontWeight.w700,
-                                                    color: Colors.white))))
-                                    : Center(
-                                        child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
-                                            style: GoogleFonts.outfit(
-                                                fontSize: 20, fontWeight: FontWeight.w700,
-                                                color: Colors.white))),
-                              ),
-                            ),
-                            const SizedBox(height: 5),
-                            Text(name,
-                                textAlign: TextAlign.center,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.outfit(
-                                    fontSize: 11, color: AppColors.text2)),
-                          ]),
-                        ),
-                      );
+                ...(_followedArtists.take(5).map((artist) {
+                  final pic = (artist['picture_medium'] ?? artist['picture_xl'] ?? artist['picture'] ?? '').toString();
+                  final name = (artist['name'] ?? '').toString();
+                  final fans = artist['nb_fan'];
+                  final fansNum = fans is int ? fans : int.tryParse(fans?.toString() ?? '') ?? 0;
+                  final fansStr = fansNum >= 1000000
+                      ? '${(fansNum / 1000000).toStringAsFixed(1)}M followers'
+                      : fansNum >= 1000
+                          ? '${(fansNum / 1000).toStringAsFixed(0)}K followers'
+                          : fansNum > 0 ? '$fansNum followers' : 'Artist';
+                  return GestureDetector(
+                    onTap: () {
+                      final id = artist['id'];
+                      if (id != null) {
+                        Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => ArtistScreen(artistId: id.toString(), artistName: name),
+                        ));
+                      }
                     },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                      child: Row(children: [
+                        Container(
+                          width: 48, height: 48,
+                          decoration: BoxDecoration(shape: BoxShape.circle, gradient: AppColors.gradMixed),
+                          child: ClipOval(child: pic.isNotEmpty
+                              ? CachedNetworkImage(imageUrl: pic, fit: BoxFit.cover,
+                                  errorWidget: (_, __, ___) => Center(child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                      style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))))
+                              : Center(child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                  style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white)))),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(name, style: GoogleFonts.outfit(
+                              fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.text)),
+                          Text(fansStr, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+                        ])),
+                        const Icon(Icons.chevron_right_rounded, color: AppColors.text3, size: 20),
+                      ]),
+                    ),
+                  );
+                })),
+                if (_followedArtists.length > 5)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                    child: GestureDetector(
+                      onTap: () => Navigator.push(context, MaterialPageRoute(
+                        builder: (_) => _AllFollowedArtistsScreen(artists: _followedArtists),
+                      )),
+                      child: Text('Show all (${_followedArtists.length})',
+                          style: GoogleFonts.outfit(fontSize: 13, color: AppColors.purpleLight,
+                              fontWeight: FontWeight.w600)),
+                    ),
                   ),
-                ),
               ],
 
               // Quick access
@@ -469,6 +502,165 @@ class _NavRow extends StatelessWidget {
           ])),
           Icon(Icons.chevron_right_rounded, color: AppColors.text3, size: 20),
         ]),
+      ),
+    );
+  }
+}
+
+// ─── Followers / Following list screen ───────────────────────────────────────
+
+class _UsersListScreen extends StatefulWidget {
+  final String title;
+  final int userId;
+  final String mode; // 'followers' | 'following'
+  const _UsersListScreen({required this.title, required this.userId, required this.mode});
+
+  @override
+  State<_UsersListScreen> createState() => _UsersListScreenState();
+}
+
+class _UsersListScreenState extends State<_UsersListScreen> {
+  List<Map<String, dynamic>> _users = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final data = widget.mode == 'followers'
+          ? await ApiService().getUserFollowers(widget.userId)
+          : await ApiService().getUserFollowing(widget.userId);
+      if (!mounted) return;
+      setState(() { _users = data; _loading = false; });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        backgroundColor: AppColors.bg2,
+        elevation: 0,
+        title: Text(widget.title,
+            style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.text)),
+        iconTheme: const IconThemeData(color: AppColors.text),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _users.isEmpty
+              ? Center(child: Text('Nothing here yet',
+                  style: GoogleFonts.outfit(fontSize: 15, color: AppColors.text3)))
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: _users.length,
+                  itemBuilder: (context, i) {
+                    final u = _users[i];
+                    final name = (u['display_name'] ?? u['username'] ?? '').toString();
+                    final uname = (u['username'] ?? '').toString();
+                    final avatar = (u['avatar_url'] ?? '').toString();
+                    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                      child: Row(children: [
+                        Container(
+                          width: 48, height: 48,
+                          decoration: BoxDecoration(shape: BoxShape.circle, gradient: AppColors.gradMixed),
+                          child: ClipOval(
+                            child: avatar.isNotEmpty
+                                ? CachedNetworkImage(imageUrl: avatar, fit: BoxFit.cover,
+                                    errorWidget: (_, __, ___) => Center(child: Text(initial,
+                                        style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))))
+                                : Center(child: Text(initial,
+                                    style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(name, style: GoogleFonts.outfit(
+                              fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.text)),
+                          if (uname.isNotEmpty)
+                            Text('@$uname', style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+                        ])),
+                      ]),
+                    );
+                  },
+                ),
+    );
+  }
+}
+
+// ─── All followed artists screen ──────────────────────────────────────────────
+
+class _AllFollowedArtistsScreen extends StatelessWidget {
+  final List<Map<String, dynamic>> artists;
+  const _AllFollowedArtistsScreen({required this.artists});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        backgroundColor: AppColors.bg2,
+        elevation: 0,
+        title: Text('Following',
+            style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.text)),
+        iconTheme: const IconThemeData(color: AppColors.text),
+      ),
+      body: ListView.builder(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: artists.length,
+        itemBuilder: (context, i) {
+          final artist = artists[i];
+          final pic = (artist['picture_medium'] ?? artist['picture_xl'] ?? artist['picture'] ?? '').toString();
+          final name = (artist['name'] ?? '').toString();
+          final fans = artist['nb_fan'];
+          final fansNum = fans is int ? fans : int.tryParse(fans?.toString() ?? '') ?? 0;
+          final fansStr = fansNum >= 1000000
+              ? '${(fansNum / 1000000).toStringAsFixed(1)}M followers'
+              : fansNum >= 1000
+                  ? '${(fansNum / 1000).toStringAsFixed(0)}K followers'
+                  : fansNum > 0 ? '$fansNum followers' : 'Artist';
+          return GestureDetector(
+            onTap: () {
+              final id = artist['id'];
+              if (id != null) {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ArtistScreen(artistId: id.toString(), artistName: name),
+                ));
+              }
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+              child: Row(children: [
+                Container(
+                  width: 48, height: 48,
+                  decoration: BoxDecoration(shape: BoxShape.circle, gradient: AppColors.gradMixed),
+                  child: ClipOval(child: pic.isNotEmpty
+                      ? CachedNetworkImage(imageUrl: pic, fit: BoxFit.cover,
+                          errorWidget: (_, __, ___) => Center(child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+                              style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))))
+                      : Center(child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+                          style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white)))),
+                ),
+                const SizedBox(width: 14),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(name, style: GoogleFonts.outfit(
+                      fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.text)),
+                  Text(fansStr, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+                ])),
+                const Icon(Icons.chevron_right_rounded, color: AppColors.text3, size: 20),
+              ]),
+            ),
+          );
+        },
       ),
     );
   }

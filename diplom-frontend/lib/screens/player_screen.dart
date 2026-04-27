@@ -108,6 +108,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   // Progress heartbeat
   Timer? _progressTimer;
 
+  // Like animation
+  late final AnimationController _likeController;
+  late final Animation<double> _likeScale;
+
   String get _title =>
       (_track['title'] ?? _track['trackName'] ?? 'Unknown').toString();
   String get _artist =>
@@ -160,6 +164,15 @@ class _PlayerScreenState extends State<PlayerScreen>
       vsync: this,
       duration: const Duration(seconds: 4),
     )..repeat(reverse: true);
+    _likeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _likeScale = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.45), weight: 40),
+      TweenSequenceItem(tween: Tween(begin: 1.45, end: 0.88), weight: 30),
+      TweenSequenceItem(tween: Tween(begin: 0.88, end: 1.0), weight: 30),
+    ]).animate(CurvedAnimation(parent: _likeController, curve: Curves.easeOut));
     // Register toggle callback with PlayerProvider
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -188,6 +201,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _sleepTimer?.cancel();
     _progressTimer?.cancel();
     _floatController.dispose();
+    _likeController.dispose();
     _ytStateSubscription?.cancel();
     _ytPositionSubscription?.cancel();
     _audioPositionSubscription?.cancel();
@@ -647,6 +661,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       );
       if (!mounted) return;
       setState(() => _isLiked = !_isLiked);
+      if (_isLiked) _likeController.forward(from: 0);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Added to Liked Songs'),
@@ -1055,12 +1070,19 @@ class _PlayerScreenState extends State<PlayerScreen>
               ],
             ),
           ),
-          IconButton(
-            onPressed: _toggleLike,
-            icon: Icon(
-              _isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-              color: _isLiked ? AppColors.pink : AppColors.text2,
-              size: 24,
+          AnimatedBuilder(
+            animation: _likeScale,
+            builder: (_, child) => Transform.scale(
+              scale: _likeScale.value,
+              child: child,
+            ),
+            child: IconButton(
+              onPressed: _toggleLike,
+              icon: Icon(
+                _isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                color: _isLiked ? AppColors.pink : AppColors.text2,
+                size: 24,
+              ),
             ),
           ),
         ],

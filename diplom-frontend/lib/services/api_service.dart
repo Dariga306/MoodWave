@@ -553,6 +553,18 @@ class ApiService {
     return resp.data;
   }
 
+  Future<List<Map<String, dynamic>>> searchPlaylists(String q) async {
+    try {
+      final resp = await globalSearch(q, type: 'playlists');
+      return ((resp['playlists'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<List<dynamic>> getTrending() async {
     final resp = await _dio.get('/search/trending');
     return resp.data as List? ?? [];
@@ -656,9 +668,13 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> createPlaylist(String title,
-      {String visibility = 'private'}) async {
-    final resp = await _dio
-        .post('/playlists/', data: {'title': title, 'visibility': visibility});
+      {String visibility = 'private', String? description, String? coverUrl}) async {
+    final resp = await _dio.post('/playlists/', data: {
+      'title': title,
+      'visibility': visibility,
+      if (description != null && description.isNotEmpty) 'description': description,
+      if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+    });
     return resp.data;
   }
 
@@ -672,10 +688,12 @@ class ApiService {
     await _dio.post('/playlists/$playlistId/tracks', data: track);
   }
 
-  Future<void> updatePlaylist(int playlistId, {String? title, String? visibility}) async {
+  Future<void> updatePlaylist(int playlistId, {String? title, String? description, String? visibility, String? coverUrl}) async {
     await _dio.put('/playlists/$playlistId', data: {
       if (title != null) 'title': title,
+      if (description != null) 'description': description,
       if (visibility != null) 'visibility': visibility,
+      if (coverUrl != null) 'cover_url': coverUrl,
     });
   }
 

@@ -37,8 +37,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   List<Map<String, dynamic>> get _filtered {
     if (_filter == 0) return _notifs;
-    if (_filter == 1) return _notifs.where((n) => n['type'] == 'match').toList();
-    if (_filter == 2) return _notifs.where((n) => n['type'] == 'friend_request').toList();
+    if (_filter == 1) return _notifs.where((n) =>
+        n['type'] == 'match' || n['type'] == 'taste_match').toList();
+    if (_filter == 2) return _notifs.where((n) =>
+        n['type'] == 'friend_request' || n['type'] == 'new_follower').toList();
     return _notifs;
   }
 
@@ -115,12 +117,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             itemCount: _filtered.length,
                             itemBuilder: (_, i) {
                               final n = _filtered[i];
-                              if (n['type'] == 'friend_request') {
+                              final type = n['type'] as String? ?? '';
+                              if (type == 'friend_request') {
                                 return _FriendRequestCard(
                                   key: ValueKey(n['id']),
                                   notif: n,
                                   onDismiss: () => _removeNotif(n['id'] as String),
                                 );
+                              }
+                              if (type == 'new_follower') {
+                                return _NewFollowerCard(notif: n);
+                              }
+                              if (type == 'new_album') {
+                                return _NewAlbumCard(notif: n);
                               }
                               return _MatchCard(notif: n);
                             },
@@ -315,6 +324,104 @@ class _FriendRequestCardState extends State<_FriendRequestCard> {
           ])),
         ]),
       ),
+    );
+  }
+}
+
+// ─── New Follower card ────────────────────────────────────────────────────────
+
+class _NewFollowerCard extends StatelessWidget {
+  final Map<String, dynamic> notif;
+  const _NewFollowerCard({required this.notif});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = notif['user_name'] as String? ?? '?';
+    final initial = (notif['user_initial'] as String?) ??
+        (name.isNotEmpty ? name[0].toUpperCase() : '?');
+    final time = notif['time'] as String? ?? '';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Stack(children: [
+          Container(
+            width: 46, height: 46,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(colors: [Color(0xFF4c1d95), Color(0xFF7c3aed)]),
+              shape: BoxShape.circle,
+            ),
+            child: Center(child: Text(initial, style: GoogleFonts.outfit(
+                fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)))),
+          Positioned(bottom: -2, right: -2,
+            child: Container(width: 20, height: 20,
+              decoration: BoxDecoration(color: AppColors.purpleLight, shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.bg, width: 2)),
+              child: const Center(child: Text('👤', style: TextStyle(fontSize: 9))))),
+        ]),
+        const SizedBox(width: 14),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          RichText(text: TextSpan(
+            style: GoogleFonts.outfit(fontSize: 14, height: 1.5, color: AppColors.text),
+            children: [
+              TextSpan(text: name,
+                  style: GoogleFonts.outfit(color: AppColors.purpleLight, fontWeight: FontWeight.w600)),
+              const TextSpan(text: ' started following you'),
+            ],
+          )),
+          const SizedBox(height: 4),
+          Text(time, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+        ])),
+      ]),
+    );
+  }
+}
+
+// ─── New Album card ───────────────────────────────────────────────────────────
+
+class _NewAlbumCard extends StatelessWidget {
+  final Map<String, dynamic> notif;
+  const _NewAlbumCard({required this.notif});
+
+  @override
+  Widget build(BuildContext context) {
+    final artist = notif['artist_name'] as String? ?? '?';
+    final album = notif['album_name'] as String? ?? 'New release';
+    final time = notif['time'] as String? ?? '';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Stack(children: [
+          Container(
+            width: 46, height: 46,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(colors: [Color(0xFF065f46), Color(0xFF10b981)]),
+              shape: BoxShape.circle,
+            ),
+            child: const Center(child: Text('💿', style: TextStyle(fontSize: 20)))),
+          Positioned(bottom: -2, right: -2,
+            child: Container(width: 20, height: 20,
+              decoration: BoxDecoration(color: const Color(0xFF10b981), shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.bg, width: 2)),
+              child: const Center(child: Text('🎵', style: TextStyle(fontSize: 9))))),
+        ]),
+        const SizedBox(width: 14),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          RichText(text: TextSpan(
+            style: GoogleFonts.outfit(fontSize: 14, height: 1.5, color: AppColors.text),
+            children: [
+              TextSpan(text: artist,
+                  style: GoogleFonts.outfit(color: const Color(0xFF5eead4), fontWeight: FontWeight.w600)),
+              const TextSpan(text: ' released '),
+              TextSpan(text: album,
+                  style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
+            ],
+          )),
+          const SizedBox(height: 4),
+          Text(time, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+        ])),
+      ]),
     );
   }
 }

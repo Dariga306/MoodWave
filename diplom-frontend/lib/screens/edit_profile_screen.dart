@@ -309,7 +309,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       Navigator.of(context).pop(true);
     } on DioException catch (e) {
       if (!mounted) return;
-      showErrorSnackBar(context, ErrorHelper.parseError(e));
+      final msg = ErrorHelper.parseError(e);
+      showErrorSnackBar(context, msg);
+    } catch (e) {
+      if (!mounted) return;
+      showErrorSnackBar(context, 'Something went wrong. Please try again.');
     } finally {
       if (mounted) setState(() => _saving = false);
     }

@@ -171,6 +171,16 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
 
   void _showPlaylistMenu() {
     final title = _playlist?['title']?.toString() ?? 'Playlist';
+
+    Widget item(IconData icon, String label, VoidCallback onTap, {Color? color}) {
+      final c = color ?? Colors.white;
+      return ListTile(
+        leading: Icon(icon, color: color ?? Colors.white70, size: 22),
+        title: Text(label, style: GoogleFonts.outfit(fontSize: 15, color: c)),
+        onTap: onTap,
+      );
+    }
+
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1a1a2e),
@@ -196,37 +206,111 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
             ),
             const SizedBox(height: 10),
             const Divider(color: Colors.white10, height: 1),
-            ListTile(
-              leading: const Icon(Icons.edit_rounded, color: Colors.white70, size: 22),
-              title: Text('Rename', style: GoogleFonts.outfit(fontSize: 15, color: Colors.white)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _renamePlaylist();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.share_outlined, color: Colors.white70, size: 22),
-              title: Text('Share', style: GoogleFonts.outfit(fontSize: 15, color: Colors.white)),
-              onTap: () {
-                Navigator.pop(ctx);
-                Clipboard.setData(ClipboardData(text: 'Check out my playlist: $title on MoodWave'));
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Copied to clipboard'),
-                  duration: Duration(seconds: 2),
-                ));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline_rounded, color: Color(0xFFef4444), size: 22),
-              title: Text('Delete', style: GoogleFonts.outfit(fontSize: 15, color: const Color(0xFFef4444))),
-              onTap: () {
-                Navigator.pop(ctx);
-                _deletePlaylistAndPop();
-              },
-            ),
+            item(Icons.add_rounded, 'Add tracks', () {
+              Navigator.pop(ctx);
+              _addTracksDialog();
+            }),
+            item(Icons.edit_rounded, 'Rename', () {
+              Navigator.pop(ctx);
+              _renamePlaylist();
+            }),
+            item(Icons.description_outlined, 'Edit description', () {
+              Navigator.pop(ctx);
+              _editDescriptionDialog();
+            }),
+            item(Icons.share_outlined, 'Share', () {
+              Navigator.pop(ctx);
+              Clipboard.setData(ClipboardData(text: 'Check out my playlist: $title on MoodWave'));
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Copied to clipboard'),
+                duration: Duration(seconds: 2),
+              ));
+            }),
+            item(Icons.download_outlined, 'Download', () {
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Download coming soon'),
+                duration: Duration(seconds: 2),
+              ));
+            }),
+            item(Icons.delete_outline_rounded, 'Delete', () {
+              Navigator.pop(ctx);
+              _deletePlaylistAndPop();
+            }, color: const Color(0xFFef4444)),
             const SizedBox(height: 8),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _editDescriptionDialog() async {
+    if (widget.playlistId == null) return;
+    final current = _playlist?['description']?.toString() ?? '';
+    final ctrl = TextEditingController(text: current);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Edit Description',
+            style: GoogleFonts.outfit(
+                fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLines: 3,
+          maxLength: 300,
+          style: GoogleFonts.outfit(color: AppColors.text, fontSize: 15),
+          decoration: InputDecoration(
+            hintText: 'Describe your playlist...',
+            hintStyle: GoogleFonts.outfit(color: AppColors.text3),
+            filled: true,
+            fillColor: AppColors.surface3,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Save',
+                style: GoogleFonts.outfit(
+                    color: AppColors.purpleLight, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await ApiService().updatePlaylist(widget.playlistId!, description: ctrl.text.trim());
+      if (mounted) {
+        showSuccessSnackBar(context, 'Description updated');
+        _load();
+      }
+    } catch (_) {
+      if (mounted) showErrorSnackBar(context, 'Could not update description');
+    }
+  }
+
+  Future<void> _addTracksDialog() async {
+    if (widget.playlistId == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => _AddTracksSheet(
+        playlistId: widget.playlistId!,
+        onAdded: _load,
       ),
     );
   }
@@ -585,6 +669,152 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                 const SliverToBoxAdapter(child: SizedBox(height: 80)),
               ],
             ),
+    );
+  }
+}
+
+class _AddTracksSheet extends StatefulWidget {
+  final int playlistId;
+  final VoidCallback onAdded;
+  const _AddTracksSheet({required this.playlistId, required this.onAdded});
+
+  @override
+  State<_AddTracksSheet> createState() => _AddTracksSheetState();
+}
+
+class _AddTracksSheetState extends State<_AddTracksSheet> {
+  final _ctrl = TextEditingController();
+  List<Map<String, dynamic>> _results = [];
+  bool _searching = false;
+  final Set<String> _addedIds = {};
+
+  Future<void> _search(String q) async {
+    if (q.trim().isEmpty) {
+      setState(() => _results = []);
+      return;
+    }
+    setState(() => _searching = true);
+    try {
+      final raw = await ApiService().searchTracks(q.trim());
+      if (!mounted) return;
+      setState(() {
+        _results = raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        _searching = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  Future<void> _add(Map<String, dynamic> track) async {
+    final id = track['spotify_id']?.toString() ?? track['deezer_id']?.toString() ?? '';
+    if (id.isEmpty || _addedIds.contains(id)) return;
+    try {
+      await ApiService().addTrackToPlaylist(widget.playlistId, track);
+      if (!mounted) return;
+      setState(() => _addedIds.add(id));
+      widget.onAdded();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not add track')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.65,
+        child: Column(children: [
+          const SizedBox(height: 8),
+          Container(width: 36, height: 4,
+              decoration: BoxDecoration(color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 14),
+          Text('Add Tracks', style: GoogleFonts.outfit(
+              fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.text)),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: _ctrl,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: AppColors.text),
+              onChanged: (v) => _search(v),
+              decoration: InputDecoration(
+                hintText: 'Search for a track...',
+                hintStyle: GoogleFonts.outfit(color: AppColors.text3),
+                filled: true,
+                fillColor: AppColors.surface3,
+                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.text3),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (_searching)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
+                itemCount: _results.length,
+                itemBuilder: (_, i) {
+                  final t = _results[i];
+                  final id = t['spotify_id']?.toString() ?? t['deezer_id']?.toString() ?? '';
+                  final added = _addedIds.contains(id);
+                  final cover = t['cover_url']?.toString();
+                  return ListTile(
+                    leading: Container(
+                      width: 44, height: 44,
+                      decoration: BoxDecoration(
+                        gradient: AppColors.gradMixed,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: cover != null
+                          ? ClipRRect(borderRadius: BorderRadius.circular(8),
+                              child: Image.network(cover, fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => const SizedBox()))
+                          : const Icon(Icons.music_note_rounded, color: Colors.white70, size: 20),
+                    ),
+                    title: Text(t['title']?.toString() ?? 'Unknown',
+                        style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600,
+                            color: AppColors.text),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(t['artist']?.toString() ?? '',
+                        style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    trailing: GestureDetector(
+                      onTap: added ? null : () => _add(t),
+                      child: Container(
+                        width: 32, height: 32,
+                        decoration: BoxDecoration(
+                          gradient: added ? null : AppColors.gradPurple,
+                          color: added ? AppColors.surface3 : null,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          added ? Icons.check_rounded : Icons.add_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ]),
+      ),
     );
   }
 }

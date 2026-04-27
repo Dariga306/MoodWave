@@ -859,7 +859,7 @@ class _RecentHorizontal extends StatelessWidget {
                   ),
                   // Subtitle
                   Text(
-                    artist.isNotEmpty ? artist : 'Трек',
+                    artist.isNotEmpty ? artist : 'Track',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.outfit(

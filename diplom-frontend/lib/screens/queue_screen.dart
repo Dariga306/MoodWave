@@ -13,6 +13,7 @@ class QueueScreen extends StatefulWidget {
   final int repeatMode; // 0=off 1=all 2=one
   final VoidCallback? onToggleShuffle;
   final ValueChanged<int>? onChangeRepeat;
+  final ValueChanged<List<Map<String, dynamic>>>? onQueueReordered;
 
   const QueueScreen({
     super.key,
@@ -25,6 +26,7 @@ class QueueScreen extends StatefulWidget {
     this.repeatMode = 0,
     this.onToggleShuffle,
     this.onChangeRepeat,
+    this.onQueueReordered,
   });
 
   @override
@@ -34,12 +36,17 @@ class QueueScreen extends StatefulWidget {
 class _QueueScreenState extends State<QueueScreen> {
   late bool _shuffle;
   late int _repeatMode;
+  late List<Map<String, dynamic>> _upNext;
 
   @override
   void initState() {
     super.initState();
     _shuffle = widget.shuffle;
     _repeatMode = widget.repeatMode;
+    _upNext = widget.queue.asMap().entries
+        .where((e) => e.key > widget.currentIndex)
+        .map((e) => Map<String, dynamic>.from(e.value))
+        .toList();
   }
 
   String _fmt(dynamic durationMs) {
@@ -53,10 +60,7 @@ class _QueueScreenState extends State<QueueScreen> {
   Widget build(BuildContext context) {
     final title = widget.currentTitle ?? 'Unknown';
     final artist = widget.currentArtist ?? '';
-    final upNext = widget.queue.asMap().entries
-        .where((e) => e.key > widget.currentIndex)
-        .map((e) => e.value)
-        .toList();
+    final upNext = _upNext;
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -218,118 +222,64 @@ class _QueueScreenState extends State<QueueScreen> {
             ),
           Expanded(
             child: upNext.isEmpty
-                ? Center(
-                    child: Text(
-                      'Queue is empty',
-                      style: GoogleFonts.outfit(
-                        fontSize: 15,
-                        color: AppColors.text3,
-                      ),
-                    ),
-                  )
-                : ListView.builder(
+                ? Center(child: Text('Queue is empty',
+                    style: GoogleFonts.outfit(fontSize: 15, color: AppColors.text3)))
+                : ReorderableListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     itemCount: upNext.length,
+                    onReorder: (oldIdx, newIdx) {
+                      setState(() {
+                        if (newIdx > oldIdx) newIdx--;
+                        final item = _upNext.removeAt(oldIdx);
+                        _upNext.insert(newIdx, item);
+                      });
+                      widget.onQueueReordered?.call(_upNext);
+                    },
                     itemBuilder: (context, index) {
                       final track = upNext[index];
-                      final trackTitle =
-                          track['title']?.toString() ?? track['trackName']?.toString() ?? 'Unknown';
-                      final trackArtist =
-                          track['artist']?.toString() ?? track['artistName']?.toString() ?? '';
+                      final trackTitle = track['title']?.toString() ?? track['trackName']?.toString() ?? 'Unknown';
+                      final trackArtist = track['artist']?.toString() ?? track['artistName']?.toString() ?? '';
                       final duration = _fmt(track['duration_ms']);
                       final coverUrl = track['cover_url']?.toString() ?? track['artworkUrl100']?.toString();
 
-                      return GestureDetector(
-                        onTap: () {
-                          Navigator.pop(context);
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => PlayerScreen(track: track),
-                            ),
-                          );
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          decoration: const BoxDecoration(
-                            border: Border(
-                              bottom: BorderSide(color: Color(0x08FFFFFF)),
-                            ),
-                          ),
+                      return Container(
+                        key: ValueKey('${track['spotify_id'] ?? track['deezer_id'] ?? index}_$index'),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: const BoxDecoration(
+                          border: Border(bottom: BorderSide(color: Color(0x08FFFFFF))),
+                        ),
+                        child: GestureDetector(
+                          onTap: () {
+                            Navigator.pop(context);
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => PlayerScreen(track: track)));
+                          },
                           child: Row(children: [
-                            const Icon(Icons.drag_handle_rounded,
-                                size: 16, color: AppColors.text3),
-                            const SizedBox(width: 8),
-                            Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                gradient: AppColors.gradMixed,
-                                borderRadius: BorderRadius.circular(11),
+                            ReorderableDragStartListener(
+                              index: index,
+                              child: const Padding(
+                                padding: EdgeInsets.only(right: 8),
+                                child: Icon(Icons.drag_handle_rounded, size: 20, color: AppColors.text3),
                               ),
+                            ),
+                            Container(
+                              width: 44, height: 44,
+                              decoration: BoxDecoration(gradient: AppColors.gradMixed, borderRadius: BorderRadius.circular(11)),
                               child: coverUrl != null
-                                  ? ClipRRect(
-                                      borderRadius: BorderRadius.circular(11),
-                                      child: Image.network(
-                                        coverUrl,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => const Center(
-                                          child: Text('🎵', style: TextStyle(fontSize: 18)),
-                                        ),
-                                      ),
-                                    )
-                                  : const Center(
-                                      child: Text('🎵', style: TextStyle(fontSize: 18))),
+                                  ? ClipRRect(borderRadius: BorderRadius.circular(11),
+                                      child: Image.network(coverUrl, fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) => const Center(child: Text('🎵', style: TextStyle(fontSize: 18)))))
+                                  : const Center(child: Text('🎵', style: TextStyle(fontSize: 18))),
                             ),
                             const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    trackTitle,
-                                    style: GoogleFonts.outfit(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.text,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if (trackArtist.isNotEmpty)
-                                    Text(
-                                      trackArtist,
-                                      style: GoogleFonts.outfit(
-                                        fontSize: 12,
-                                        color: AppColors.text2,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
+                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(trackTitle, style: GoogleFonts.outfit(
+                                  fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text),
+                                  overflow: TextOverflow.ellipsis),
+                              if (trackArtist.isNotEmpty)
+                                Text(trackArtist, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text2)),
+                            ])),
                             if (duration.isNotEmpty)
-                              Text(
-                                duration,
-                                style: GoogleFonts.outfit(
-                                  fontSize: 12,
-                                  color: AppColors.text3,
-                                ),
-                              ),
-                            const SizedBox(width: 8),
-                            Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: List.generate(
-                                3,
-                                (_) => Container(
-                                  width: 3,
-                                  height: 3,
-                                  margin: const EdgeInsets.symmetric(vertical: 1.5),
-                                  decoration: const BoxDecoration(
-                                    color: AppColors.text3,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                              ),
-                            ),
+                              Text(duration, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
                           ]),
                         ),
                       );

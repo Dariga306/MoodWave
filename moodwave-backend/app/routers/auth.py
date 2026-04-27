@@ -1104,6 +1104,21 @@ async def get_me_stats(
     genres = (await db.execute(
         select(UserGenre.genre).where(UserGenre.user_id == current_user.id).limit(5)
     )).scalars().all()
+    # Real genre counts from listening history (JSONB unnest)
+    from sqlalchemy import text as sa_text
+    genre_counts_rows = (await db.execute(sa_text("""
+        SELECT genre_val, COUNT(*) AS plays
+        FROM listening_history lh
+        JOIN track_cache tc ON lh.spotify_track_id = tc.spotify_id,
+             jsonb_array_elements_text(tc.genres) AS genre_val
+        WHERE lh.user_id = :uid
+          AND jsonb_typeof(tc.genres) = 'array'
+          AND genre_val <> ''
+        GROUP BY genre_val
+        ORDER BY plays DESC
+        LIMIT 8
+    """), {"uid": current_user.id})).all()
+    genre_counts = [{"name": r.genre_val, "plays": r.plays} for r in genre_counts_rows]
 
     return {
         "songs_count": songs_count or 0,
@@ -1116,6 +1131,8 @@ async def get_me_stats(
         "total_hours": total_hours,
         "top_artists": top_artists,
         "genres": list(genres),
+        "genre_counts": genre_counts,
+        "user_id": current_user.id,
     }
 
 

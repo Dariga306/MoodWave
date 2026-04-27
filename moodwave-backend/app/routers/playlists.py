@@ -20,7 +20,7 @@ class PlaylistCreateRequest(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=255)
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=500)
-    cover_url: Optional[str] = Field(default=None, max_length=2000)
+    cover_url: Optional[str] = Field(default=None)
     visibility: PlaylistVisibility = PlaylistVisibility.private
     is_collaborative: bool = False
     collab_user_id: Optional[int] = None
@@ -37,7 +37,7 @@ class PlaylistCreateRequest(BaseModel):
 class PlaylistUpdateRequest(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=500)
-    cover_url: Optional[str] = Field(default=None, max_length=2000)
+    cover_url: Optional[str] = Field(default=None)
     visibility: Optional[PlaylistVisibility] = None
     is_collaborative: Optional[bool] = None
     collab_user_id: Optional[int] = None

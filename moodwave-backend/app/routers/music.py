@@ -733,17 +733,24 @@ async def get_youtube_id(
 ):
     from app.services.youtube_service import search_video_id
 
-    redis = request.app.state.redis
+    redis = getattr(request.app.state, "redis", None)
     cache_key = f"yt:{spotify_id}"
 
-    cached = await redis.get(cache_key)
-    if cached:
-        return {"video_id": cached, "track_id": spotify_id}
+    if redis is not None:
+        try:
+            cached = await redis.get(cache_key)
+            if cached:
+                return {"video_id": cached, "track_id": spotify_id}
+        except Exception:
+            pass
 
     video_id = await search_video_id(title, artist)
 
-    if video_id:
-        await redis.setex(cache_key, 86400, video_id)  # cache 24 h
+    if video_id and redis is not None:
+        try:
+            await redis.setex(cache_key, 86400, video_id)
+        except Exception:
+            pass
 
     return {"video_id": video_id, "track_id": spotify_id}
 
