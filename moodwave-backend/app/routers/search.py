@@ -24,6 +24,15 @@ from app.services.security import get_blocked_ids_for_user
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+_BANNED_SUGGESTION_TERMS = (
+    "official audio",
+    "official song",
+    "official songs",
+    "lyrics",
+    "lyric",
+    "audio",
+)
+
 
 class SearchHistoryCreateRequest(BaseModel):
     query: str
@@ -31,6 +40,16 @@ class SearchHistoryCreateRequest(BaseModel):
     result_id: str | None = None
     result_title: str | None = None
     result_cover: str | None = None
+
+
+def _sanitize_suggestion(value: str) -> str:
+    text = value.strip()
+    lowered = text.lower()
+    if not text:
+        return ""
+    if any(term in lowered for term in _BANNED_SUGGESTION_TERMS):
+        return ""
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -156,24 +175,31 @@ async def get_search_suggestions(
         )
     ).scalars().all()
     for row in rows:
-        key = row.strip().lower()
+        cleaned = _sanitize_suggestion(row)
+        if not cleaned:
+            continue
+        key = cleaned.lower()
         if key not in seen:
             seen.add(key)
-            suggestions.append(row.strip())
+            suggestions.append(cleaned)
 
     # From trending searches matching the prefix
     try:
         trending = await get_trending_searches(redis, limit=50)
         for t in trending:
-            key = t.strip().lower()
+            cleaned = _sanitize_suggestion(t)
+            if not cleaned:
+                continue
+            key = cleaned.lower()
             if key not in seen and key.startswith(query.lower()):
                 seen.add(key)
-                suggestions.append(t.strip())
+                suggestions.append(cleaned)
     except Exception:
         pass
 
-    if query.lower() not in seen:
-        suggestions.insert(0, query)
+    cleaned_query = _sanitize_suggestion(query)
+    if cleaned_query and cleaned_query.lower() not in seen:
+        suggestions.insert(0, cleaned_query)
 
     return suggestions[:limit]
 

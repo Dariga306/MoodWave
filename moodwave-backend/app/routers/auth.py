@@ -1,5 +1,6 @@
 import logging
 import os
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -79,6 +80,21 @@ CODE_TTL_MINUTES = 15
 MAX_RESENDS_PER_HOUR = 3
 UPLOADS_DIR = Path(__file__).resolve().parents[2] / "uploads"
 PROFILE_UPLOADS_DIR = UPLOADS_DIR / "profiles"
+
+RU_MONTHS_SHORT = {
+    1: "Jan",
+    2: "Feb",
+    3: "Mar",
+    4: "Apr",
+    5: "May",
+    6: "Jun",
+    7: "Jul",
+    8: "Aug",
+    9: "Sep",
+    10: "Oct",
+    11: "Nov",
+    12: "Dec",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1036,6 +1052,75 @@ async def deactivate_account(
     }
 
 
+def _week_start_for(value: date | datetime) -> date:
+    dt = value.date() if isinstance(value, datetime) else value
+    return dt - timedelta(days=dt.weekday())
+
+
+def _format_week_range_ru(start: date, end: date) -> str:
+    if start.month == end.month:
+        return f"{RU_MONTHS_SHORT[end.month]} {start.day}–{end.day}"
+    return f"{RU_MONTHS_SHORT[start.month]} {start.day} – {RU_MONTHS_SHORT[end.month]} {end.day}"
+
+
+def _translate_day_part_ru(day_part: str) -> str:
+    mapping = {
+        "morning": "morning",
+        "afternoon": "afternoon",
+        "evening": "evening",
+        "night": "night",
+    }
+    return mapping.get(day_part, day_part)
+
+
+def _build_weekly_insight_ru(
+    *,
+    total_plays: int,
+    unique_artists: int,
+    unique_tracks: int,
+    top_artist_name: str | None,
+    top_artist_plays: int,
+    day_parts: dict[str, int],
+) -> dict[str, str]:
+    if total_plays <= 0:
+        return {
+            "kind": "empty",
+            "title": "Not enough listening data yet",
+            "subtitle": "Play a few more tracks and come back to see your weekly recap.",
+        }
+
+    dominant_day_part = max(day_parts.items(), key=lambda item: item[1])
+    dominant_pct = round((dominant_day_part[1] / total_plays) * 100) if total_plays else 0
+
+    if dominant_pct >= 55 and dominant_day_part[1] > 0:
+        return {
+            "kind": "dominant_day_part",
+            "title": f"{dominant_pct}% of your listening happened in the {_translate_day_part_ru(dominant_day_part[0])}",
+            "subtitle": f"The {_translate_day_part_ru(dominant_day_part[0])} clearly dominated this stretch.",
+        }
+
+    if top_artist_name and top_artist_plays >= max(2, round(total_plays * 0.45)):
+        return {
+            "kind": "artist_focus",
+            "title": f"{top_artist_name} defined your week",
+            "subtitle": f"{top_artist_plays} of your {total_plays} plays came from {top_artist_name}.",
+        }
+
+    if unique_artists <= 3:
+        noun = "artist" if unique_artists == 1 else "artists"
+        return {
+            "kind": "tight_rotation",
+            "title": f"You stayed close to {unique_artists} {noun}",
+            "subtitle": "This week felt tighter and more focused than usual.",
+        }
+
+    return {
+        "kind": "wide_rotation",
+        "title": f"{unique_tracks} tracks shaped this week",
+        "subtitle": f"You moved across {unique_artists} artists, so the week felt broader and more exploratory.",
+    }
+
+
 @router.get(
     "/users/me/stats",
     summary="Get profile stats",
@@ -1238,6 +1323,163 @@ async def get_me_stats(
         "best_streak": best_streak,
         "user_id": current_user.id,
     }
+
+
+@router.get(
+    "/users/me/stats/weekly-recaps",
+    summary="Get weekly listening recap sections",
+    description="Returns Spotify-style weekly listening recap sections with top artists, top tracks, hero artwork and insight text for the authenticated user.",
+)
+async def get_weekly_stats_recaps(
+    weeks: int = Query(default=6, ge=1, le=12),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from sqlalchemy import desc as sa_desc
+
+    current_week_start = _week_start_for(datetime.utcnow())
+    week_starts = [current_week_start - timedelta(days=7 * offset) for offset in range(weeks)]
+    oldest_start = week_starts[-1]
+    oldest_start_dt = datetime.combine(oldest_start, datetime.min.time())
+
+    rows = (
+        await db.execute(
+            select(
+                ListeningHistory.created_at,
+                TrackCache.spotify_id,
+                TrackCache.title,
+                TrackCache.artist,
+                TrackCache.cover_url,
+                TrackCache.preview_url,
+                TrackCache.duration_ms,
+            )
+            .join(TrackCache, TrackCache.spotify_id == ListeningHistory.spotify_track_id, isouter=True)
+            .where(ListeningHistory.user_id == current_user.id)
+            .where(ListeningHistory.created_at >= oldest_start_dt)
+            .order_by(sa_desc(ListeningHistory.created_at))
+        )
+    ).all()
+
+    grouped_events: dict[date, list[dict]] = {week_start: [] for week_start in week_starts}
+
+    for row in rows:
+        event_date = row.created_at.date() if isinstance(row.created_at, datetime) else row.created_at
+        week_start = _week_start_for(event_date)
+        if week_start not in grouped_events:
+            continue
+        grouped_events[week_start].append(
+            {
+                "spotify_id": row.spotify_id,
+                "title": row.title or "Unknown track",
+                "artist": row.artist or "Unknown artist",
+                "cover_url": row.cover_url,
+                "preview_url": row.preview_url,
+                "duration_ms": row.duration_ms,
+                "played_at": row.created_at.isoformat() if row.created_at else None,
+            }
+        )
+
+    sections: list[dict] = []
+    for week_start in week_starts:
+        week_end = week_start + timedelta(days=6)
+        events = grouped_events.get(week_start, [])
+        artist_counts: dict[str, int] = defaultdict(int)
+        artist_images: dict[str, str | None] = {}
+        track_counts: dict[str, int] = defaultdict(int)
+        track_payloads: dict[str, dict] = {}
+        track_images: dict[str, str | None] = {}
+        day_parts = {"morning": 0, "afternoon": 0, "evening": 0, "night": 0}
+
+        for event in events:
+            artist = event["artist"] or "Unknown artist"
+            title = event["title"] or "Unknown track"
+            cover_url = event.get("cover_url")
+            artist_counts[artist] += 1
+            artist_images.setdefault(artist, cover_url)
+
+            track_key = f"{artist}::{title}"
+            track_counts[track_key] += 1
+            track_payloads.setdefault(track_key, event)
+            track_images.setdefault(track_key, cover_url)
+
+            played_at_raw = event.get("played_at")
+            played_at = datetime.fromisoformat(played_at_raw) if played_at_raw else None
+            hour = played_at.hour if played_at else 0
+            if 6 <= hour <= 11:
+                day_parts["morning"] += 1
+            elif 12 <= hour <= 17:
+                day_parts["afternoon"] += 1
+            elif 18 <= hour <= 23:
+                day_parts["evening"] += 1
+            else:
+                day_parts["night"] += 1
+
+        top_artists = sorted(artist_counts.items(), key=lambda item: item[1], reverse=True)
+        top_tracks_entries = sorted(track_counts.items(), key=lambda item: item[1], reverse=True)
+
+        top_artist_items = [
+            {
+                "name": name,
+                "plays": plays,
+                "image_url": artist_images.get(name),
+            }
+            for name, plays in top_artists[:10]
+        ]
+
+        top_track_items = []
+        for track_key, plays in top_tracks_entries[:10]:
+            payload = dict(track_payloads.get(track_key, {}))
+            top_track_items.append(
+                {
+                    "title": payload.get("title") or "Unknown track",
+                    "artist": payload.get("artist") or "Unknown artist",
+                    "plays": plays,
+                    "image_url": track_images.get(track_key),
+                    "track": payload,
+                }
+            )
+
+        hero_images: list[str] = []
+        for item in top_track_items:
+            image_url = item.get("image_url")
+            if image_url and image_url not in hero_images:
+                hero_images.append(image_url)
+            if len(hero_images) >= 4:
+                break
+
+        total_plays = len(events)
+        unique_artists = len(artist_counts)
+        unique_tracks = len(track_counts)
+        top_artist = top_artist_items[0] if top_artist_items else None
+        top_track = top_track_items[0] if top_track_items else None
+        insight = _build_weekly_insight_ru(
+            total_plays=total_plays,
+            unique_artists=unique_artists,
+            unique_tracks=unique_tracks,
+            top_artist_name=top_artist["name"] if top_artist else None,
+            top_artist_plays=top_artist["plays"] if top_artist else 0,
+            day_parts=day_parts,
+        )
+
+        sections.append(
+            {
+                "start_date": week_start.isoformat(),
+                "end_date": week_end.isoformat(),
+                "range_label": _format_week_range_ru(week_start, week_end),
+                "is_current_week": week_start == current_week_start,
+                "total_plays": total_plays,
+                "unique_artists": unique_artists,
+                "unique_tracks": unique_tracks,
+                "top_artist": top_artist,
+                "top_track": top_track,
+                "top_artists": top_artist_items,
+                "top_tracks": top_track_items,
+                "hero_images": hero_images,
+                "insight": insight,
+            }
+        )
+
+    return {"weeks": sections}
 
 
 @router.get(

@@ -7,11 +7,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import asc, desc, func, select
+from sqlalchemy import and_, asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_current_user_optional, get_db
-from app.models.music import ListeningHistory, TrackCache
+from app.models.music import LikedAlbum, ListeningHistory, TrackCache
 from app.models.user import TasteVector, User, UserGenre
 from app.schemas.music import TrackResponse
 from app.services import cache as cache_svc
@@ -364,22 +364,31 @@ async def get_liked_tracks(
     subq = (
         select(
             ListeningHistory.spotify_track_id,
-            sa_func.max(ListeningHistory.created_at).label("liked_at"),
+            sa_func.max(ListeningHistory.created_at).label("last_action_at"),
         )
         .where(
             ListeningHistory.user_id == current_user.id,
-            ListeningHistory.action == "liked",
+            ListeningHistory.action.in_(("liked", "disliked")),
         )
         .group_by(ListeningHistory.spotify_track_id)
-        .order_by(sa_desc("liked_at"))
+        .order_by(sa_desc("last_action_at"))
         .limit(limit)
         .subquery()
     )
     rows = (
         await db.execute(
-            select(TrackCache, subq.c.liked_at)
+            select(TrackCache, ListeningHistory.created_at)
             .join(subq, TrackCache.spotify_id == subq.c.spotify_track_id)
-            .order_by(sa_desc(subq.c.liked_at))
+            .join(
+                ListeningHistory,
+                and_(
+                    ListeningHistory.spotify_track_id == subq.c.spotify_track_id,
+                    ListeningHistory.created_at == subq.c.last_action_at,
+                    ListeningHistory.user_id == current_user.id,
+                ),
+            )
+            .where(ListeningHistory.action == "liked")
+            .order_by(sa_desc(ListeningHistory.created_at))
         )
     ).all()
     return [
@@ -1046,6 +1055,113 @@ async def search_albums(
         return []
     normalized = _normalize_query(query)
     return await deezer_service.search_albums(normalized, limit=limit)
+
+
+@album_router.get(
+    "/liked",
+    summary="Get liked albums",
+    description="Returns the authenticated user's saved albums ordered by most recently saved.",
+)
+async def get_liked_albums(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        await db.execute(
+            select(LikedAlbum)
+            .where(LikedAlbum.user_id == current_user.id)
+            .order_by(desc(LikedAlbum.liked_at), desc(LikedAlbum.id))
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": row.album_id,
+            "album_name": row.album_name,
+            "artist_name": row.artist_name,
+            "cover_url": row.cover_url,
+            "liked_at": row.liked_at.isoformat() if row.liked_at else None,
+        }
+        for row in rows
+    ]
+
+
+class LikeAlbumRequest(BaseModel):
+    album_id: str = Field(min_length=1, max_length=100)
+    album_name: str = Field(min_length=1, max_length=255)
+    artist_name: str = Field(default="", max_length=255)
+    cover_url: Optional[str] = None
+
+
+@album_router.get(
+    "/{album_id}/liked-status",
+    summary="Get album liked status",
+    description="Returns whether the authenticated user has saved this album.",
+)
+async def get_album_liked_status(
+    album_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = await db.scalar(
+        select(LikedAlbum).where(
+            LikedAlbum.user_id == current_user.id,
+            LikedAlbum.album_id == album_id,
+        )
+    )
+    return {"liked": row is not None}
+
+
+@album_router.post(
+    "/{album_id}/like",
+    summary="Save album to library",
+    description="Stores an album in the authenticated user's library.",
+)
+async def like_album(
+    album_id: str,
+    body: LikeAlbumRequest = Body(default_factory=LikeAlbumRequest),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    saved = await db.scalar(
+        select(LikedAlbum).where(
+            LikedAlbum.user_id == current_user.id,
+            LikedAlbum.album_id == album_id,
+        )
+    )
+    if saved is None:
+        db.add(
+            LikedAlbum(
+                user_id=current_user.id,
+                album_id=album_id,
+                album_name=body.album_name.strip(),
+                artist_name=body.artist_name.strip(),
+                cover_url=body.cover_url,
+            )
+        )
+        await db.commit()
+    return {"liked": True}
+
+
+@album_router.delete(
+    "/{album_id}/like",
+    summary="Remove album from library",
+    description="Removes an album from the authenticated user's library.",
+)
+async def unlike_album(
+    album_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = await db.scalar(
+        select(LikedAlbum).where(
+            LikedAlbum.user_id == current_user.id,
+            LikedAlbum.album_id == album_id,
+        )
+    )
+    if row is not None:
+        await db.delete(row)
+        await db.commit()
+    return {"liked": False}
 
 
 @album_router.get(

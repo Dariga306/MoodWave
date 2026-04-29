@@ -471,7 +471,8 @@ class ApiService {
 
   Future<List<dynamic>> getMoodTracks(String moodKey) async {
     try {
-      final resp = await _dio.get('/moods/${Uri.encodeComponent(moodKey)}/tracks');
+      final resp =
+          await _dio.get('/moods/${Uri.encodeComponent(moodKey)}/tracks');
       return resp.data as List? ?? [];
     } catch (_) {
       return [];
@@ -480,8 +481,8 @@ class ApiService {
 
   Future<List<dynamic>> getLikedTracks({int limit = 100}) async {
     try {
-      final resp = await _dio
-          .get('/tracks/me/liked', queryParameters: {'limit': limit});
+      final resp =
+          await _dio.get('/tracks/me/liked', queryParameters: {'limit': limit});
       return resp.data as List? ?? [];
     } catch (_) {
       return [];
@@ -544,7 +545,7 @@ class ApiService {
 
   Future<void> unlikeTrack(String spotifyId) async {
     await _dio.post('/tracks/${Uri.encodeComponent(spotifyId)}/like',
-        data: {'action': 'unliked'});
+        data: {'action': 'disliked'});
   }
 
   Future<List<Map<String, dynamic>>> getLikedAlbums() async {
@@ -609,13 +610,18 @@ class ApiService {
     return resp.data;
   }
 
-  Future<List<Map<String, dynamic>>> searchPlaylists(String q, {int limit = 10}) async {
+  Future<List<Map<String, dynamic>>> searchPlaylists(String q,
+      {int limit = 10}) async {
     try {
-      final resp = await _dio.get('/playlists/search',
-          queryParameters: {'q': q, 'limit': limit});
+      final resp = await _dio
+          .get('/playlists/search', queryParameters: {'q': q, 'limit': limit});
       final raw = resp.data;
-      final list = raw is Map ? (raw['playlists'] as List?) ?? [] : raw as List? ?? [];
-      return list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      final list =
+          raw is Map ? (raw['playlists'] as List?) ?? [] : raw as List? ?? [];
+      return list
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
     } catch (_) {
       return [];
     }
@@ -628,8 +634,8 @@ class ApiService {
 
   Future<List<String>> getSearchSuggestions(String q) async {
     try {
-      final resp = await _dio.get('/search/suggestions',
-          queryParameters: {'q': q, 'limit': 8});
+      final resp = await _dio
+          .get('/search/suggestions', queryParameters: {'q': q, 'limit': 8});
       return (resp.data as List? ?? []).map((e) => e.toString()).toList();
     } catch (_) {
       return [];
@@ -673,9 +679,25 @@ class ApiService {
     await _dio.delete('/search/history');
   }
 
-  Future<Map<String, dynamic>> getUserStats({String period = 'all_time'}) async {
-    final resp = await _dio.get('/users/me/stats', queryParameters: {'period': period});
+  Future<Map<String, dynamic>> getUserStats(
+      {String period = 'all_time'}) async {
+    final resp =
+        await _dio.get('/users/me/stats', queryParameters: {'period': period});
     return resp.data as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> getWeeklyStatsRecaps(
+      {int weeks = 6}) async {
+    final resp = await _dio.get(
+      '/users/me/stats/weekly-recaps',
+      queryParameters: {'weeks': weeks},
+    );
+    final raw =
+        (resp.data as Map<String, dynamic>)['weeks'] as List? ?? const [];
+    return raw
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
   }
 
   Future<Map<String, dynamic>> getTasteVector() async {
@@ -719,8 +741,10 @@ class ApiService {
 
   Future<List<dynamic>> getCharts({String genre = '', int limit = 20}) async {
     try {
-      final resp = await _dio.get('/tracks/charts',
-          queryParameters: {if (genre.isNotEmpty) 'genre': genre, 'limit': limit});
+      final resp = await _dio.get('/tracks/charts', queryParameters: {
+        if (genre.isNotEmpty) 'genre': genre,
+        'limit': limit
+      });
       return resp.data as List? ?? [];
     } catch (_) {
       return [];
@@ -734,11 +758,14 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> createPlaylist(String title,
-      {String visibility = 'private', String? description, String? coverUrl}) async {
+      {String visibility = 'private',
+      String? description,
+      String? coverUrl}) async {
     final resp = await _dio.post('/playlists/', data: {
       'title': title,
       'visibility': visibility,
-      if (description != null && description.isNotEmpty) 'description': description,
+      if (description != null && description.isNotEmpty)
+        'description': description,
       if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
     });
     return resp.data;
@@ -754,7 +781,11 @@ class ApiService {
     await _dio.post('/playlists/$playlistId/tracks', data: track);
   }
 
-  Future<void> updatePlaylist(int playlistId, {String? title, String? description, String? visibility, String? coverUrl}) async {
+  Future<void> updatePlaylist(int playlistId,
+      {String? title,
+      String? description,
+      String? visibility,
+      String? coverUrl}) async {
     await _dio.put('/playlists/$playlistId', data: {
       if (title != null) 'title': title,
       if (description != null) 'description': description,
@@ -896,7 +927,8 @@ class ApiService {
 
   Future<List<dynamic>> getActiveRooms({int limit = 5}) async {
     try {
-      final resp = await _dio.get('/rooms/active', queryParameters: {'limit': limit});
+      final resp =
+          await _dio.get('/rooms/active', queryParameters: {'limit': limit});
       final data = resp.data;
       if (data is Map) return (data['rooms'] as List?) ?? [];
       return [];
@@ -948,7 +980,8 @@ class ApiService {
     return Map<String, dynamic>.from(resp.data as Map);
   }
 
-  Future<Map<String, dynamic>> updatePrivacySettings(Map<String, dynamic> data) async {
+  Future<Map<String, dynamic>> updatePrivacySettings(
+      Map<String, dynamic> data) async {
     final resp = await _dio.put('/users/me/privacy-settings', data: data);
     return Map<String, dynamic>.from(resp.data as Map);
   }
@@ -958,7 +991,8 @@ class ApiService {
     return Map<String, dynamic>.from(resp.data as Map);
   }
 
-  Future<Map<String, dynamic>> updateNotificationSettings(Map<String, dynamic> data) async {
+  Future<Map<String, dynamic>> updateNotificationSettings(
+      Map<String, dynamic> data) async {
     final resp = await _dio.put('/users/me/notification-settings', data: data);
     return Map<String, dynamic>.from(resp.data as Map);
   }
@@ -1042,7 +1076,8 @@ class ApiService {
 
   // ─── Trending / Hot ───────────────────────────────────────────────────────
 
-  Future<List<dynamic>> getTrendingTracks({String? city, int limit = 20}) async {
+  Future<List<dynamic>> getTrendingTracks(
+      {String? city, int limit = 20}) async {
     try {
       final resp = await _dio.get(
         '/trending/tracks',

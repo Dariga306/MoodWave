@@ -1,23 +1,25 @@
-import 'package:fl_chart/fl_chart.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import 'artist_screen.dart';
+import 'player_screen.dart';
+import '../widgets/common_widgets.dart';
 
 class StatsScreen extends StatefulWidget {
   const StatsScreen({super.key});
+
   @override
   State<StatsScreen> createState() => _StatsScreenState();
 }
 
 class _StatsScreenState extends State<StatsScreen> {
-  Map<String, dynamic>? _stats;
+  List<_WeeklyStatsSection> _sections = const [];
+  List<Map<String, dynamic>> _genreMixes = const [];
   bool _loading = true;
-  int _periodIndex = 0; // 0=All Time, 1=This Month, 2=This Week
-  final GlobalKey _shareKey = GlobalKey();
-
-  static const _periodKeys = ['all_time', 'month', 'week'];
-  static const _periodLabels = ['All Time', 'This Month', 'This Week'];
+  String? _error;
 
   @override
   void initState() {
@@ -26,782 +28,1536 @@ class _StatsScreenState extends State<StatsScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    final api = ApiService();
+
     try {
-      final data = await ApiService().getUserStats(period: _periodKeys[_periodIndex]);
+      final results = await Future.wait<dynamic>([
+        api.getWeeklyStatsRecaps(weeks: 6),
+        api.getGenreMixes(limit: 6, tracksPerMix: 12),
+      ]);
+
       if (!mounted) return;
-      setState(() { _stats = data; _loading = false; });
+
+      setState(() {
+        final loadedSections = (results[0] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) =>
+                _WeeklyStatsSection.fromMap(Map<String, dynamic>.from(item)))
+            .toList();
+        _sections = loadedSections
+            .where((section) => !section.isEmpty || section.isCurrentWeek)
+            .toList();
+        _genreMixes = (results[1] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+        _loading = false;
+      });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() {
+        _loading = false;
+        _error = 'Could not load listening stats.';
+      });
     }
-  }
-
-  String _fmtHours(dynamic val) {
-    if (val == null) return '0h';
-    final h = val is double ? val : (val as num).toDouble();
-    if (h >= 1000) return '${(h / 1000).toStringAsFixed(1)}Kh';
-    if (h == h.truncate()) return '${h.toInt()}h';
-    return '${h.toStringAsFixed(1)}h';
-  }
-
-  String _fmtNum(dynamic val) {
-    if (val == null) return '0';
-    final n = val is int ? val : (val as num).toInt();
-    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
-    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
-    return n.toString();
-  }
-
-  String _fmtInt(int n) {
-    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
-    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
-    return n.toString();
   }
 
   @override
   Widget build(BuildContext context) {
-    final songs = _stats?['songs_count'] ?? 0;
-    final artists = _stats?['unique_artists_count'] ?? 0;
-    final playlists = _stats?['playlists_count'] ?? 0;
-    final topArtists = (_stats?['top_artists'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-    final topTracks = (_stats?['top_tracks'] as List?)
-        ?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
-    final genres = (_stats?['genres'] as List?)?.cast<String>() ?? [];
-    final genreCounts = (_stats?['genre_counts'] as List?)
-        ?.whereType<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList() ?? [];
-    final listeningByTime = (_stats?['listening_by_time'] as Map?)
-        ?.cast<String, dynamic>() ?? {};
-    final currentStreak = _stats?['current_streak'] as int? ?? 0;
-    final bestStreak = _stats?['best_streak'] as int? ?? 0;
+    final sections = _sections;
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: const Color(0xFF0F0F10),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
-            colors: [Color(0xFF08080f), Color(0xFF1a0533), Color(0xFF0d1a3d), Color(0xFF08080f)],
-            stops: [0.0, 0.3, 0.7, 1.0],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF181818),
+              Color(0xFF101011),
+              Color(0xFF0B0B0C),
+            ],
           ),
         ),
-        child: Stack(
-          children: [
-            Positioned(top: 60, left: -60,
-              child: Container(width: 260, height: 260,
-                decoration: BoxDecoration(shape: BoxShape.circle,
-                  gradient: RadialGradient(colors: [const Color(0xFF8B5CF6).withOpacity(0.25), Colors.transparent])))),
-            Positioned(top: 300, right: -40,
-              child: Container(width: 200, height: 200,
-                decoration: BoxDecoration(shape: BoxShape.circle,
-                  gradient: RadialGradient(colors: [AppColors.pink.withOpacity(0.2), Colors.transparent])))),
-            SafeArea(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.purpleLight))
+        child: SafeArea(
+          bottom: false,
+          child: _loading
+              ? const Center(
+                  child: CircularProgressIndicator(
+                    color: AppColors.green,
+                    strokeWidth: 2.2,
+                  ),
+                )
+              : _error != null
+                  ? _StatsErrorState(message: _error!, onRetry: _load)
                   : RefreshIndicator(
                       onRefresh: _load,
-                      color: AppColors.purpleLight,
-                      backgroundColor: AppColors.surface,
-                      child: SingleChildScrollView(
+                      color: AppColors.green,
+                      backgroundColor: const Color(0xFF181818),
+                      child: CustomScrollView(
                         physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 16),
-                            Row(children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(colors: [
-                                    AppColors.purpleDark.withOpacity(0.2),
-                                    AppColors.pink.withOpacity(0.15),
-                                  ]),
-                                  borderRadius: BorderRadius.circular(100),
-                                  border: Border.all(color: AppColors.purple.withOpacity(0.3)),
-                                ),
-                                child: Text('Your Listening Stats', style: GoogleFonts.outfit(
-                                    fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.purpleLight)),
-                              ),
-                            ]),
-                            const SizedBox(height: 14),
-                            // Period switcher
-                            Container(
-                              height: 36,
-                              decoration: BoxDecoration(
-                                color: AppColors.surface,
-                                borderRadius: BorderRadius.circular(100),
-                                border: Border.all(color: AppColors.border),
-                              ),
-                              child: Row(children: List.generate(_periodLabels.length, (i) {
-                                final active = _periodIndex == i;
-                                return Expanded(
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      if (_periodIndex != i) {
-                                        setState(() => _periodIndex = i);
-                                        _load();
-                                      }
-                                    },
-                                    child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 200),
-                                      margin: const EdgeInsets.all(3),
-                                      decoration: BoxDecoration(
-                                        gradient: active ? AppColors.gradPurple : null,
-                                        borderRadius: BorderRadius.circular(100),
-                                      ),
-                                      child: Center(
-                                        child: Text(_periodLabels[i],
-                                            style: GoogleFonts.outfit(
-                                                fontSize: 12, fontWeight: FontWeight.w700,
-                                                color: active ? Colors.white : AppColors.text3)),
-                                      ),
-                                    ),
+                        slivers: [
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _StatsHeader(
+                                    onBack: () => Navigator.of(context).pop(),
                                   ),
-                                );
-                              })),
-                            ),
-                            const SizedBox(height: 14),
-                            Text("You've been busy…", style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2)),
-                            const SizedBox(height: 2),
-                            TweenAnimationBuilder<double>(
-                              key: ValueKey('h_${_periodIndex}_${(_stats?['total_hours'] as num?)?.toDouble() ?? 0.0}'),
-                              tween: Tween(begin: 0.0, end: (_stats?['total_hours'] as num?)?.toDouble() ?? 0.0),
-                              duration: const Duration(milliseconds: 1200),
-                              curve: Curves.easeOut,
-                              builder: (_, val, __) => ShaderMask(
-                                shaderCallback: (b) => const LinearGradient(
-                                  colors: [AppColors.purpleLight, AppColors.pink, AppColors.blueLight],
-                                ).createShader(b),
-                                child: Text(_fmtHours(val), style: GoogleFonts.outfit(
-                                    fontSize: 56, fontWeight: FontWeight.w900,
-                                    color: Colors.white, letterSpacing: -0.04 * 56, height: 1)),
+                                  const SizedBox(height: 28),
+                                  if (sections.isNotEmpty) ...[
+                                    _WeekSection(
+                                      section: sections.first,
+                                      title: 'This week',
+                                      showDateUnderTitle: true,
+                                      onShare: () =>
+                                          _showWeekSummary(sections.first),
+                                      onOpenTopArtists: () =>
+                                          _openTopArtists(sections.first),
+                                      onOpenTopTracks: () =>
+                                          _openTopTracks(sections.first),
+                                    ),
+                                    if (sections.length > 1)
+                                      const SizedBox(height: 30),
+                                  ],
+                                  ...sections
+                                      .skip(1)
+                                      .toList()
+                                      .asMap()
+                                      .entries
+                                      .map((entry) {
+                                    final index = entry.key;
+                                    final section = entry.value;
+                                    final title = index == 0
+                                        ? 'Last week'
+                                        : section.rangeLabel;
+                                    return Padding(
+                                      padding: EdgeInsets.only(
+                                          bottom: index == sections.length - 2
+                                              ? 0
+                                              : 28),
+                                      child: _WeekSection(
+                                        section: section,
+                                        title: title,
+                                        showDateUnderTitle: index == 0,
+                                        onShare: () =>
+                                            _showWeekSummary(section),
+                                        onOpenTopArtists: () =>
+                                            _openTopArtists(section),
+                                        onOpenTopTracks: () =>
+                                            _openTopTracks(section),
+                                      ),
+                                    );
+                                  }),
+                                  const SizedBox(height: 120),
+                                ],
                               ),
                             ),
-                            Text(
-                              _periodIndex == 1 ? 'listened this month'
-                                  : _periodIndex == 2 ? 'listened this week'
-                                  : 'listened this year',
-                              style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2),
-                            ),
-                            const SizedBox(height: 20),
-                            _StatCard(
-                              gradient: const LinearGradient(colors: [Color(0xFF4c1d95), Color(0xFF7c3aed)]),
-                              value: _fmtNum(songs), label: 'songs played', icon: Icons.music_note_rounded,
-                              animTarget: songs is int ? songs : (songs as num?)?.toInt() ?? 0,
-                              formatter: _fmtInt,
-                            ),
-                            const SizedBox(height: 10),
-                            Row(children: [
-                              Expanded(child: _StatCard(
-                                gradient: const LinearGradient(colors: [Color(0xFF9d174d), Color(0xFFec4899)]),
-                                value: _fmtNum(artists), label: 'artists discovered', icon: Icons.people_rounded, small: true,
-                                animTarget: artists is int ? artists : (artists as num?)?.toInt() ?? 0,
-                                formatter: _fmtInt,
-                              )),
-                              const SizedBox(width: 10),
-                              Expanded(child: _StatCard(
-                                gradient: const LinearGradient(colors: [Color(0xFF164e63), Color(0xFF06b6d4)]),
-                                value: _fmtNum(playlists), label: 'playlists created', icon: Icons.queue_music_rounded, small: true,
-                                animTarget: playlists is int ? playlists : (playlists as num?)?.toInt() ?? 0,
-                                formatter: _fmtInt,
-                              )),
-                            ]),
-                            const SizedBox(height: 14),
-
-                            // Top Tracks
-                            if (topTracks.isNotEmpty) ...[
-                              Text('Top Songs', style: GoogleFonts.outfit(
-                                  fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text)),
-                              const SizedBox(height: 10),
-                              ...topTracks.asMap().entries.map((e) {
-                                final i = e.key;
-                                final t = e.value;
-                                return _TopTrackRow(rank: i + 1, track: t);
-                              }),
-                              const SizedBox(height: 14),
-                            ],
-
-                            // Top Artists
-                            Text('Top Artists', style: GoogleFonts.outfit(
-                                fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text)),
-                            const SizedBox(height: 12),
-                            topArtists.isEmpty
-                                ? _EmptySection(text: 'Listen to music to build your top artists')
-                                : _buildTopArtists(topArtists),
-
-                            const SizedBox(height: 14),
-
-                            // Listening Activity by time of day
-                            if (listeningByTime.isNotEmpty &&
-                                listeningByTime.values.any((v) => (v as int? ?? 0) > 0)) ...[
-                              Text('Listening Activity', style: GoogleFonts.outfit(
-                                  fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text)),
-                              const SizedBox(height: 12),
-                              _ListeningActivityBars(data: listeningByTime),
-                              const SizedBox(height: 14),
-                            ],
-
-                            // Streak
-                            if (currentStreak > 0 || bestStreak > 0) ...[
-                              _StreakCard(current: currentStreak, best: bestStreak),
-                              const SizedBox(height: 14),
-                            ],
-
-                            // Genre section — donut chart if real data, bars otherwise
-                            Text('Genre Breakdown', style: GoogleFonts.outfit(
-                                fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text)),
-                            const SizedBox(height: 12),
-                            if (genreCounts.isNotEmpty)
-                              _GenreDonut(genreCounts: genreCounts)
-                            else if (genres.isNotEmpty)
-                              _buildGenreBars(genres)
-                            else
-                              _EmptySection(text: 'Listen to more music to see your genres'),
-
-                            const SizedBox(height: 16),
-                            GestureDetector(
-                              onTap: _showShareDialog,
-                              child: Container(
-                                width: double.infinity, padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  gradient: AppColors.primaryBtn,
-                                  borderRadius: BorderRadius.circular(16),
-                                  boxShadow: [BoxShadow(color: AppColors.purpleDark.withOpacity(0.4), blurRadius: 24, offset: const Offset(0, 10))],
-                                ),
-                                child: Text('Share My Stats', textAlign: TextAlign.center,
-                                    style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
-                              ),
-                            ),
-                            const SizedBox(height: 32),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
+        ),
+      ),
+    );
+  }
+
+  void _openTopArtists(_WeeklyStatsSection section) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _TopArtistsScreen(
+          section: section,
+          mixes: _genreMixes,
+        ),
+      ),
+    );
+  }
+
+  void _openTopTracks(_WeeklyStatsSection section) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _TopTracksScreen(section: section),
+      ),
+    );
+  }
+
+  void _showWeekSummary(_WeeklyStatsSection section) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF181818),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (context) {
+        final theme = GoogleFonts.outfit();
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 42,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 18),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                Text(
+                  section.rangeLabel,
+                  style: theme.copyWith(
+                    fontSize: 14,
+                    color: Colors.white.withValues(alpha: 0.6),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  section.insightTitle,
+                  style: theme.copyWith(
+                    fontSize: 26,
+                    height: 1.08,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  section.insightSubtitle,
+                  style: theme.copyWith(
+                    fontSize: 15,
+                    height: 1.35,
+                    color: Colors.white.withValues(alpha: 0.7),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                _BottomSheetMetricRow(
+                  label: 'Plays',
+                  value: '${section.totalPlays}',
+                ),
+                _BottomSheetMetricRow(
+                  label: 'Artists',
+                  value: '${section.uniqueArtists}',
+                ),
+                _BottomSheetMetricRow(
+                  label: 'Tracks',
+                  value: '${section.uniqueTracks}',
+                ),
+                _BottomSheetMetricRow(
+                  label: 'Top artist',
+                  value: section.topArtists.isNotEmpty
+                      ? section.topArtists.first.name
+                      : '—',
+                ),
+                _BottomSheetMetricRow(
+                  label: 'Top track',
+                  value: section.topTracks.isNotEmpty
+                      ? section.topTracks.first.title
+                      : '—',
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _StatsHeader extends StatelessWidget {
+  final VoidCallback onBack;
+
+  const _StatsHeader({required this.onBack});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _RoundActionButton(
+          icon: Icons.arrow_back_ios_new_rounded,
+          onTap: onBack,
+        ),
+        const Spacer(),
+        Text(
+          'Listening Stats',
+          style: GoogleFonts.outfit(
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
+        ),
+        const Spacer(),
+        const SizedBox(width: 42),
+      ],
+    );
+  }
+}
+
+class _WeekSection extends StatelessWidget {
+  final _WeeklyStatsSection section;
+  final String title;
+  final bool showDateUnderTitle;
+  final VoidCallback onShare;
+  final VoidCallback onOpenTopArtists;
+  final VoidCallback onOpenTopTracks;
+
+  const _WeekSection({
+    required this.section,
+    required this.title,
+    required this.showDateUnderTitle,
+    required this.onShare,
+    required this.onOpenTopArtists,
+    required this.onOpenTopTracks,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final titleStyle = GoogleFonts.outfit(
+      fontSize: 16,
+      fontWeight: FontWeight.w700,
+      color: Colors.white.withValues(alpha: 0.68),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: titleStyle),
+                  if (showDateUnderTitle) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      section.rangeLabel,
+                      style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            _RoundActionButton(
+              icon: Icons.ios_share_outlined,
+              onTap: onShare,
+              small: true,
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        if (section.isEmpty)
+          _EmptyWeekCard(section: section)
+        else ...[
+          Row(
+            children: [
+              Expanded(
+                child: _SummaryTile(
+                  label: 'Top artist',
+                  title:
+                      section.topArtists.firstOrNull?.name ?? 'No artist yet',
+                  subtitle: section.topArtists.isNotEmpty
+                      ? '${section.topArtists.first.plays} plays'
+                      : 'Play more tracks to unlock this',
+                  imageUrl: section.topArtists.firstOrNull?.imageUrl,
+                  circularArtwork: true,
+                  onTap: section.topArtists.isEmpty ? null : onOpenTopArtists,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _SummaryTile(
+                  label: 'Top track',
+                  title: section.topTracks.firstOrNull?.title ?? 'No track yet',
+                  subtitle: section.topTracks.isNotEmpty
+                      ? section.topTracks.first.artist
+                      : 'Play more tracks to unlock this',
+                  imageUrl: section.topTracks.firstOrNull?.imageUrl,
+                  circularArtwork: false,
+                  onTap: section.topTracks.isEmpty ? null : onOpenTopTracks,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _InsightHeroCard(section: section),
+        ],
+      ],
+    );
+  }
+}
+
+class _SummaryTile extends StatelessWidget {
+  final String label;
+  final String title;
+  final String subtitle;
+  final String? imageUrl;
+  final bool circularArtwork;
+  final VoidCallback? onTap;
+
+  const _SummaryTile({
+    required this.label,
+    required this.title,
+    required this.subtitle,
+    required this.imageUrl,
+    required this.circularArtwork,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Ink(
+          height: 198,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1D1D1E),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.outfit(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white.withValues(alpha: 0.56),
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: Colors.white.withValues(alpha: 0.42),
+                    size: 22,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.outfit(
+                  fontSize: 18,
+                  height: 1.0,
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  height: 1.22,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white.withValues(alpha: 0.58),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.bottomLeft,
+                  child: _ArtworkThumb(
+                    imageUrl: imageUrl,
+                    size: 72,
+                    circular: circularArtwork,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InsightHeroCard extends StatelessWidget {
+  final _WeeklyStatsSection section;
+
+  const _InsightHeroCard({required this.section});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1F),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: _HeroArtwork(images: section.heroImages),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  section.insightTitle,
+                  style: GoogleFonts.outfit(
+                    fontSize: 24,
+                    height: 1.05,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  section.insightSubtitle,
+                  style: GoogleFonts.outfit(
+                    fontSize: 14,
+                    height: 1.35,
+                    color: Colors.white.withValues(alpha: 0.64),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroArtwork extends StatelessWidget {
+  final List<String> images;
+
+  const _HeroArtwork({required this.images});
+
+  @override
+  Widget build(BuildContext context) {
+    final unique = images.where((url) => url.trim().isNotEmpty).toList();
+    if (unique.isEmpty) {
+      return Container(
+        height: 300,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF2A2A2C),
+              Color(0xFF151516),
+            ],
+          ),
+        ),
+        child: Center(
+          child: Icon(
+            Icons.graphic_eq_rounded,
+            color: Colors.white.withValues(alpha: 0.28),
+            size: 72,
+          ),
+        ),
+      );
+    }
+
+    final clamped = unique.take(4).toList();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: SizedBox(
+        height: 300,
+        child: _buildLayout(clamped),
+      ),
+    );
+  }
+
+  Widget _buildLayout(List<String> images) {
+    if (images.length == 1) {
+      return _CoverImage(imageUrl: images[0]);
+    }
+
+    if (images.length == 2) {
+      return Row(
+        children: [
+          Expanded(child: _CoverImage(imageUrl: images[0])),
+          const SizedBox(width: 2),
+          Expanded(child: _CoverImage(imageUrl: images[1])),
+        ],
+      );
+    }
+
+    if (images.length == 3) {
+      return Row(
+        children: [
+          Expanded(flex: 5, child: _CoverImage(imageUrl: images[0])),
+          const SizedBox(width: 2),
+          Expanded(
+            flex: 4,
+            child: Column(
+              children: [
+                Expanded(child: _CoverImage(imageUrl: images[1])),
+                const SizedBox(height: 2),
+                Expanded(child: _CoverImage(imageUrl: images[2])),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    return GridView.builder(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 2,
+        mainAxisSpacing: 2,
+      ),
+      itemCount: 4,
+      itemBuilder: (_, index) => _CoverImage(imageUrl: images[index]),
+    );
+  }
+}
+
+class _MixCard extends StatelessWidget {
+  final Map<String, dynamic> mix;
+
+  const _MixCard({required this.mix});
+
+  @override
+  Widget build(BuildContext context) {
+    final title = mix['title']?.toString() ?? 'Mix';
+    final subtitle = mix['subtitle']?.toString() ?? '';
+    final coverUrl = mix['cover_url']?.toString();
+    final firstTrack = ((mix['tracks'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((track) => Map<String, dynamic>.from(track))
+        .firstOrNull;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: firstTrack == null
+            ? null
+            : () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) => PlayerScreen(track: firstTrack)),
+                );
+              },
+        child: Ink(
+          width: 146,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A1B),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: 122,
+                  height: 122,
+                  child: coverUrl != null && coverUrl.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: coverUrl,
+                          fit: BoxFit.cover,
+                          errorWidget: (_, __, ___) => _mixFallback(),
+                        )
+                      : _mixFallback(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.outfit(
+                  fontSize: 15,
+                  height: 1.05,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.outfit(
+                  fontSize: 12,
+                  height: 1.25,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white.withValues(alpha: 0.56),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _mixFallback() {
+    return Container(
+      color: const Color(0xFF2A2A2C),
+      child: const Center(
+        child: Icon(
+          Icons.music_note_rounded,
+          color: Colors.white54,
+          size: 28,
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyWeekCard extends StatelessWidget {
+  final _WeeklyStatsSection section;
+
+  const _EmptyWeekCard({required this.section});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 22),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1F),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
+      ),
+      child: Column(
+        children: [
+          Text(
+            'Not enough listening data yet',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.outfit(
+              fontSize: 19,
+              height: 1.1,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Play a few more tracks and come back to see your weekly recap.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.outfit(
+              fontSize: 14,
+              height: 1.38,
+              fontWeight: FontWeight.w500,
+              color: Colors.white.withValues(alpha: 0.62),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TopArtistsScreen extends StatelessWidget {
+  final _WeeklyStatsSection section;
+  final List<Map<String, dynamic>> mixes;
+
+  const _TopArtistsScreen({
+    required this.section,
+    required this.mixes,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final count = section.uniqueArtists;
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F0F10),
+      body: SafeArea(
+        bottom: false,
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _DetailHeader(
+                      title: 'Top Artists',
+                      onBack: () => Navigator.of(context).pop(),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      section.rangeLabel,
+                      style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white.withValues(alpha: 0.56),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'This week you listened to $count ${count == 1 ? 'artist' : 'artists'}',
+                      style: GoogleFonts.outfit(
+                        fontSize: 28,
+                        height: 1.15,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    Divider(
+                        color: Colors.white.withValues(alpha: 0.08), height: 1),
+                    const SizedBox(height: 22),
+                    ...section.topArtists.asMap().entries.map((entry) {
+                      return _ArtistRankRow(
+                        rank: entry.key + 1,
+                        artist: entry.value,
+                      );
+                    }),
+                    if (mixes.isNotEmpty) ...[
+                      const SizedBox(height: 28),
+                      Divider(
+                          color: Colors.white.withValues(alpha: 0.08),
+                          height: 1),
+                      const SizedBox(height: 22),
+                      Text(
+                        'Similar to your favorite artists',
+                        style: GoogleFonts.outfit(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      SizedBox(
+                        height: 214,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: mixes.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(width: 14),
+                          itemBuilder: (_, index) =>
+                              _MixCard(mix: mixes[index]),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ],
         ),
       ),
     );
   }
+}
 
-  void _showShareDialog() {
-    final songs = _stats?['songs_count'] ?? 0;
-    final hours = _fmtHours(_stats?['total_hours']);
-    final artists = _stats?['unique_artists_count'] ?? 0;
-    final topArtists = (_stats?['top_artists'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-    final top1 = topArtists.isNotEmpty ? topArtists[0]['name'] ?? '' : '';
+class _TopTracksScreen extends StatelessWidget {
+  final _WeeklyStatsSection section;
 
-    showDialog(
-      context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: RepaintBoundary(
-          key: _shareKey,
-          child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft, end: Alignment.bottomRight,
-              colors: [Color(0xFF1a0533), Color(0xFF0d1a3d)],
-            ),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: AppColors.purple.withOpacity(0.3)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('MoodWave Stats', style: GoogleFonts.outfit(
-                  fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.purpleLight)),
-              const SizedBox(height: 16),
-              _ShareRow('Songs played', '$songs'),
-              _ShareRow('Hours listened', hours),
-              _ShareRow('Artists explored', '$artists'),
-              if (top1.isNotEmpty) _ShareRow('Top artist', top1),
-              const SizedBox(height: 20),
-              Container(
-                width: double.infinity, padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.glass,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.border),
+  const _TopTracksScreen({required this.section});
+
+  @override
+  Widget build(BuildContext context) {
+    final count = section.uniqueTracks;
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F0F10),
+      body: SafeArea(
+        bottom: false,
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _DetailHeader(
+                      title: 'Top Tracks',
+                      onBack: () => Navigator.of(context).pop(),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      section.rangeLabel,
+                      style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white.withValues(alpha: 0.56),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'This week you played $count ${count == 1 ? 'track' : 'tracks'}',
+                      style: GoogleFonts.outfit(
+                        fontSize: 28,
+                        height: 1.15,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    Divider(
+                        color: Colors.white.withValues(alpha: 0.08), height: 1),
+                    const SizedBox(height: 22),
+                    ...section.topTracks.asMap().entries.map((entry) {
+                      return _TrackRankRow(
+                        rank: entry.key + 1,
+                        track: entry.value,
+                      );
+                    }),
+                  ],
                 ),
-                child: Text('moodwave.app', textAlign: TextAlign.center,
-                    style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3)),
               ),
-              const SizedBox(height: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DetailHeader extends StatelessWidget {
+  final String title;
+  final VoidCallback onBack;
+
+  const _DetailHeader({
+    required this.title,
+    required this.onBack,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _RoundActionButton(
+          icon: Icons.arrow_back_ios_new_rounded,
+          onTap: onBack,
+        ),
+        const Spacer(),
+        Text(
+          title,
+          style: GoogleFonts.outfit(
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
+        ),
+        const Spacer(),
+        const SizedBox(width: 42),
+      ],
+    );
+  }
+}
+
+class _ArtistRankRow extends StatelessWidget {
+  final int rank;
+  final _ArtistRank artist;
+
+  const _ArtistRankRow({
+    required this.rank,
+    required this.artist,
+  });
+
+  Future<void> _openArtist(BuildContext context) async {
+    final name = artist.name.trim();
+    if (name.isEmpty || name == 'Unknown artist') return;
+
+    try {
+      var candidates = await ApiService().searchArtistsList(name, limit: 8);
+      if (!context.mounted) return;
+
+      if (candidates.isEmpty) {
+        final firstWord = name
+            .split(RegExp(r'\s+'))
+            .firstWhere((w) => w.length > 2, orElse: () => '');
+        if (firstWord.isNotEmpty) {
+          candidates =
+              await ApiService().searchArtistsList(firstWord, limit: 8);
+          if (!context.mounted) return;
+        }
+      }
+
+      if (candidates.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not find artist.')),
+        );
+        return;
+      }
+
+      candidates.sort((a, b) {
+        final aName = (a['name']?.toString() ?? '').toLowerCase();
+        final bName = (b['name']?.toString() ?? '').toLowerCase();
+        final target = name.toLowerCase();
+        final aScore =
+            (aName == target ? 2 : 0) + (aName.startsWith(target) ? 1 : 0);
+        final bScore =
+            (bName == target ? 2 : 0) + (bName.startsWith(target) ? 1 : 0);
+        if (aScore != bScore) return bScore.compareTo(aScore);
+        return aName.compareTo(bName);
+      });
+      final artistData = candidates.first;
+      final artistId = artistData['id']?.toString();
+      if (!context.mounted || artistId == null || artistId.isEmpty) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ArtistScreen(
+            artistId: artistId,
+            artistName: artistData['name']?.toString() ?? name,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open artist right now.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _openArtist(context),
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 24,
+                child: Text(
+                  '$rank',
+                  style: GoogleFonts.outfit(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white.withValues(alpha: 0.62),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              _ArtworkThumb(
+                imageUrl: artist.imageUrl,
+                size: 72,
+                circular: true,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  artist.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.outfit(
+                    fontSize: 17,
+                    height: 1.15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                '${artist.plays}',
+                style: GoogleFonts.outfit(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white.withValues(alpha: 0.45),
+                ),
+              ),
+              const SizedBox(width: 8),
               GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: Text('Close', style: GoogleFonts.outfit(
-                    fontSize: 14, color: AppColors.purpleLight, fontWeight: FontWeight.w600)),
+                onTap: () => _openArtist(context),
+                child: Icon(
+                  Icons.more_horiz_rounded,
+                  color: Colors.white.withValues(alpha: 0.48),
+                ),
               ),
             ],
           ),
         ),
-        ),
       ),
-    );
-  }
-
-  Widget _buildTopArtists(List<Map<String, dynamic>> artists) {
-    final gradients = [
-      AppColors.gradMixed,
-      const LinearGradient(colors: [Color(0xFF1e3a8a), Color(0xFF3b82f6)]),
-      const LinearGradient(colors: [Color(0xFF065f46), Color(0xFF10b981)]),
-    ];
-
-    final padded = List<Map<String, dynamic>>.from(artists);
-    while (padded.length < 3) {
-      padded.add({'name': '—', 'plays': 0});
-    }
-    final ordered = [padded[1], padded[0], padded[2]];
-    final rankLabels = ['#2', '#1', '#3'];
-
-    return Row(children: List.generate(3, (i) {
-      final a = ordered[i];
-      final name = a['name']?.toString() ?? '—';
-      final plays = a['plays'] as int? ?? 0;
-      final playsStr = plays > 0 ? '${plays}x' : '—';
-      final initial = name.isNotEmpty && name != '—' ? name[0].toUpperCase() : '?';
-      return Expanded(child: Padding(
-        padding: EdgeInsets.only(right: i < 2 ? 10 : 0),
-        child: _Top3Card(
-          rank: rankLabels[i],
-          initial: initial,
-          gradient: gradients[i],
-          name: name,
-          plays: playsStr,
-          highlighted: i == 1,
-        ),
-      ));
-    }));
-  }
-
-  Widget _buildGenreBars(List<String> genres) {
-    final weights = [0.38, 0.26, 0.18, 0.12, 0.06];
-    final colors = [AppColors.purpleLight, AppColors.pinkLight, AppColors.blueLight,
-        const Color(0xFF5eead4), const Color(0xFFfbbf24)];
-    final gradients = [
-      const LinearGradient(colors: [Color(0xFF7c3aed), AppColors.purple]),
-      const LinearGradient(colors: [Color(0xFF9d174d), AppColors.pink]),
-      const LinearGradient(colors: [Color(0xFF1e3a8a), AppColors.blue]),
-      const LinearGradient(colors: [Color(0xFF065f46), Color(0xFF10b981)]),
-      const LinearGradient(colors: [Color(0xFF92400e), Color(0xFFf59e0b)]),
-    ];
-
-    return Column(
-      children: List.generate(genres.length.clamp(0, 5), (i) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: _GenreBar(genres[i], weights[i], colors[i], gradients[i]),
-      )),
     );
   }
 }
 
-// ─── Top Track Row ────────────────────────────────────────────────────────────
-
-class _TopTrackRow extends StatelessWidget {
+class _TrackRankRow extends StatelessWidget {
   final int rank;
-  final Map<String, dynamic> track;
-  const _TopTrackRow({required this.rank, required this.track});
+  final _TrackRank track;
 
-  @override
-  Widget build(BuildContext context) {
-    final title = track['title']?.toString() ?? 'Unknown';
-    final artist = track['artist']?.toString() ?? '';
-    final coverUrl = track['cover_url']?.toString();
-    final plays = track['play_count'] as int? ?? 0;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(children: [
-        SizedBox(width: 22, child: Text('$rank',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3, fontWeight: FontWeight.w700))),
-        const SizedBox(width: 10),
-        Container(
-          width: 44, height: 44,
-          decoration: BoxDecoration(gradient: AppColors.gradMixed, borderRadius: BorderRadius.circular(10)),
-          child: coverUrl != null
-              ? ClipRRect(borderRadius: BorderRadius.circular(10),
-                  child: Image.network(coverUrl, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.music_note_rounded, color: Colors.white54, size: 20))))
-              : const Center(child: Icon(Icons.music_note_rounded, color: Colors.white54, size: 20)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
-          Text(artist, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-        ])),
-        Text('${plays}x', style: GoogleFonts.outfit(fontSize: 12, color: AppColors.purpleLight, fontWeight: FontWeight.w700)),
-      ]),
+  const _TrackRankRow({
+    required this.rank,
+    required this.track,
+  });
+
+  void _showActions(BuildContext context) {
+    showTrackMenu(
+      context,
+      track.track,
+      onPlayNow: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => PlayerScreen(track: track.track)),
+        );
+      },
+      onGoToArtist: () async {
+        final candidates =
+            await ApiService().searchArtistsList(track.artist, limit: 6);
+        if (!context.mounted || candidates.isEmpty) return;
+        final artistData = candidates.first;
+        final artistId = artistData['id']?.toString();
+        if (artistId == null || artistId.isEmpty) return;
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ArtistScreen(
+              artistId: artistId,
+              artistName: artistData['name']?.toString() ?? track.artist,
+            ),
+          ),
+        );
+      },
     );
   }
-}
-
-// ─── Listening Activity Bar Chart (fl_chart) ─────────────────────────────────
-
-class _ListeningActivityBars extends StatelessWidget {
-  final Map<String, dynamic> data;
-  const _ListeningActivityBars({required this.data});
 
   @override
   Widget build(BuildContext context) {
-    final keys = ['morning', 'afternoon', 'evening', 'night'];
-    final labels = ['Morn', 'Aft', 'Eve', 'Night'];
-    final values = keys.map((k) => (data[k] as int? ?? 0).toDouble()).toList();
-    final maxVal = values.fold(0.0, (a, b) => a > b ? a : b);
-    if (maxVal == 0) return const SizedBox.shrink();
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: SizedBox(
-        height: 130,
-        child: BarChart(
-          BarChartData(
-            alignment: BarChartAlignment.spaceAround,
-            maxY: maxVal * 1.35,
-            barGroups: List.generate(4, (i) {
-              final isMax = values[i] == maxVal && values[i] > 0;
-              return BarChartGroupData(
-                x: i,
-                barRods: [
-                  BarChartRodData(
-                    toY: values[i],
-                    gradient: isMax
-                        ? const LinearGradient(
-                            colors: [AppColors.purpleDark, AppColors.purpleLight],
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter)
-                        : null,
-                    color: isMax ? null : const Color(0xFF374151),
-                    width: 32,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(6),
-                      topRight: Radius.circular(6),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => PlayerScreen(track: track.track)),
+          );
+        },
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 24,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    '$rank',
+                    style: GoogleFonts.outfit(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white.withValues(alpha: 0.62),
                     ),
                   ),
-                ],
-              );
-            }),
-            titlesData: FlTitlesData(
-              show: true,
-              bottomTitles: AxisTitles(
-                sideTitles: SideTitles(
-                  showTitles: true,
-                  getTitlesWidget: (val, meta) => Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(labels[val.toInt()],
-                        style: GoogleFonts.outfit(fontSize: 10, color: AppColors.text3)),
-                  ),
-                  reservedSize: 32,
                 ),
               ),
-              leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-              topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-              rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            ),
-            gridData: const FlGridData(show: false),
-            borderData: FlBorderData(show: false),
+              const SizedBox(width: 14),
+              _ArtworkThumb(
+                imageUrl: track.imageUrl,
+                size: 84,
+                circular: false,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        track.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          fontSize: 16,
+                          height: 1.15,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        track.artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white.withValues(alpha: 0.62),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${track.plays} ${track.plays == 1 ? 'play' : 'plays'}',
+                        style: GoogleFonts.outfit(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white.withValues(alpha: 0.62),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: GestureDetector(
+                  onTap: () => _showActions(context),
+                  child: Icon(
+                    Icons.more_horiz_rounded,
+                    color: Colors.white.withValues(alpha: 0.48),
+                  ),
+                ),
+              ),
+            ],
           ),
-          swapAnimationDuration: const Duration(milliseconds: 500),
-          swapAnimationCurve: Curves.easeInOut,
         ),
       ),
     );
   }
 }
 
-// ─── Streak Card ─────────────────────────────────────────────────────────────
+class _StatsErrorState extends StatelessWidget {
+  final String message;
+  final Future<void> Function() onRetry;
 
-class _StreakCard extends StatelessWidget {
-  final int current;
-  final int best;
-  const _StreakCard({required this.current, required this.best});
+  const _StatsErrorState({
+    required this.message,
+    required this.onRetry,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF2d1654), Color(0xFF1a0a3d)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.query_stats_rounded,
+              size: 48,
+              color: Colors.white.withValues(alpha: 0.36),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.outfit(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.white.withValues(alpha: 0.8),
+              ),
+            ),
+            const SizedBox(height: 18),
+            TextButton(
+              onPressed: onRetry,
+              child: Text(
+                'Try again',
+                style: GoogleFonts.outfit(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.green,
+                ),
+              ),
+            ),
+          ],
         ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.purple.withOpacity(0.3)),
       ),
-      child: Row(children: [
-        const Icon(Icons.local_fire_department_rounded, size: 28, color: Color(0xFFf97316)),
-        const SizedBox(width: 14),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Listening Streak', style: GoogleFonts.outfit(
-              fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text)),
-          const SizedBox(height: 4),
-          Text('Current: $current day${current == 1 ? '' : 's'}  ·  Best: $best day${best == 1 ? '' : 's'}',
-              style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text2)),
-        ])),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: AppColors.purple.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(100),
-          ),
-          child: Text('$current days', style: GoogleFonts.outfit(
-              fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.purpleLight)),
-        ),
-      ]),
     );
   }
 }
 
-class _ShareRow extends StatelessWidget {
-  final String label, value;
-  const _ShareRow(this.label, this.value);
+class _BottomSheetMetricRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _BottomSheetMetricRow({
+    required this.label,
+    required this.value,
+  });
+
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
-          Text(value, style: GoogleFonts.outfit(
-              fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.text)),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Genre Pie Chart (fl_chart) ───────────────────────────────────────────────
-
-class _GenreDonut extends StatelessWidget {
-  final List<Map<String, dynamic>> genreCounts;
-  const _GenreDonut({required this.genreCounts});
-
-  @override
-  Widget build(BuildContext context) {
-    final total = genreCounts.fold<int>(0, (s, e) {
-      final p = e['plays'];
-      return s + (p is int ? p : int.tryParse(p?.toString() ?? '') ?? 0);
-    });
-    if (total == 0) return const SizedBox.shrink();
-
-    const colors = [
-      AppColors.purpleLight,
-      AppColors.pink,
-      AppColors.blueLight,
-      Color(0xFF5eead4),
-      Color(0xFFfbbf24),
-      Color(0xFFf87171),
-      Color(0xFFa3e635),
-      Color(0xFF38bdf8),
-    ];
-
-    final items = genreCounts.take(8).toList();
-
-    return Column(children: [
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 140,
-            height: 140,
-            child: PieChart(
-              PieChartData(
-                sections: items.asMap().entries.map((e) {
-                  final i = e.key;
-                  final plays = e.value['plays'];
-                  final p = plays is int ? plays : int.tryParse(plays?.toString() ?? '') ?? 0;
-                  return PieChartSectionData(
-                    value: p.toDouble(),
-                    color: colors[i % colors.length],
-                    title: '',
-                    radius: 40,
-                  );
-                }).toList(),
-                centerSpaceRadius: 38,
-                sectionsSpace: 3,
-                startDegreeOffset: -90,
-              ),
-              swapAnimationDuration: const Duration(milliseconds: 800),
-              swapAnimationCurve: Curves.easeInOut,
-            ),
-          ),
-          const SizedBox(width: 20),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: List.generate(items.length.clamp(0, 5), (i) {
-                final name = items[i]['name']?.toString() ?? '';
-                final plays = items[i]['plays'];
-                final p = plays is int ? plays : int.tryParse(plays?.toString() ?? '') ?? 0;
-                final pct = total > 0 ? (p / total * 100).round() : 0;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Row(children: [
-                    Container(width: 8, height: 8,
-                        decoration: BoxDecoration(
-                            color: colors[i % colors.length], shape: BoxShape.circle)),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(name,
-                        style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text),
-                        overflow: TextOverflow.ellipsis)),
-                    Text('$pct%',
-                        style: GoogleFonts.outfit(
-                            fontSize: 12, fontWeight: FontWeight.w700,
-                            color: colors[i % colors.length])),
-                  ]),
-                );
-              }),
+            child: Text(
+              label,
+              style: GoogleFonts.outfit(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.white.withValues(alpha: 0.54),
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: GoogleFonts.outfit(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
             ),
           ),
         ],
       ),
-      const SizedBox(height: 12),
-    ]);
-  }
-}
-
-// ─── Shared widgets ───────────────────────────────────────────────────────────
-
-class _EmptySection extends StatelessWidget {
-  final String text;
-  const _EmptySection({required this.text});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      decoration: BoxDecoration(
-        color: AppColors.glass,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(children: [
-        const Icon(Icons.music_note_rounded, size: 32, color: AppColors.text3),
-        const SizedBox(height: 8),
-        Text(text, style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3),
-            textAlign: TextAlign.center),
-      ]),
     );
   }
 }
 
-class _StatCard extends StatelessWidget {
-  final LinearGradient gradient;
-  final String value, label;
+class _RoundActionButton extends StatelessWidget {
   final IconData icon;
+  final VoidCallback onTap;
   final bool small;
-  final int? animTarget;
-  final String Function(int)? formatter;
-  const _StatCard({required this.gradient, required this.value, required this.label, required this.icon, this.small = false, this.animTarget, this.formatter});
+
+  const _RoundActionButton({
+    required this.icon,
+    required this.onTap,
+    this.small = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final fontSize = small ? 28.0 : 40.0;
-    final valueStyle = GoogleFonts.outfit(
-        fontSize: fontSize, fontWeight: FontWeight.w900,
-        color: Colors.white, letterSpacing: -0.03 * fontSize, height: 1);
-
-    final valueWidget = animTarget != null && formatter != null
-        ? TweenAnimationBuilder<int>(
-            tween: IntTween(begin: 0, end: animTarget!),
-            duration: const Duration(milliseconds: 1000),
-            curve: Curves.easeOut,
-            builder: (_, v, __) => Text(formatter!(v), style: valueStyle),
-          )
-        : Text(value, style: valueStyle);
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(gradient: gradient, borderRadius: BorderRadius.circular(24)),
-      child: Stack(children: [
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          valueWidget,
-          const SizedBox(height: 4),
-          Text(label, style: GoogleFonts.outfit(
-              fontSize: 13, color: Colors.white.withOpacity(0.6), fontWeight: FontWeight.w500)),
-        ]),
-        Positioned(right: 0, top: 0,
-          child: Opacity(opacity: 0.25,
-            child: Icon(icon, size: 48, color: Colors.white))),
-      ]),
-    );
-  }
-}
-
-class _Top3Card extends StatelessWidget {
-  final String rank, initial, name, plays;
-  final LinearGradient gradient;
-  final bool highlighted;
-  const _Top3Card({required this.rank, required this.initial, required this.gradient,
-      required this.name, required this.plays, this.highlighted = false});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      decoration: BoxDecoration(
-        gradient: highlighted ? LinearGradient(colors: [
-          AppColors.purpleDark.withOpacity(0.15), AppColors.pink.withOpacity(0.1)]) : null,
-        color: highlighted ? null : AppColors.glass,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: highlighted ? AppColors.purple.withOpacity(0.3) : AppColors.border),
+    final size = small ? 36.0 : 42.0;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(99),
+        child: Ink(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.05),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+          ),
+          child: Icon(
+            icon,
+            color: Colors.white.withValues(alpha: 0.92),
+            size: small ? 18 : 20,
+          ),
+        ),
       ),
-      child: Column(children: [
-        Text(rank, style: GoogleFonts.outfit(
-            fontSize: 11, fontWeight: FontWeight.w700,
-            color: highlighted ? const Color(0xFFf59e0b) : AppColors.text3, letterSpacing: 0.08)),
-        const SizedBox(height: 8),
-        Container(
-          width: highlighted ? 60 : 52, height: highlighted ? 60 : 52,
-          decoration: BoxDecoration(gradient: gradient, shape: BoxShape.circle,
-              border: Border.all(color: AppColors.border2, width: 2)),
-          child: Center(child: Text(initial, style: GoogleFonts.outfit(
-              fontSize: highlighted ? 22 : 18, fontWeight: FontWeight.w800, color: Colors.white)))),
-        const SizedBox(height: 8),
-        Text(name, style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.text),
-            textAlign: TextAlign.center, overflow: TextOverflow.ellipsis, maxLines: 2),
-        const SizedBox(height: 3),
-        Text(plays, style: GoogleFonts.outfit(
-            fontSize: 10, color: highlighted ? AppColors.purpleLight : AppColors.text3,
-            fontWeight: highlighted ? FontWeight.w700 : FontWeight.w400)),
-      ]),
     );
   }
 }
 
-class _GenreBar extends StatelessWidget {
-  final String name;
-  final double pct;
-  final Color color;
-  final LinearGradient gradient;
-  const _GenreBar(this.name, this.pct, this.color, this.gradient);
+class _ArtworkThumb extends StatelessWidget {
+  final String? imageUrl;
+  final double size;
+  final bool circular;
+
+  const _ArtworkThumb({
+    required this.imageUrl,
+    required this.size,
+    required this.circular,
+  });
+
   @override
   Widget build(BuildContext context) {
-    return Column(children: [
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(name, style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text)),
-        Text('${(pct * 100).toInt()}%', style: GoogleFonts.outfit(
-            fontSize: 13, fontWeight: FontWeight.w700, color: color)),
-      ]),
-      const SizedBox(height: 5),
-      Stack(children: [
-        Container(height: 6, decoration: BoxDecoration(
-            color: AppColors.surface3, borderRadius: BorderRadius.circular(100))),
-        FractionallySizedBox(widthFactor: pct, child: Container(height: 6,
-          decoration: BoxDecoration(gradient: gradient, borderRadius: BorderRadius.circular(100)))),
-      ]),
-    ]);
+    final borderRadius = BorderRadius.circular(circular ? size : 12);
+
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: imageUrl != null && imageUrl!.trim().isNotEmpty
+            ? CachedNetworkImage(
+                imageUrl: imageUrl!,
+                fit: BoxFit.cover,
+                errorWidget: (_, __, ___) => _fallback(),
+              )
+            : _fallback(),
+      ),
+    );
   }
+
+  Widget _fallback() {
+    return Container(
+      color: const Color(0xFF2B2B2E),
+      child: const Center(
+        child: Icon(
+          Icons.music_note_rounded,
+          color: Colors.white54,
+          size: 24,
+        ),
+      ),
+    );
+  }
+}
+
+class _CoverImage extends StatelessWidget {
+  final String imageUrl;
+
+  const _CoverImage({required this.imageUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return CachedNetworkImage(
+      imageUrl: imageUrl,
+      fit: BoxFit.cover,
+      errorWidget: (_, __, ___) => Container(
+        color: const Color(0xFF252527),
+        child: const Center(
+          child:
+              Icon(Icons.music_note_rounded, color: Colors.white54, size: 30),
+        ),
+      ),
+    );
+  }
+}
+
+class _ArtistRank {
+  final String name;
+  final int plays;
+  final String? imageUrl;
+
+  const _ArtistRank({
+    required this.name,
+    required this.plays,
+    required this.imageUrl,
+  });
+
+  factory _ArtistRank.fromMap(Map<String, dynamic> map) {
+    return _ArtistRank(
+      name: map['name']?.toString() ?? 'Unknown artist',
+      plays: (map['plays'] as num?)?.toInt() ?? 0,
+      imageUrl: map['image_url']?.toString(),
+    );
+  }
+}
+
+class _TrackRank {
+  final String title;
+  final String artist;
+  final int plays;
+  final String? imageUrl;
+  final Map<String, dynamic> track;
+
+  const _TrackRank({
+    required this.title,
+    required this.artist,
+    required this.plays,
+    required this.imageUrl,
+    required this.track,
+  });
+
+  factory _TrackRank.fromMap(Map<String, dynamic> map) {
+    final rawTrack = map['track'] is Map
+        ? Map<String, dynamic>.from(map['track'] as Map)
+        : <String, dynamic>{};
+    return _TrackRank(
+      title: map['title']?.toString() ?? 'Unknown track',
+      artist: map['artist']?.toString() ?? '',
+      plays: (map['plays'] as num?)?.toInt() ?? 0,
+      imageUrl: map['image_url']?.toString(),
+      track: rawTrack,
+    );
+  }
+}
+
+class _WeeklyStatsSection {
+  final DateTime start;
+  final DateTime end;
+  final int totalPlays;
+  final int uniqueArtists;
+  final int uniqueTracks;
+  final List<_ArtistRank> topArtists;
+  final List<_TrackRank> topTracks;
+  final List<String> heroImages;
+  final String insightTitle;
+  final String insightSubtitle;
+  final String rangeLabel;
+  final bool isCurrentWeek;
+
+  const _WeeklyStatsSection({
+    required this.start,
+    required this.end,
+    required this.totalPlays,
+    required this.uniqueArtists,
+    required this.uniqueTracks,
+    required this.topArtists,
+    required this.topTracks,
+    required this.heroImages,
+    required this.insightTitle,
+    required this.insightSubtitle,
+    required this.rangeLabel,
+    required this.isCurrentWeek,
+  });
+
+  bool get isEmpty => totalPlays == 0;
+
+  factory _WeeklyStatsSection.fromMap(Map<String, dynamic> map) {
+    final startRaw = map['start_date']?.toString();
+    final endRaw = map['end_date']?.toString();
+    final insight = map['insight'] is Map
+        ? Map<String, dynamic>.from(map['insight'] as Map)
+        : <String, dynamic>{};
+
+    return _WeeklyStatsSection(
+      start: startRaw != null
+          ? DateTime.tryParse(startRaw) ?? DateTime.now()
+          : DateTime.now(),
+      end: endRaw != null
+          ? DateTime.tryParse(endRaw) ?? DateTime.now()
+          : DateTime.now(),
+      totalPlays: (map['total_plays'] as num?)?.toInt() ?? 0,
+      uniqueArtists: (map['unique_artists'] as num?)?.toInt() ?? 0,
+      uniqueTracks: (map['unique_tracks'] as num?)?.toInt() ?? 0,
+      topArtists: ((map['top_artists'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((item) => _ArtistRank.fromMap(Map<String, dynamic>.from(item)))
+          .toList(),
+      topTracks: ((map['top_tracks'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((item) => _TrackRank.fromMap(Map<String, dynamic>.from(item)))
+          .toList(),
+      heroImages: ((map['hero_images'] as List?) ?? const [])
+          .map((item) => item.toString())
+          .where((item) => item.trim().isNotEmpty)
+          .toList(),
+      insightTitle: insight['title']?.toString() ?? '',
+      insightSubtitle: insight['subtitle']?.toString() ?? '',
+      rangeLabel: map['range_label']?.toString() ?? '',
+      isCurrentWeek: map['is_current_week'] == true,
+    );
+  }
+}
+
+extension<T> on List<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }

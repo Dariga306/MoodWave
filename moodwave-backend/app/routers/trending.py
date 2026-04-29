@@ -70,20 +70,29 @@ async def get_trending_tracks(
         or ""
     ).lower().replace(" ", "_")
 
-    city_key = f"trending:city:{user_city}"
-    city_count = await redis.zcard(city_key) if user_city else 0
-    trending_key = city_key if city_count >= 5 else "trending:global"
+    # All Redis calls wrapped — fall back to Deezer charts if Redis is down
+    try:
+        city_key = f"trending:city:{user_city}"
+        city_count = await redis.zcard(city_key) if user_city else 0
+        trending_key = city_key if city_count >= 5 else "trending:global"
+        raw = await redis.zrevrange(trending_key, 0, limit - 1, withscores=True)
+    except Exception:
+        raw = []
 
-    # Try Redis sorted set
-    raw = await redis.zrevrange(trending_key, 0, limit - 1, withscores=True)
     if not raw:
         # Fallback to Deezer global charts
-        cache_key = f"trending:deezer_fallback:{limit}"
-        cached = await redis.get(cache_key)
-        if cached:
-            return {"tracks": json.loads(cached), "based_on": "global_chart"}
+        try:
+            cache_key = f"trending:deezer_fallback:{limit}"
+            cached = await redis.get(cache_key)
+            if cached:
+                return {"tracks": json.loads(cached), "based_on": "global_chart"}
+        except Exception:
+            cached = None
         tracks = await _deezer_global_charts(limit)
-        await redis.setex(cache_key, TRENDING_CACHE_TTL, json.dumps(tracks))
+        try:
+            await redis.setex(cache_key, TRENDING_CACHE_TTL, json.dumps(tracks))
+        except Exception:
+            pass
         return {"tracks": tracks, "based_on": "global_chart"}
 
     track_ids = [item[0] for item in raw]
@@ -105,7 +114,10 @@ async def get_trending_tracks(
             continue
 
         current_score = scores.get(track_id, 0)
-        yesterday_raw = await redis.zscore(yesterday_key, track_id)
+        try:
+            yesterday_raw = await redis.zscore(yesterday_key, track_id)
+        except Exception:
+            yesterday_raw = None
         yesterday_score = float(yesterday_raw) if yesterday_raw else 0
         growth = 0
         if yesterday_score > 0:

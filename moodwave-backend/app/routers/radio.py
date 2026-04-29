@@ -128,8 +128,12 @@ async def list_radio_stations(request: Request):
     redis = request.app.state.redis
     stations = []
     for station_id, cfg in STATION_CONFIG.items():
-        raw = await redis.get(f"radio:listeners:{station_id}")
-        listener_count = int(raw) if raw else 0
+        listener_count = 0
+        try:
+            raw = await redis.get(f"radio:listeners:{station_id}")
+            listener_count = int(raw) if raw else 0
+        except Exception:
+            pass
         stations.append({
             "id": station_id,
             "name": cfg["name"],

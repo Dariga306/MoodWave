@@ -17,10 +17,12 @@ def _yt_dlp_exe() -> str:
 async def search_video_id(title: str, artist: str) -> str | None:
     """Search YouTube using yt-dlp subprocess (no API key needed)."""
     queries = [
-        f"{title} {artist} official audio",
+        f"{artist} {title}",
         f"{title} {artist}",
+        f"{artist} {title} audio",
+        f"{title} {artist} official audio",
     ]
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     for query in queries:
         video_id = await loop.run_in_executor(None, _ytdlp_subprocess, query)
         if video_id:

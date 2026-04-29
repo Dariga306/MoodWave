@@ -391,9 +391,15 @@ class _PlayerScreenState extends State<PlayerScreen>
         artist: _artist,
       );
       if (videoId != null && videoId.isNotEmpty) {
+        // Set duration hint from track metadata immediately so seek bar is usable
+        final trackDurationMs = _track['duration_ms'] as int?;
+        if (trackDurationMs != null && trackDurationMs > 0 && mounted) {
+          setState(() => _duration = Duration(milliseconds: trackDurationMs));
+        }
+
         final controller = yt.YoutubePlayerController.fromVideoId(
           videoId: videoId,
-          autoPlay: false,
+          autoPlay: true,
           params: const yt.YoutubePlayerParams(
             showControls: false,
             showFullscreenButton: false,
@@ -1112,18 +1118,20 @@ class _PlayerScreenState extends State<PlayerScreen>
                 ? (_position.inMilliseconds / _duration.inMilliseconds)
                     .clamp(0.0, 1.0)
                 : 0.0,
-            onChanged: (value) {
-              final ms = (value * _duration.inMilliseconds).round();
-              if (_ytReady && _ytController != null) {
-                _ytController!.seekTo(
-                  seconds: ms / 1000,
-                  allowSeekAhead: true,
-                );
-              } else if (_audioReady) {
-                _player.seek(Duration(milliseconds: ms));
-              }
-              setState(() => _position = Duration(milliseconds: ms));
-            },
+            onChanged: _duration.inMilliseconds > 0
+                ? (value) {
+                    final ms = (value * _duration.inMilliseconds).round();
+                    if (_ytReady && _ytController != null) {
+                      _ytController!.seekTo(
+                        seconds: ms / 1000,
+                        allowSeekAhead: true,
+                      );
+                    } else if (_audioReady) {
+                      _player.seek(Duration(milliseconds: ms));
+                    }
+                    setState(() => _position = Duration(milliseconds: ms));
+                  }
+                : null,
           ),
         ),
         const SizedBox(height: 8),

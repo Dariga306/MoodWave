@@ -39,7 +39,10 @@ const List<List<Color>> _bannerGradients = [
 ];
 
 const List<String> _genderOptions = [
-  'Male', 'Female', 'Non-binary', 'Prefer not to say',
+  'Male',
+  'Female',
+  'Non-binary',
+  'Prefer not to say',
 ];
 
 class EditProfileScreen extends StatefulWidget {
@@ -132,41 +135,59 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 8),
-            Container(width: 36, height: 4,
-                decoration: BoxDecoration(color: Colors.white24,
+            Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: Colors.white24,
                     borderRadius: BorderRadius.circular(100))),
             const SizedBox(height: 14),
-            Text('Change Avatar', style: GoogleFonts.outfit(
-                fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text)),
+            Text('Change Avatar',
+                style: GoogleFonts.outfit(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.text)),
             const SizedBox(height: 10),
             const Divider(color: Colors.white10, height: 1),
             ListTile(
-              leading: Container(width: 36, height: 36,
-                decoration: BoxDecoration(
-                    color: AppColors.purple.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.photo_library_rounded,
-                    size: 18, color: AppColors.purpleLight)),
-              title: Text('Choose from Gallery', style: GoogleFonts.outfit(
-                  fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
-              subtitle: Text('Use your own photo', style: GoogleFonts.outfit(
-                  fontSize: 11, color: AppColors.text3)),
+              leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                      color: AppColors.purple.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.photo_library_rounded,
+                      size: 18, color: AppColors.purpleLight)),
+              title: Text('Choose from Gallery',
+                  style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.text)),
+              subtitle: Text('Use your own photo',
+                  style:
+                      GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
               onTap: () {
                 Navigator.pop(ctx);
                 _pickAvatarImage();
               },
             ),
             ListTile(
-              leading: Container(width: 36, height: 36,
-                decoration: BoxDecoration(
-                    color: AppColors.blue.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.palette_rounded,
-                    size: 18, color: AppColors.blue)),
-              title: Text('Choose Color Preset', style: GoogleFonts.outfit(
-                  fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
-              subtitle: Text('Pick a gradient color', style: GoogleFonts.outfit(
-                  fontSize: 11, color: AppColors.text3)),
+              leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                      color: AppColors.blue.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.palette_rounded,
+                      size: 18, color: AppColors.blue)),
+              title: Text('Choose Color Preset',
+                  style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.text)),
+              subtitle: Text('Pick a gradient color',
+                  style:
+                      GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
               onTap: () {
                 Navigator.pop(ctx);
                 setState(() {
@@ -177,14 +198,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             ),
             if (_avatarBytes != null)
               ListTile(
-                leading: Container(width: 36, height: 36,
-                  decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(10)),
-                  child: const Icon(Icons.delete_outline_rounded,
-                      size: 18, color: Colors.redAccent)),
-                title: Text('Remove Photo', style: GoogleFonts.outfit(
-                    fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
+                leading: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.delete_outline_rounded,
+                        size: 18, color: Colors.redAccent)),
+                title: Text('Remove Photo',
+                    style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text)),
                 onTap: () {
                   Navigator.pop(ctx);
                   if (mounted) setState(() => _avatarBytes = null);
@@ -208,41 +234,59 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 8),
-            Container(width: 36, height: 4,
-                decoration: BoxDecoration(color: Colors.white24,
+            Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: Colors.white24,
                     borderRadius: BorderRadius.circular(100))),
             const SizedBox(height: 14),
-            Text('Change Banner', style: GoogleFonts.outfit(
-                fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text)),
+            Text('Change Banner',
+                style: GoogleFonts.outfit(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.text)),
             const SizedBox(height: 10),
             const Divider(color: Colors.white10, height: 1),
             ListTile(
-              leading: Container(width: 36, height: 36,
-                decoration: BoxDecoration(
-                    color: AppColors.purple.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.photo_library_rounded,
-                    size: 18, color: AppColors.purpleLight)),
-              title: Text('Choose from Gallery', style: GoogleFonts.outfit(
-                  fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
-              subtitle: Text('Use your own photo', style: GoogleFonts.outfit(
-                  fontSize: 11, color: AppColors.text3)),
+              leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                      color: AppColors.purple.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.photo_library_rounded,
+                      size: 18, color: AppColors.purpleLight)),
+              title: Text('Choose from Gallery',
+                  style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.text)),
+              subtitle: Text('Use your own photo',
+                  style:
+                      GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
               onTap: () {
                 Navigator.pop(ctx);
                 _pickBannerImage();
               },
             ),
             ListTile(
-              leading: Container(width: 36, height: 36,
-                decoration: BoxDecoration(
-                    color: AppColors.blue.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.palette_rounded,
-                    size: 18, color: AppColors.blue)),
-              title: Text('Choose Color Preset', style: GoogleFonts.outfit(
-                  fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
-              subtitle: Text('Pick a gradient color', style: GoogleFonts.outfit(
-                  fontSize: 11, color: AppColors.text3)),
+              leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                      color: AppColors.blue.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.palette_rounded,
+                      size: 18, color: AppColors.blue)),
+              title: Text('Choose Color Preset',
+                  style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.text)),
+              subtitle: Text('Pick a gradient color',
+                  style:
+                      GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
               onTap: () {
                 Navigator.pop(ctx);
                 setState(() {
@@ -253,14 +297,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             ),
             if (_bannerBytes != null)
               ListTile(
-                leading: Container(width: 36, height: 36,
-                  decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(10)),
-                  child: const Icon(Icons.delete_outline_rounded,
-                      size: 18, color: Colors.redAccent)),
-                title: Text('Remove Photo', style: GoogleFonts.outfit(
-                    fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
+                leading: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.delete_outline_rounded,
+                        size: 18, color: Colors.redAccent)),
+                title: Text('Remove Photo',
+                    style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text)),
                 onTap: () {
                   Navigator.pop(ctx);
                   if (mounted) setState(() => _bannerBytes = null);
@@ -290,6 +339,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
     setState(() => _saving = true);
     try {
+      final auth = context.read<AuthProvider>();
       final updates = <String, dynamic>{
         'first_name': _firstNameCtrl.text.trim(),
         'last_name': _lastNameCtrl.text.trim(),
@@ -308,10 +358,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         bannerBytes: _bannerBytes,
       );
       if (!mounted) return;
-      context.read<AuthProvider>().updateUser(updatedUser);
+      final nextAvatarUrl = updatedUser['avatar_url'] as String?;
+      final nextBannerUrl = updatedUser['banner_url'] as String?;
+      if (nextAvatarUrl != null && nextAvatarUrl.isNotEmpty) {
+        await CachedNetworkImage.evictFromCache(nextAvatarUrl);
+      }
+      if (nextBannerUrl != null && nextBannerUrl.isNotEmpty) {
+        await CachedNetworkImage.evictFromCache(nextBannerUrl);
+      }
+      auth.updateUser(updatedUser);
+      await auth.reload();
+      if (!mounted) return;
       setState(() {
-        _savedAvatarUrl = updatedUser['avatar_url'] as String?;
-        _savedBannerUrl = updatedUser['banner_url'] as String?;
+        _savedAvatarUrl = nextAvatarUrl;
+        _savedBannerUrl = nextBannerUrl;
         _avatarBytes = null;
         _bannerBytes = null;
       });
@@ -381,11 +441,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         GestureDetector(
                           onTap: () => Navigator.of(context).pop(),
                           child: Container(
-                            width: 40, height: 40,
+                            width: 40,
+                            height: 40,
                             decoration: BoxDecoration(
                               color: Colors.black.withOpacity(0.3),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.white.withOpacity(0.2)),
+                              border: Border.all(
+                                  color: Colors.white.withOpacity(0.2)),
                             ),
                             child: const Icon(Icons.arrow_back_rounded,
                                 size: 18, color: Colors.white),
@@ -393,34 +455,41 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         ),
                         const Spacer(),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
                             color: Colors.black.withOpacity(0.25),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Row(children: [
-                            const Icon(Icons.palette_outlined, size: 13, color: Colors.white70),
+                            const Icon(Icons.palette_outlined,
+                                size: 13, color: Colors.white70),
                             const SizedBox(width: 4),
-                            Text('Banner', style: GoogleFonts.outfit(
-                                fontSize: 11, color: Colors.white70)),
+                            Text('Banner',
+                                style: GoogleFonts.outfit(
+                                    fontSize: 11, color: Colors.white70)),
                           ]),
                         ),
                         const SizedBox(width: 8),
                         GestureDetector(
                           onTap: _saving ? null : _save,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 18, vertical: 8),
                             decoration: BoxDecoration(
                               gradient: AppColors.gradPurple,
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: _saving
-                                ? const SizedBox(width: 16, height: 16,
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
                                     child: CircularProgressIndicator(
                                         strokeWidth: 2, color: Colors.white))
                                 : Text('Save',
                                     style: GoogleFonts.outfit(
-                                        fontSize: 14, fontWeight: FontWeight.w700,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
                                         color: Colors.white)),
                           ),
                         ),
@@ -434,14 +503,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         onTap: _showAvatarOptions,
                         child: Stack(children: [
                           Container(
-                            width: 80, height: 80,
+                            width: 80,
+                            height: 80,
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
                                   colors: avatarColors),
                               shape: BoxShape.circle,
-                              border: Border.all(color: const Color(0xFF08080f), width: 3),
+                              border: Border.all(
+                                  color: const Color(0xFF08080f), width: 3),
                             ),
                             child: _avatarBytes != null
                                 ? ClipOval(
@@ -459,11 +530,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                           width: 80,
                                           height: 80,
                                           fit: BoxFit.cover,
-                                          placeholder: (_, __) => const SizedBox(),
+                                          placeholder: (_, __) =>
+                                              const SizedBox(),
                                           errorWidget: (_, __, ___) => Center(
                                             child: Text(initial,
                                                 style: GoogleFonts.outfit(
-                                                    fontSize: 30, fontWeight: FontWeight.w800,
+                                                    fontSize: 30,
+                                                    fontWeight: FontWeight.w800,
                                                     color: Colors.white)),
                                           ),
                                         ),
@@ -471,20 +544,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                     : Center(
                                         child: Text(initial,
                                             style: GoogleFonts.outfit(
-                                                fontSize: 30, fontWeight: FontWeight.w800,
+                                                fontSize: 30,
+                                                fontWeight: FontWeight.w800,
                                                 color: Colors.white)),
                                       ),
                           ),
                           Positioned(
-                            bottom: 0, right: 0,
+                            bottom: 0,
+                            right: 0,
                             child: Container(
-                              width: 24, height: 24,
+                              width: 24,
+                              height: 24,
                               decoration: BoxDecoration(
                                 color: AppColors.purple,
                                 shape: BoxShape.circle,
-                                border: Border.all(color: const Color(0xFF08080f), width: 2),
+                                border: Border.all(
+                                    color: const Color(0xFF08080f), width: 2),
                               ),
-                              child: const Icon(Icons.edit_rounded, size: 12, color: Colors.white),
+                              child: const Icon(Icons.edit_rounded,
+                                  size: 12, color: Colors.white),
                             ),
                           ),
                         ]),
@@ -504,36 +582,46 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: AppColors.border),
                   ),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('BANNER COLOR', style: GoogleFonts.outfit(
-                        fontSize: 11, fontWeight: FontWeight.w700,
-                        color: AppColors.text3, letterSpacing: 0.08)),
-                    const SizedBox(height: 8),
-                    Row(children: List.generate(_bannerGradients.length, (i) {
-                      return GestureDetector(
-                        onTap: () => setState(() {
-                          _bannerPreset = i;
-                          _showBannerPicker = false;
-                        }),
-                        child: Container(
-                          width: 44, height: 28,
-                          margin: EdgeInsets.only(right: i < _bannerGradients.length - 1 ? 6 : 0),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: _bannerGradients[i]),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: _bannerPreset == i
-                                  ? Colors.white
-                                  : Colors.transparent,
-                              width: 2),
-                          ),
-                        ),
-                      );
-                    })),
-                  ]),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('BANNER COLOR',
+                            style: GoogleFonts.outfit(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.text3,
+                                letterSpacing: 0.08)),
+                        const SizedBox(height: 8),
+                        Row(
+                            children:
+                                List.generate(_bannerGradients.length, (i) {
+                          return GestureDetector(
+                            onTap: () => setState(() {
+                              _bannerPreset = i;
+                              _showBannerPicker = false;
+                            }),
+                            child: Container(
+                              width: 44,
+                              height: 28,
+                              margin: EdgeInsets.only(
+                                  right:
+                                      i < _bannerGradients.length - 1 ? 6 : 0),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: _bannerGradients[i]),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                    color: _bannerPreset == i
+                                        ? Colors.white
+                                        : Colors.transparent,
+                                    width: 2),
+                              ),
+                            ),
+                          );
+                        })),
+                      ]),
                 ),
 
               const SizedBox(height: 48),
@@ -548,40 +636,49 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: AppColors.border),
                   ),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('AVATAR COLOR', style: GoogleFonts.outfit(
-                        fontSize: 11, fontWeight: FontWeight.w700,
-                        color: AppColors.text3, letterSpacing: 0.08)),
-                    const SizedBox(height: 8),
-                    Wrap(spacing: 8, runSpacing: 8,
-                      children: List.generate(_avatarGradients.length, (i) {
-                        return GestureDetector(
-                          onTap: () => setState(() {
-                            _avatarPreset = i;
-                            _showAvatarPicker = false;
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('AVATAR COLOR',
+                            style: GoogleFonts.outfit(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.text3,
+                                letterSpacing: 0.08)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: List.generate(_avatarGradients.length, (i) {
+                            return GestureDetector(
+                              onTap: () => setState(() {
+                                _avatarPreset = i;
+                                _showAvatarPicker = false;
+                              }),
+                              child: Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                      colors: _avatarGradients[i]),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: _avatarPreset == i
+                                          ? Colors.white
+                                          : Colors.transparent,
+                                      width: 2),
+                                ),
+                                child: _avatarPreset == i
+                                    ? const Icon(Icons.check_rounded,
+                                        color: Colors.white, size: 18)
+                                    : null,
+                              ),
+                            );
                           }),
-                          child: Container(
-                            width: 44, height: 44,
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: _avatarGradients[i]),
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: _avatarPreset == i
-                                    ? Colors.white
-                                    : Colors.transparent,
-                                width: 2),
-                            ),
-                            child: _avatarPreset == i
-                                ? const Icon(Icons.check_rounded, color: Colors.white, size: 18)
-                                : null,
-                          ),
-                        );
-                      }),
-                    ),
-                  ]),
+                        ),
+                      ]),
                 ),
 
               Padding(
@@ -589,17 +686,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 child: Column(children: [
                   const SizedBox(height: 8),
                   Text('Tap avatar or banner to change · Gallery or preset',
-                      style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
+                      style: GoogleFonts.outfit(
+                          fontSize: 11, color: AppColors.text3)),
                   const SizedBox(height: 20),
 
-                  _buildField('FIRST NAME', _firstNameCtrl, Icons.person_outline_rounded,
+                  _buildField('FIRST NAME', _firstNameCtrl,
+                      Icons.person_outline_rounded,
                       hint: 'Your first name'),
                   const SizedBox(height: 14),
-                  _buildField('LAST NAME', _lastNameCtrl, Icons.person_outline_rounded,
+                  _buildField(
+                      'LAST NAME', _lastNameCtrl, Icons.person_outline_rounded,
                       hint: 'Your last name (optional)'),
                   const SizedBox(height: 14),
-                  _buildField('USERNAME', _usernameCtrl, Icons.alternate_email_rounded,
-                      hint: 'username', readOnly: true,
+                  _buildField(
+                      'USERNAME', _usernameCtrl, Icons.alternate_email_rounded,
+                      hint: 'username',
+                      readOnly: true,
                       subtitle: 'Username cannot be changed'),
                   const SizedBox(height: 14),
                   _buildField('CITY', _cityCtrl, Icons.location_city_rounded,
@@ -651,22 +753,23 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label,
           style: GoogleFonts.outfit(
-              fontSize: 11, fontWeight: FontWeight.w700,
-              color: AppColors.text3, letterSpacing: 0.08)),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: AppColors.text3,
+              letterSpacing: 0.08)),
       const SizedBox(height: 7),
       Container(
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: readOnly ? AppColors.glass : AppColors.border),
+          border:
+              Border.all(color: readOnly ? AppColors.glass : AppColors.border),
         ),
         child: TextField(
           controller: controller,
           readOnly: readOnly,
           style: GoogleFonts.outfit(
-              fontSize: 15,
-              color: readOnly ? AppColors.text3 : Colors.white),
+              fontSize: 15, color: readOnly ? AppColors.text3 : Colors.white),
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: GoogleFonts.outfit(color: AppColors.text3, fontSize: 15),
@@ -674,7 +777,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 size: 18,
                 color: readOnly ? AppColors.surface3 : AppColors.text3),
             border: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           ),
         ),
       ),
@@ -693,8 +797,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       Row(children: [
         Text('BIO',
             style: GoogleFonts.outfit(
-                fontSize: 11, fontWeight: FontWeight.w700,
-                color: AppColors.text3, letterSpacing: 0.08)),
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: AppColors.text3,
+                letterSpacing: 0.08)),
         const Spacer(),
         Text('$len/150',
             style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
@@ -717,7 +823,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             hintStyle: GoogleFonts.outfit(color: AppColors.text3, fontSize: 14),
             border: InputBorder.none,
             counterText: '',
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
         ),
       ),
@@ -728,8 +835,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('GENDER',
           style: GoogleFonts.outfit(
-              fontSize: 11, fontWeight: FontWeight.w700,
-              color: AppColors.text3, letterSpacing: 0.08)),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: AppColors.text3,
+              letterSpacing: 0.08)),
       const SizedBox(height: 7),
       Container(
         decoration: BoxDecoration(
@@ -743,7 +852,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             hint: Padding(
               padding: const EdgeInsets.only(left: 16),
               child: Text('Select gender (optional)',
-                  style: GoogleFonts.outfit(color: AppColors.text3, fontSize: 15)),
+                  style:
+                      GoogleFonts.outfit(color: AppColors.text3, fontSize: 15)),
             ),
             isExpanded: true,
             dropdownColor: AppColors.surface,
@@ -757,9 +867,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     style: GoogleFonts.outfit(color: AppColors.text3)),
               ),
               ..._genderOptions.map((g) => DropdownMenuItem<String?>(
-                value: g,
-                child: Text(g),
-              )),
+                    value: g,
+                    child: Text(g),
+                  )),
             ],
             onChanged: (v) => setState(() => _gender = v),
           ),
@@ -785,10 +895,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       child: Row(children: [
         Icon(icon, size: 18, color: AppColors.text3),
         const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(title,
               style: GoogleFonts.outfit(
-                  fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white)),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white)),
           Text(subtitle,
               style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
         ])),
@@ -796,7 +910,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           onTap: () => onChanged(!value),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
-            width: 44, height: 26,
+            width: 44,
+            height: 26,
             decoration: BoxDecoration(
               gradient: value
                   ? const LinearGradient(
@@ -810,12 +925,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               alignment: value ? Alignment.centerRight : Alignment.centerLeft,
               child: Container(
                 margin: const EdgeInsets.all(3),
-                width: 20, height: 20,
+                width: 20,
+                height: 20,
                 decoration: BoxDecoration(
                   color: Colors.white,
                   shape: BoxShape.circle,
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 4)
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.3), blurRadius: 4)
                   ],
                 ),
               ),

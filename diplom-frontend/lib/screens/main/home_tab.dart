@@ -9,7 +9,6 @@ import '../../theme/app_colors.dart';
 import '../../widgets/common_widgets.dart';
 import '../artist_screen.dart';
 import '../extra_screens.dart';
-import '../mood_screen.dart';
 import '../notifications_screen.dart';
 import '../player_screen.dart';
 import '../weather_screen.dart';
@@ -234,21 +233,19 @@ class _HomeTabState extends State<HomeTab> {
                                     color: const Color(0xFF93c5fd)
                                         .withOpacity(0.55))),
                           ])),
-                      GestureDetector(
-                          onTap: () => _playWeatherMood(weatherDesc),
-                          child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 10),
-                              decoration: BoxDecoration(
-                                  color: AppColors.blue.withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                      color: AppColors.blue.withOpacity(0.3))),
-                              child: Text('Play Vibes',
-                                  style: GoogleFonts.outfit(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: const Color(0xFF93c5fd))))),
+                      Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                              color: AppColors.blue.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                  color: AppColors.blue.withOpacity(0.3))),
+                          child: Text('Play Vibes',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF93c5fd)))),
                     ]),
                   ),
                 ),
@@ -483,65 +480,58 @@ class _HomeTabState extends State<HomeTab> {
 
               // ─── Mood tiles ────────────────────────────────────
               const SizedBox(height: 22),
-              SectionHeader(
-                title: 'Choose Your Mood',
-                action: 'All →',
-                onAction: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => MoodScreen(weather: _weather))),
-              ),
+              const SectionHeader(title: 'Choose Your Mood', action: 'All →'),
               const SizedBox(height: 12),
               SizedBox(
-                  height: 160,
+                  height: 130,
                   child: ListView(
                       scrollDirection: Axis.horizontal,
                       padding: const EdgeInsets.only(left: 20),
-                      children: const [
-                        _MoodCard(
-                          name: 'Study',
-                          moodKey: 'study',
-                          icon: Icons.headphones_rounded,
-                          gradient: AppColors.gradBlue,
-                        ),
-                        _MoodCard(
-                          name: 'Sport',
-                          moodKey: 'sport',
-                          icon: Icons.bolt_rounded,
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [Color(0xFFc2410c), Color(0xFFf97316)],
-                          ),
-                        ),
-                        _MoodCard(
-                          name: 'Drive',
-                          moodKey: 'drive',
-                          icon: Icons.directions_car_rounded,
-                          gradient: AppColors.gradPurple,
-                        ),
-                        _MoodCard(
-                          name: 'Sleep',
-                          moodKey: 'sleep',
-                          icon: Icons.dark_mode_rounded,
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [Color(0xFF0f172a), Color(0xFF312e81)],
-                          ),
-                        ),
-                        _MoodCard(
-                          name: 'Party',
-                          moodKey: 'party',
-                          icon: Icons.celebration_rounded,
-                          gradient: AppColors.gradPink,
-                        ),
-                        _MoodCard(
-                          name: 'Chill',
-                          moodKey: 'chill',
-                          icon: Icons.waves_rounded,
-                          gradient: AppColors.gradTeal,
-                        ),
+                      children: [
+                        _MoodTile(
+                            emoji: '📚',
+                            name: 'Study',
+                            gradient: AppColors.gradBlue,
+                            onTap: () =>
+                                _showMoodTracks('study', '📚', 'Study')),
+                        _MoodTile(
+                            emoji: '🏃',
+                            name: 'Sport',
+                            gradient: const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [Color(0xFF7c3d12), Color(0xFFf59e0b)]),
+                            onTap: () =>
+                                _showMoodTracks('workout', '🏃', 'Sport')),
+                        _MoodTile(
+                            emoji: '🚗',
+                            name: 'Drive',
+                            gradient: AppColors.gradPurple,
+                            onTap: () =>
+                                _showMoodTracks('driving', '🚗', 'Drive')),
+                        _MoodTile(
+                            emoji: '😴',
+                            name: 'Sleep',
+                            gradient: const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [Color(0xFF0f172a), Color(0xFF312e81)]),
+                            onTap: () =>
+                                _showMoodTracks('sleep', '😴', 'Sleep')),
+                        _MoodTile(
+                            emoji: '🎉',
+                            name: 'Party',
+                            gradient: AppColors.gradPink,
+                            onTap: () =>
+                                _showMoodTracks('party', '🎉', 'Party')),
+                        _MoodTile(
+                            emoji: '💔',
+                            name: 'Sad',
+                            gradient: const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [Color(0xFF1a0a2e), Color(0xFF4c1d95)]),
+                            onTap: () => _showMoodTracks('sad', '💔', 'Sad')),
                       ])),
 
               const SizedBox(height: 32),
@@ -582,42 +572,14 @@ class _HomeTabState extends State<HomeTab> {
     );
   }
 
-  Future<void> _playWeatherMood(String weatherDesc) async {
-    final desc = weatherDesc.toLowerCase();
-    String moodKey;
-    String moodName;
-    if (desc.contains('rain') || desc.contains('drizzle')) {
-      moodKey = 'chill';
-      moodName = 'Chill';
-    } else if (desc.contains('snow')) {
-      moodKey = 'sleep';
-      moodName = 'Sleep';
-    } else if (desc.contains('cloud')) {
-      moodKey = 'chill';
-      moodName = 'Chill';
-    } else if (desc.contains('clear') || desc.contains('sunny')) {
-      moodKey = 'party';
-      moodName = 'Party';
-    } else if (desc.contains('thunder') || desc.contains('storm')) {
-      moodKey = 'chill';
-      moodName = 'Chill';
-    } else {
-      moodKey = 'study';
-      moodName = 'Study';
-    }
-    try {
-      final tracks = await ApiService().getMoodTracks(moodKey);
-      if (!mounted || tracks.isEmpty) return;
-      final firstTrack = Map<String, dynamic>.from(tracks.first as Map)
-        ..['queue'] = tracks;
-      Navigator.push(
-          context, MaterialPageRoute(builder: (_) => PlayerScreen(track: firstTrack)));
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Playing: $moodName vibes'),
-        duration: const Duration(seconds: 2),
-        backgroundColor: AppColors.surface,
-      ));
-    } catch (_) {}
+  void _showMoodTracks(String moodKey, String emoji, String name) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) =>
+          _MoodTracksSheet(moodKey: moodKey, emoji: emoji, name: name),
+    );
   }
 }
 
@@ -1033,91 +995,178 @@ class _TrackCard extends StatelessWidget {
   }
 }
 
-// ─── Mood card ────────────────────────────────────────────────────────────────
+// ─── Mood tile ────────────────────────────────────────────────────────────────
 
-class _MoodCard extends StatefulWidget {
-  final String name;
-  final String moodKey;
-  final IconData icon;
+class _MoodTile extends StatelessWidget {
+  final String emoji, name;
   final LinearGradient gradient;
-
-  const _MoodCard({
-    required this.name,
-    required this.moodKey,
-    required this.icon,
-    required this.gradient,
-  });
+  final VoidCallback? onTap;
+  const _MoodTile(
+      {required this.emoji,
+      required this.name,
+      required this.gradient,
+      this.onTap});
 
   @override
-  State<_MoodCard> createState() => _MoodCardState();
+  Widget build(BuildContext context) => GestureDetector(
+      onTap: onTap,
+      child: Container(
+          width: 120,
+          margin: const EdgeInsets.only(right: 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+              gradient: gradient, borderRadius: BorderRadius.circular(20)),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(emoji, style: const TextStyle(fontSize: 30)),
+            const Spacer(),
+            Text(name,
+                style: GoogleFonts.outfit(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white)),
+          ])));
 }
 
-class _MoodCardState extends State<_MoodCard> {
-  bool _loading = false;
+// ─── Mood tracks bottom sheet ─────────────────────────────────────────────────
 
-  Future<void> _play() async {
-    if (_loading) return;
-    setState(() => _loading = true);
+class _MoodTracksSheet extends StatefulWidget {
+  final String moodKey, emoji, name;
+  const _MoodTracksSheet(
+      {required this.moodKey, required this.emoji, required this.name});
+  @override
+  State<_MoodTracksSheet> createState() => _MoodTracksSheetState();
+}
+
+class _MoodTracksSheetState extends State<_MoodTracksSheet> {
+  List<dynamic> _tracks = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
     try {
-      List<dynamic> tracks = [];
-      await Future.wait([
-        ApiService().getMoodTracks(widget.moodKey).then((v) => tracks = v),
-        Future.delayed(const Duration(milliseconds: 500)),
-      ]);
+      final tracks = await ApiService().getRecommendations(mood: widget.moodKey);
       if (!mounted) return;
-      if (tracks.isNotEmpty) {
-        final firstTrack = Map<String, dynamic>.from(tracks.first as Map)
-          ..['queue'] = tracks;
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => PlayerScreen(track: firstTrack)),
-        );
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Playing: ${widget.name} vibes'),
-          duration: const Duration(seconds: 2),
-          backgroundColor: AppColors.surface,
-        ));
-      }
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      setState(() {
+        _tracks = tracks;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: _play,
-      child: Container(
-        width: 140,
-        height: 140,
-        margin: const EdgeInsets.only(right: 12),
-        decoration: BoxDecoration(
-          gradient: widget.gradient,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: _loading
-            ? const Center(
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
-            : Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(widget.icon, size: 48, color: Colors.white),
-                  const SizedBox(height: 10),
-                  Text(
-                    widget.name,
-                    style: GoogleFonts.outfit(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.65,
+      decoration: const BoxDecoration(
+        color: Color(0xFF0f0d1a),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
+      child: Column(children: [
+        const SizedBox(height: 10),
+        Container(
+            width: 38,
+            height: 4,
+            decoration: BoxDecoration(
+                color: AppColors.border,
+                borderRadius: BorderRadius.circular(100))),
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(children: [
+            Text(widget.emoji, style: const TextStyle(fontSize: 24)),
+            const SizedBox(width: 10),
+            Text('${widget.name} Vibes',
+                style: GoogleFonts.outfit(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.text)),
+          ]),
+        ),
+        const SizedBox(height: 14),
+        Expanded(
+          child: _loading
+              ? const Center(
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.purpleLight))
+              : _tracks.isEmpty
+                  ? Center(
+                      child: Text('No tracks for this mood yet',
+                          style: GoogleFonts.outfit(
+                              fontSize: 14, color: AppColors.text3)))
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      itemCount: _tracks.length,
+                      itemBuilder: (context, i) {
+                        final track = _tracks[i] as Map<String, dynamic>;
+                        final title = track['title'] ?? track['trackName'] ?? 'Unknown';
+                        final artist = track['artist'] ?? track['artistName'] ?? '';
+                        final coverUrl = track['cover_url'] ?? track['artworkUrl100'];
+                        return GestureDetector(
+                          onTap: () {
+                            Navigator.pop(context);
+                            Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => PlayerScreen(track: track)));
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: const BoxDecoration(
+                                border: Border(
+                                    bottom: BorderSide(color: Color(0x0AFFFFFF)))),
+                            child: Row(children: [
+                              Container(
+                                  width: 48,
+                                  height: 48,
+                                  decoration: BoxDecoration(
+                                      gradient: AppColors.gradMixed,
+                                      borderRadius: BorderRadius.circular(12)),
+                                  child: coverUrl != null
+                                      ? ClipRRect(
+                                          borderRadius: BorderRadius.circular(12),
+                                          child: CachedNetworkImage(
+                                              imageUrl: coverUrl,
+                                              fit: BoxFit.cover,
+                                              placeholder: (_, __) => const SizedBox(),
+                                              errorWidget: (_, __, ___) =>
+                                                  const Center(child: Text('🎵'))))
+                                      : const Center(
+                                          child: Text('🎵', style: TextStyle(fontSize: 22)))),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                  child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                    Text(title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.outfit(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppColors.text)),
+                                    Text(artist,
+                                        style: GoogleFonts.outfit(
+                                            fontSize: 12, color: AppColors.text2)),
+                                  ])),
+                              const Icon(Icons.play_arrow_rounded,
+                                  color: AppColors.text3, size: 22),
+                            ]),
+                          ),
+                        );
+                      },
+                    ),
+        ),
+        const SizedBox(height: 20),
+      ]),
     );
   }
 }

@@ -369,7 +369,7 @@ async def search_albums(query: str, limit: int = 10) -> list[dict]:
     """Search Deezer for albums matching the query."""
     try:
         data = await _get_json("/search/album", params={"q": query, "limit": min(limit, 50)})
-        return [
+        items = [
             {
                 "id": a.get("id"),
                 "title": a.get("title"),
@@ -379,8 +379,27 @@ async def search_albums(query: str, limit: int = 10) -> list[dict]:
                 "release_date": a.get("release_date", ""),
                 "nb_tracks": a.get("nb_tracks", 0),
             }
-            for a in (data.get("data") or [])[:limit]
+            for a in (data.get("data") or [])
         ]
+        normalized_query = query.strip().lower()
+
+        def _score(album: dict) -> tuple[int, int, int, str]:
+            title = (album.get("title") or "").strip().lower()
+            artist = (album.get("artist") or "").strip().lower()
+            title_exact = int(title == normalized_query)
+            title_prefix = int(title.startswith(normalized_query))
+            title_contains = int(normalized_query in title) if normalized_query else 0
+            artist_contains = int(normalized_query in artist) if normalized_query else 0
+            track_count = int(album.get("nb_tracks") or 0)
+            return (
+                title_exact * 100 + title_prefix * 40 + title_contains * 20 + artist_contains * 10,
+                track_count,
+                -int(album.get("id") or 0),
+                title,
+            )
+
+        items.sort(key=_score, reverse=True)
+        return items[:limit]
     except Exception:
         return []
 

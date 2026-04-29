@@ -24,7 +24,6 @@ class _ProfileTabState extends State<ProfileTab> {
   int? _followingCount;
   int? _userId;
   bool _statsLoaded = false;
-  List<Map<String, dynamic>> _followedArtists = [];
 
   @override
   void initState() {
@@ -33,7 +32,7 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 
   Future<void> _load() async {
-    await Future.wait([_loadStats(), _loadFollowedArtists()]);
+    await _loadStats();
   }
 
   Future<void> _loadStats() async {
@@ -54,41 +53,38 @@ class _ProfileTabState extends State<ProfileTab> {
 
   void _openFollowersList() {
     if (_userId == null) return;
-    Navigator.push(context, MaterialPageRoute(
-      builder: (_) => _SocialScreen(userId: _userId!, initialTab: 0),
-    ));
+    Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _SocialScreen(userId: _userId!, initialTab: 0),
+        ));
   }
 
   void _openFollowingList() {
     if (_userId == null) return;
-    Navigator.push(context, MaterialPageRoute(
-      builder: (_) => _SocialScreen(userId: _userId!, initialTab: 1),
-    ));
+    Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _SocialScreen(userId: _userId!, initialTab: 1),
+        ));
   }
 
   static String _genderToPronouns(String gender) {
     switch (gender.toLowerCase().trim()) {
-      case 'male': return 'he/him';
-      case 'female': return 'she/her';
+      case 'male':
+        return 'he/him';
+      case 'female':
+        return 'she/her';
       case 'non-binary':
-      case 'non_binary': return 'they/them';
+      case 'non_binary':
+        return 'they/them';
       case '':
       case 'prefer not to say':
-      case 'prefer_not_to_say': return '';
-      default: return gender;
+      case 'prefer_not_to_say':
+        return '';
+      default:
+        return gender;
     }
-  }
-
-  Future<void> _loadFollowedArtists() async {
-    try {
-      final list = await ApiService().getFollowedArtistsDetails();
-      if (!mounted) return;
-      setState(() {
-        _followedArtists = list.whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
-      });
-    } catch (_) {}
   }
 
   @override
@@ -171,7 +167,8 @@ class _ProfileTabState extends State<ProfileTab> {
                           ),
                         Center(
                           child: Container(
-                            width: 200, height: 200,
+                            width: 200,
+                            height: 200,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               gradient: RadialGradient(colors: [
@@ -182,19 +179,25 @@ class _ProfileTabState extends State<ProfileTab> {
                           ),
                         ),
                         Positioned(
-                          top: 0, right: 20,
+                          top: 0,
+                          right: 20,
                           child: SafeArea(
                             child: GestureDetector(
-                              onTap: () => Navigator.push(context,
-                                  MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                              onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (_) => const SettingsScreen())),
                               child: Container(
-                                width: 40, height: 40,
+                                width: 40,
+                                height: 40,
                                 decoration: BoxDecoration(
                                   color: Colors.black.withOpacity(0.3),
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.white.withOpacity(0.15)),
+                                  border: Border.all(
+                                      color: Colors.white.withOpacity(0.15)),
                                 ),
-                                child: const Icon(Icons.settings_rounded, size: 20, color: Colors.white),
+                                child: const Icon(Icons.settings_rounded,
+                                    size: 20, color: Colors.white),
                               ),
                             ),
                           ),
@@ -220,85 +223,94 @@ class _ProfileTabState extends State<ProfileTab> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                      Container(
-                        width: 82, height: 82,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: avatarColors.cast<Color>(),
-                          ),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: AppColors.bg, width: 3),
-                          boxShadow: [
-                            BoxShadow(
-                                color: AppColors.purpleDark.withOpacity(0.4),
-                                blurRadius: 20),
-                          ],
-                        ),
-                        child: avatarUrl.isNotEmpty
-                            ? ClipOval(
-                                child: CachedNetworkImage(
-                                  imageUrl: avatarUrl,
-                                  width: 82,
-                                  height: 82,
-                                  fit: BoxFit.cover,
-                                  placeholder: (_, __) => Center(
+                          Container(
+                            width: 82,
+                            height: 82,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: avatarColors.cast<Color>(),
+                              ),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: AppColors.bg, width: 3),
+                              boxShadow: [
+                                BoxShadow(
+                                    color:
+                                        AppColors.purpleDark.withOpacity(0.4),
+                                    blurRadius: 20),
+                              ],
+                            ),
+                            child: avatarUrl.isNotEmpty
+                                ? ClipOval(
+                                    child: CachedNetworkImage(
+                                      imageUrl: avatarUrl,
+                                      width: 82,
+                                      height: 82,
+                                      fit: BoxFit.cover,
+                                      placeholder: (_, __) => Center(
+                                        child: Text(initial,
+                                            style: GoogleFonts.outfit(
+                                                fontSize: 32,
+                                                fontWeight: FontWeight.w800,
+                                                color: Colors.white)),
+                                      ),
+                                      errorWidget: (_, __, ___) => Center(
+                                        child: Text(initial,
+                                            style: GoogleFonts.outfit(
+                                                fontSize: 32,
+                                                fontWeight: FontWeight.w800,
+                                                color: Colors.white)),
+                                      ),
+                                    ),
+                                  )
+                                : Center(
                                     child: Text(initial,
                                         style: GoogleFonts.outfit(
-                                            fontSize: 32, fontWeight: FontWeight.w800,
+                                            fontSize: 32,
+                                            fontWeight: FontWeight.w800,
                                             color: Colors.white)),
                                   ),
-                                  errorWidget: (_, __, ___) => Center(
-                                    child: Text(initial,
-                                        style: GoogleFonts.outfit(
-                                            fontSize: 32, fontWeight: FontWeight.w800,
-                                            color: Colors.white)),
+                          ),
+                          GestureDetector(
+                            onTap: () async {
+                              if (user == null) return;
+                              final auth = context.read<AuthProvider>();
+                              final saved =
+                                  await Navigator.of(context).push<bool>(
+                                MaterialPageRoute(
+                                  builder: (_) => EditProfileScreen(
+                                    user: Map<String, dynamic>.from(user),
                                   ),
                                 ),
-                              )
-                            : Center(
-                                child: Text(initial,
-                                    style: GoogleFonts.outfit(
-                                        fontSize: 32, fontWeight: FontWeight.w800,
-                                        color: Colors.white)),
+                              );
+                              if (mounted && saved == true) {
+                                await auth.reload();
+                                if (mounted) _load();
+                              } else if (mounted) {
+                                setState(() {});
+                              }
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 4),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 18, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: AppColors.glass,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: AppColors.border),
                               ),
-                      ),
-                      GestureDetector(
-                        onTap: () async {
-                          if (user == null) return;
-                          final saved = await Navigator.of(context).push<bool>(
-                            MaterialPageRoute(
-                              builder: (_) => EditProfileScreen(
-                                user: Map<String, dynamic>.from(user),
-                              ),
+                              child: Text('Edit Profile',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.text)),
                             ),
-                          );
-                          if (mounted && saved == true) {
-                            await context.read<AuthProvider>().reload();
-                            if (mounted) _load();
-                          } else if (mounted) {
-                            setState(() {});
-                          }
-                        },
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 4),
-                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: AppColors.glass,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.border),
                           ),
-                          child: Text('Edit Profile',
-                              style: GoogleFonts.outfit(
-                                  fontSize: 13, fontWeight: FontWeight.w600,
-                                  color: AppColors.text)),
-                        ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
                 ),
               ),
               const SizedBox(height: 4),
@@ -311,27 +323,35 @@ class _ProfileTabState extends State<ProfileTab> {
                   children: [
                     Text(displayName,
                         style: GoogleFonts.outfit(
-                            fontSize: 24, fontWeight: FontWeight.w800,
-                            color: AppColors.text, letterSpacing: -0.5)),
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.text,
+                            letterSpacing: -0.5)),
                     const SizedBox(height: 2),
                     Row(children: [
                       Text('@$username',
-                          style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+                          style: GoogleFonts.outfit(
+                              fontSize: 14, color: AppColors.text2)),
                       if (city.isNotEmpty) ...[
                         const SizedBox(width: 8),
                         Text('· $city',
-                            style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text3)),
+                            style: GoogleFonts.outfit(
+                                fontSize: 14, color: AppColors.text3)),
                       ],
                       if (pronouns.isNotEmpty) ...[
                         const SizedBox(width: 8),
                         Text('· $pronouns',
-                            style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3)),
+                            style: GoogleFonts.outfit(
+                                fontSize: 13, color: AppColors.text3)),
                       ],
                     ]),
                     if (bio.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Text(bio,
-                          style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2, height: 1.5)),
+                          style: GoogleFonts.outfit(
+                              fontSize: 13,
+                              color: AppColors.text2,
+                              height: 1.5)),
                     ],
                   ],
                 ),
@@ -339,6 +359,34 @@ class _ProfileTabState extends State<ProfileTab> {
 
               // Stats — Followers / Following (clickable)
               const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Text(
+                      'Connections',
+                      style: GoogleFonts.outfit(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.text,
+                      ),
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: _openFollowingList,
+                      child: Text(
+                        'See all',
+                        style: GoogleFonts.outfit(
+                          fontSize: 13,
+                          color: AppColors.purpleLight,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Container(
@@ -349,7 +397,8 @@ class _ProfileTabState extends State<ProfileTab> {
                   ),
                   child: Row(
                     children: [
-                      Expanded(child: GestureDetector(
+                      Expanded(
+                          child: GestureDetector(
                         onTap: _openFollowersList,
                         child: _StatCell(
                           value: _statsLoaded ? '${_followersCount ?? 0}' : '—',
@@ -357,7 +406,8 @@ class _ProfileTabState extends State<ProfileTab> {
                         ),
                       )),
                       Container(width: 1, height: 54, color: AppColors.border),
-                      Expanded(child: GestureDetector(
+                      Expanded(
+                          child: GestureDetector(
                         onTap: _openFollowingList,
                         child: _StatCell(
                           value: _statsLoaded ? '${_followingCount ?? 0}' : '—',
@@ -369,104 +419,47 @@ class _ProfileTabState extends State<ProfileTab> {
                 ),
               ),
 
-              // Followed Artists — horizontal scroll
-              if (_followedArtists.isNotEmpty) ...[
-                const SizedBox(height: 20),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(children: [
-                    Text('Following',
-                        style: GoogleFonts.outfit(
-                            fontSize: 17, fontWeight: FontWeight.w700,
-                            color: AppColors.text)),
-                    const Spacer(),
-                    GestureDetector(
-                      onTap: () {
-                        if (_userId == null) return;
-                        Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => _SocialScreen(userId: _userId!, initialTab: 1),
-                        ));
-                      },
-                      child: Text('See all',
-                          style: GoogleFonts.outfit(fontSize: 13, color: AppColors.purpleLight,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                  ]),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 100,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    itemCount: _followedArtists.length,
-                    itemBuilder: (_, i) {
-                      final artist = _followedArtists[i];
-                      final pic = (artist['picture_xl'] ?? artist['picture_medium'] ?? artist['picture'] ?? '').toString();
-                      final name = (artist['name'] ?? '').toString();
-                      return GestureDetector(
-                        onTap: () {
-                          final id = artist['id'];
-                          if (id != null) {
-                            Navigator.push(context, MaterialPageRoute(
-                              builder: (_) => ArtistScreen(artistId: id.toString(), artistName: name),
-                            ));
-                          }
-                        },
-                        child: Container(
-                          width: 72,
-                          margin: const EdgeInsets.only(right: 12),
-                          child: Column(children: [
-                            Container(
-                              width: 64, height: 64,
-                              decoration: BoxDecoration(shape: BoxShape.circle, gradient: AppColors.gradMixed),
-                              child: ClipOval(child: pic.isNotEmpty
-                                  ? CachedNetworkImage(imageUrl: pic, fit: BoxFit.cover,
-                                      errorWidget: (_, __, ___) => Center(child: Text(
-                                          name.isNotEmpty ? name[0].toUpperCase() : '?',
-                                          style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.w700, color: Colors.white))))
-                                  : Center(child: Text(
-                                      name.isNotEmpty ? name[0].toUpperCase() : '?',
-                                      style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.w700, color: Colors.white)))),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                                style: GoogleFonts.outfit(fontSize: 11, color: Colors.white70)),
-                          ]),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-
               // Quick access
               const SizedBox(height: 20),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Text('My Pages',
                     style: GoogleFonts.outfit(
-                        fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.text)),
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.text)),
               ),
               const SizedBox(height: 10),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Column(children: [
-                  _NavRow(icon: Icons.history_rounded, label: 'Listening History', sub: 'Recently played by day',
+                  _NavRow(
+                      icon: Icons.history_rounded,
+                      label: 'Listening History',
+                      sub: 'Recently played by day',
                       color: AppColors.cyan,
-                      onTap: () => Navigator.push(context,
-                          MaterialPageRoute(builder: (_) => const RecentHistoryScreen()))),
-                  _NavRow(icon: Icons.bar_chart_rounded, label: 'My Stats', sub: 'Top artists, genres & more',
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const RecentHistoryScreen()))),
+                  _NavRow(
+                      icon: Icons.bar_chart_rounded,
+                      label: 'My Stats',
+                      sub: 'Top artists, genres & more',
                       color: AppColors.purple,
-                      onTap: () => Navigator.push(context,
-                          MaterialPageRoute(builder: (_) => const StatsScreen()))),
-                  _NavRow(icon: Icons.notifications_rounded, label: 'Notifications', sub: 'Matches, friends, music',
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const StatsScreen()))),
+                  _NavRow(
+                      icon: Icons.notifications_rounded,
+                      label: 'Notifications',
+                      sub: 'Matches, friends, music',
                       color: AppColors.pink,
-                      onTap: () => Navigator.push(context,
-                          MaterialPageRoute(builder: (_) => const NotificationsScreen()))),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const NotificationsScreen()))),
                 ]),
               ),
 
@@ -495,12 +488,17 @@ class _StatCell extends StatelessWidget {
             ).createShader(b),
             child: Text(value,
                 style: GoogleFonts.outfit(
-                    fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white)),
           ),
           const SizedBox(height: 2),
           Text(label,
               textAlign: TextAlign.center,
-              style: GoogleFonts.outfit(fontSize: 10, color: AppColors.text3, fontWeight: FontWeight.w500)),
+              style: GoogleFonts.outfit(
+                  fontSize: 10,
+                  color: AppColors.text3,
+                  fontWeight: FontWeight.w500)),
         ],
       ),
     );
@@ -512,8 +510,12 @@ class _NavRow extends StatelessWidget {
   final String label, sub;
   final Color color;
   final VoidCallback onTap;
-  const _NavRow({required this.icon, required this.label, required this.sub,
-      required this.color, required this.onTap});
+  const _NavRow(
+      {required this.icon,
+      required this.label,
+      required this.sub,
+      required this.color,
+      required this.onTap});
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -527,17 +529,27 @@ class _NavRow extends StatelessWidget {
           border: Border.all(color: AppColors.border),
         ),
         child: Row(children: [
-          Container(width: 38, height: 38,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(10)),
-            child: Center(child: Icon(icon, size: 18, color: color))),
+          Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(10)),
+              child: Center(child: Icon(icon, size: 18, color: color))),
           const SizedBox(width: 14),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(label, style: GoogleFonts.outfit(
-                fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.text)),
-            Text(sub, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-          ])),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(label,
+                    style: GoogleFonts.outfit(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text)),
+                Text(sub,
+                    style: GoogleFonts.outfit(
+                        fontSize: 12, color: AppColors.text3)),
+              ])),
           Icon(Icons.chevron_right_rounded, color: AppColors.text3, size: 20),
         ]),
       ),
@@ -747,8 +759,8 @@ class _SocialScreenState extends State<_SocialScreen>
                     color: AppColors.text)),
             const SizedBox(height: 4),
             Text('Check back later',
-                style: GoogleFonts.outfit(
-                    fontSize: 13, color: AppColors.text3)),
+                style:
+                    GoogleFonts.outfit(fontSize: 13, color: AppColors.text3)),
           ],
         ),
       );
@@ -776,8 +788,8 @@ class _SocialScreenState extends State<_SocialScreen>
                       ? 'Following'
                       : 'Following (${followingAll.length})'),
             ],
-            labelStyle: GoogleFonts.outfit(
-                fontSize: 14, fontWeight: FontWeight.w700),
+            labelStyle:
+                GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w700),
             unselectedLabelStyle:
                 GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w500),
             labelColor: AppColors.text,
@@ -799,8 +811,7 @@ class _SocialScreenState extends State<_SocialScreen>
                     ? _emptyState('No followers yet')
                     : ListView(
                         padding: const EdgeInsets.symmetric(vertical: 8),
-                        children:
-                            _followers.map((u) => _userRow(u)).toList()),
+                        children: _followers.map((u) => _userRow(u)).toList()),
 
                 // ── Following tab (users + artists) ────────────────────
                 followingAll.isEmpty
@@ -809,8 +820,7 @@ class _SocialScreenState extends State<_SocialScreen>
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         children: [
                           ..._followingUsers.map((u) => _userRow(u)),
-                          ..._followingArtists
-                              .map((a) => _artistRow(a)),
+                          ..._followingArtists.map((a) => _artistRow(a)),
                         ],
                       ),
               ],
@@ -833,7 +843,10 @@ class _AllFollowedArtistsScreen extends StatelessWidget {
         backgroundColor: AppColors.bg2,
         elevation: 0,
         title: Text('Following',
-            style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.text)),
+            style: GoogleFonts.outfit(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: AppColors.text)),
         iconTheme: const IconThemeData(color: AppColors.text),
       ),
       body: ListView.builder(
@@ -841,44 +854,80 @@ class _AllFollowedArtistsScreen extends StatelessWidget {
         itemCount: artists.length,
         itemBuilder: (context, i) {
           final artist = artists[i];
-          final pic = (artist['picture_medium'] ?? artist['picture_xl'] ?? artist['picture'] ?? '').toString();
+          final pic = (artist['picture_medium'] ??
+                  artist['picture_xl'] ??
+                  artist['picture'] ??
+                  '')
+              .toString();
           final name = (artist['name'] ?? '').toString();
           final fans = artist['nb_fan'];
-          final fansNum = fans is int ? fans : int.tryParse(fans?.toString() ?? '') ?? 0;
+          final fansNum =
+              fans is int ? fans : int.tryParse(fans?.toString() ?? '') ?? 0;
           final fansStr = fansNum >= 1000000
               ? '${(fansNum / 1000000).toStringAsFixed(1)}M followers'
               : fansNum >= 1000
                   ? '${(fansNum / 1000).toStringAsFixed(0)}K followers'
-                  : fansNum > 0 ? '$fansNum followers' : 'Artist';
+                  : fansNum > 0
+                      ? '$fansNum followers'
+                      : 'Artist';
           return GestureDetector(
             onTap: () {
               final id = artist['id'];
               if (id != null) {
-                Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => ArtistScreen(artistId: id.toString(), artistName: name),
-                ));
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ArtistScreen(
+                          artistId: id.toString(), artistName: name),
+                    ));
               }
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
               child: Row(children: [
                 Container(
-                  width: 48, height: 48,
-                  decoration: BoxDecoration(shape: BoxShape.circle, gradient: AppColors.gradMixed),
-                  child: ClipOval(child: pic.isNotEmpty
-                      ? CachedNetworkImage(imageUrl: pic, fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) => Center(child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
-                              style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))))
-                      : Center(child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
-                          style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white)))),
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                      shape: BoxShape.circle, gradient: AppColors.gradMixed),
+                  child: ClipOval(
+                      child: pic.isNotEmpty
+                          ? CachedNetworkImage(
+                              imageUrl: pic,
+                              fit: BoxFit.cover,
+                              errorWidget: (_, __, ___) => Center(
+                                  child: Text(
+                                      name.isNotEmpty
+                                          ? name[0].toUpperCase()
+                                          : '?',
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.white))))
+                          : Center(
+                              child: Text(
+                                  name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white)))),
                 ),
                 const SizedBox(width: 14),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(name, style: GoogleFonts.outfit(
-                      fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.text)),
-                  Text(fansStr, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-                ])),
-                const Icon(Icons.chevron_right_rounded, color: AppColors.text3, size: 20),
+                Expanded(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Text(name,
+                          style: GoogleFonts.outfit(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.text)),
+                      Text(fansStr,
+                          style: GoogleFonts.outfit(
+                              fontSize: 12, color: AppColors.text3)),
+                    ])),
+                const Icon(Icons.chevron_right_rounded,
+                    color: AppColors.text3, size: 20),
               ]),
             ),
           );

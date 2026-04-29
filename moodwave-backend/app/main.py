@@ -40,7 +40,12 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    app.state.redis = await aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    app.state.redis = await aioredis.from_url(
+        settings.REDIS_URL,
+        decode_responses=True,
+        socket_connect_timeout=2,
+        socket_timeout=2,
+    )
     app.state.firebase_ready = firebase_svc.init_firebase()
     app.state.limiter = limiter
     if not scheduler.running:

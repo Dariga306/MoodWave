@@ -23,7 +23,8 @@ class _LibraryTabState extends State<LibraryTab> {
   int _filter = 0; // 0=All, 1=Playlists, 2=Albums, 3=Artists
   int _playlistSubFilter = 0; // 0=All, 1=My, 2=Platform
   bool _isGridMode = false;
-  int _sortOption = 0; // 0=Recently added, 1=A→Z, 2=Z→A, 3=By artist, 4=By track count
+  int _sortOption =
+      0; // 0=Recently added, 1=A→Z, 2=Z→A, 3=By artist, 4=By track count
 
   final _filters = ['All', 'Playlists', 'Albums', 'Artists'];
 
@@ -62,44 +63,57 @@ class _LibraryTabState extends State<LibraryTab> {
     if (_filter == 3) _loadArtists();
   }
 
-  Future<void> _loadAlbums() async {
-    if (_albumsLoaded) return;
+  Future<void> _loadAlbums({bool force = false}) async {
+    if (_albumsLoaded && !force) return;
     setState(() => _albumsLoading = true);
     try {
       final raw = await ApiService().getLikedAlbums();
       if (!mounted) return;
-      final albums = raw.map((item) => {
-        'id': item['id'],
-        'title': item['album_name']?.toString() ?? 'Unknown Album',
-        'artist': item['artist_name']?.toString() ?? '',
-        'cover_xl': item['cover_url']?.toString(),
-        'liked_count': 0,
-      }).toList();
+      final albums = raw
+          .map((item) => {
+                'id': item['id'],
+                'title': item['album_name']?.toString() ?? 'Unknown Album',
+                'artist': item['artist_name']?.toString() ?? '',
+                'cover_xl': item['cover_url']?.toString(),
+                'liked_count': 0,
+              })
+          .toList();
       setState(() {
         _albums = albums;
         _albumsLoaded = true;
         _albumsLoading = false;
       });
     } catch (_) {
-      if (mounted) setState(() { _albumsLoaded = true; _albumsLoading = false; });
+      if (mounted) {
+        setState(() {
+          _albumsLoaded = true;
+          _albumsLoading = false;
+        });
+      }
     }
   }
 
-  Future<void> _loadArtists() async {
-    if (_artistsLoaded) return;
+  Future<void> _loadArtists({bool force = false}) async {
+    if (_artistsLoaded && !force) return;
     setState(() => _artistsLoading = true);
     try {
       final raw = await ApiService().getFollowedArtistsDetails();
       if (!mounted) return;
       setState(() {
-        _artists = raw.whereType<Map>()
+        _artists = raw
+            .whereType<Map>()
             .map((e) => Map<String, dynamic>.from(e))
             .toList();
         _artistsLoaded = true;
         _artistsLoading = false;
       });
     } catch (_) {
-      if (mounted) setState(() { _artistsLoaded = true; _artistsLoading = false; });
+      if (mounted) {
+        setState(() {
+          _artistsLoaded = true;
+          _artistsLoading = false;
+        });
+      }
     }
   }
 
@@ -108,8 +122,8 @@ class _LibraryTabState extends State<LibraryTab> {
       _filter = i;
       _playlistSubFilter = 0;
     });
-    if (i == 2) _loadAlbums();
-    if (i == 3) _loadArtists();
+    if (i == 2) _loadAlbums(force: true);
+    if (i == 3) _loadArtists(force: true);
   }
 
   List<dynamic> get _filteredPlaylists {
@@ -129,21 +143,28 @@ class _LibraryTabState extends State<LibraryTab> {
     }
     switch (_sortOption) {
       case 1: // A → Z
-        list = List.from(list)..sort((a, b) => (a as Map)['title'].toString().toLowerCase()
-            .compareTo((b as Map)['title'].toString().toLowerCase()));
+        list = List.from(list)
+          ..sort((a, b) => (a as Map)['title']
+              .toString()
+              .toLowerCase()
+              .compareTo((b as Map)['title'].toString().toLowerCase()));
         break;
       case 2: // Z → A
-        list = List.from(list)..sort((a, b) => (b as Map)['title'].toString().toLowerCase()
-            .compareTo((a as Map)['title'].toString().toLowerCase()));
+        list = List.from(list)
+          ..sort((a, b) => (b as Map)['title']
+              .toString()
+              .toLowerCase()
+              .compareTo((a as Map)['title'].toString().toLowerCase()));
         break;
       case 3: // By track count (descending)
-        list = List.from(list)..sort((a, b) {
-          final ca = (a as Map)['track_count'] ?? (a)['tracks_count'] ?? 0;
-          final cb = (b as Map)['track_count'] ?? (b)['tracks_count'] ?? 0;
-          final ia = ca is int ? ca : int.tryParse(ca.toString()) ?? 0;
-          final ib = cb is int ? cb : int.tryParse(cb.toString()) ?? 0;
-          return ib.compareTo(ia);
-        });
+        list = List.from(list)
+          ..sort((a, b) {
+            final ca = (a as Map)['track_count'] ?? (a)['tracks_count'] ?? 0;
+            final cb = (b as Map)['track_count'] ?? (b)['tracks_count'] ?? 0;
+            final ia = ca is int ? ca : int.tryParse(ca.toString()) ?? 0;
+            final ib = cb is int ? cb : int.tryParse(cb.toString()) ?? 0;
+            return ib.compareTo(ia);
+          });
         break;
       case 0: // Recently added (newest first — default order)
       default:
@@ -172,30 +193,49 @@ class _LibraryTabState extends State<LibraryTab> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 36, height: 4,
+                width: 36,
+                height: 4,
                 margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(2)),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
                 child: Text('Sort by',
-                    style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text)),
+                    style: GoogleFonts.outfit(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.text)),
               ),
               const SizedBox(height: 8),
-              ...List.generate(options.length, (i) => ListTile(
-                leading: Icon(
-                  _sortOption == i ? Icons.radio_button_checked_rounded : Icons.radio_button_unchecked_rounded,
-                  size: 20, color: _sortOption == i ? AppColors.purpleLight : AppColors.text3,
-                ),
-                title: Text(options[i], style: GoogleFonts.outfit(
-                    fontSize: 15,
-                    fontWeight: _sortOption == i ? FontWeight.w700 : FontWeight.w400,
-                    color: _sortOption == i ? AppColors.purpleLight : AppColors.text)),
-                onTap: () {
-                  setState(() => _sortOption = i);
-                  Navigator.pop(ctx);
-                },
-              )),
+              ...List.generate(
+                  options.length,
+                  (i) => ListTile(
+                        leading: Icon(
+                          _sortOption == i
+                              ? Icons.radio_button_checked_rounded
+                              : Icons.radio_button_unchecked_rounded,
+                          size: 20,
+                          color: _sortOption == i
+                              ? AppColors.purpleLight
+                              : AppColors.text3,
+                        ),
+                        title: Text(options[i],
+                            style: GoogleFonts.outfit(
+                                fontSize: 15,
+                                fontWeight: _sortOption == i
+                                    ? FontWeight.w700
+                                    : FontWeight.w400,
+                                color: _sortOption == i
+                                    ? AppColors.purpleLight
+                                    : AppColors.text)),
+                        onTap: () {
+                          setState(() => _sortOption = i);
+                          Navigator.pop(ctx);
+                        },
+                      )),
             ],
           ),
         ),
@@ -236,38 +276,57 @@ class _LibraryTabState extends State<LibraryTab> {
                     // Header row
                     Row(children: [
                       GestureDetector(
-                        onTap: () => Navigator.push(context,
-                            MaterialPageRoute(builder: (_) => const ProfileTabScreen())),
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const ProfileTabScreen())),
                         child: Container(
-                          width: 36, height: 36,
+                          width: 36,
+                          height: 36,
                           decoration: BoxDecoration(
                             gradient: AppColors.gradMixed,
                             shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.purple.withOpacity(0.4), width: 1.5),
+                            border: Border.all(
+                                color: AppColors.purple.withOpacity(0.4),
+                                width: 1.5),
                           ),
                           child: avatarUrl != null && avatarUrl.isNotEmpty
-                              ? ClipOval(child: Image.network(avatarUrl, fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Center(child: Text(initial,
-                                      style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white)))))
-                              : Center(child: Text(initial,
-                                  style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white))),
+                              ? ClipOval(
+                                  child: Image.network(avatarUrl,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => Center(
+                                          child: Text(initial,
+                                              style: GoogleFonts.outfit(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: Colors.white)))))
+                              : Center(
+                                  child: Text(initial,
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w800,
+                                          color: Colors.white))),
                         ),
                       ),
                       const SizedBox(width: 10),
                       Text('Your Library',
                           style: GoogleFonts.outfit(
-                              fontSize: 22, fontWeight: FontWeight.w800,
-                              color: AppColors.text, letterSpacing: -0.3)),
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.text,
+                              letterSpacing: -0.3)),
                       const Spacer(),
                       GestureDetector(
                         onTap: _openCreatePlaylist,
                         child: Container(
-                          width: 36, height: 36,
+                          width: 36,
+                          height: 36,
                           decoration: BoxDecoration(
                             gradient: AppColors.gradPurple,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.add_rounded, size: 20, color: Colors.white),
+                          child: const Icon(Icons.add_rounded,
+                              size: 20, color: Colors.white),
                         ),
                       ),
                     ]),
@@ -282,16 +341,25 @@ class _LibraryTabState extends State<LibraryTab> {
                           onTap: () => _onFilterChanged(i),
                           child: Container(
                             margin: const EdgeInsets.only(right: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 7),
                             decoration: BoxDecoration(
-                              gradient: _filter == i ? AppColors.gradPurple : null,
+                              gradient:
+                                  _filter == i ? AppColors.gradPurple : null,
                               color: _filter == i ? null : AppColors.glass,
                               borderRadius: BorderRadius.circular(100),
-                              border: Border.all(color: _filter == i ? AppColors.purple : AppColors.border),
+                              border: Border.all(
+                                  color: _filter == i
+                                      ? AppColors.purple
+                                      : AppColors.border),
                             ),
                             child: Text(_filters[i],
-                                style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600,
-                                    color: _filter == i ? Colors.white : AppColors.text2)),
+                                style: GoogleFonts.outfit(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: _filter == i
+                                        ? Colors.white
+                                        : AppColors.text2)),
                           ),
                         ),
                       ),
@@ -304,11 +372,23 @@ class _LibraryTabState extends State<LibraryTab> {
                         child: ListView(
                           scrollDirection: Axis.horizontal,
                           children: [
-                            _SubFilter(label: 'All', active: _playlistSubFilter == 0, onTap: () => setState(() => _playlistSubFilter = 0)),
+                            _SubFilter(
+                                label: 'All',
+                                active: _playlistSubFilter == 0,
+                                onTap: () =>
+                                    setState(() => _playlistSubFilter = 0)),
                             const SizedBox(width: 8),
-                            _SubFilter(label: 'My Playlists', active: _playlistSubFilter == 1, onTap: () => setState(() => _playlistSubFilter = 1)),
+                            _SubFilter(
+                                label: 'My Playlists',
+                                active: _playlistSubFilter == 1,
+                                onTap: () =>
+                                    setState(() => _playlistSubFilter = 1)),
                             const SizedBox(width: 8),
-                            _SubFilter(label: 'Saved', active: _playlistSubFilter == 2, onTap: () => setState(() => _playlistSubFilter = 2)),
+                            _SubFilter(
+                                label: 'Saved',
+                                active: _playlistSubFilter == 2,
+                                onTap: () =>
+                                    setState(() => _playlistSubFilter = 2)),
                           ],
                         ),
                       ),
@@ -320,20 +400,33 @@ class _LibraryTabState extends State<LibraryTab> {
                         GestureDetector(
                           onTap: _showSortSheet,
                           child: Row(children: [
-                            const Icon(Icons.sort_rounded, size: 16, color: AppColors.text2),
+                            const Icon(Icons.sort_rounded,
+                                size: 16, color: AppColors.text2),
                             const SizedBox(width: 4),
                             Text(
-                              const ['Recently added', 'A → Z', 'Z → A', 'By track count'][_sortOption],
-                              style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text2),
+                              const [
+                                'Recently added',
+                                'A → Z',
+                                'Z → A',
+                                'By track count'
+                              ][_sortOption],
+                              style: GoogleFonts.outfit(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.text2),
                             ),
                           ]),
                         ),
                         const Spacer(),
                         GestureDetector(
-                          onTap: () => setState(() => _isGridMode = !_isGridMode),
+                          onTap: () =>
+                              setState(() => _isGridMode = !_isGridMode),
                           child: Icon(
-                            _isGridMode ? Icons.view_list_rounded : Icons.grid_view_rounded,
-                            size: 20, color: AppColors.text2,
+                            _isGridMode
+                                ? Icons.view_list_rounded
+                                : Icons.grid_view_rounded,
+                            size: 20,
+                            color: AppColors.text2,
                           ),
                         ),
                       ]),
@@ -347,12 +440,15 @@ class _LibraryTabState extends State<LibraryTab> {
             if (_filter == 0 || _filter == 1)
               SliverToBoxAdapter(
                 child: GestureDetector(
-                  onTap: () => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const LikedSongsScreen())),
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const LikedSongsScreen())),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
                           colors: [Color(0xFF4C1D95), Color(0xFF7C3AED)],
@@ -361,21 +457,31 @@ class _LibraryTabState extends State<LibraryTab> {
                       ),
                       child: Row(children: [
                         Container(
-                          width: 52, height: 52,
+                          width: 52,
+                          height: 52,
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.15),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.favorite_rounded, color: Colors.white, size: 26),
+                          child: const Icon(Icons.favorite_rounded,
+                              color: Colors.white, size: 26),
                         ),
                         const SizedBox(width: 14),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('Liked Songs',
-                              style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
-                          Text('Your favourite tracks',
-                              style: GoogleFonts.outfit(fontSize: 12, color: Colors.white70)),
-                        ])),
-                        const Icon(Icons.chevron_right_rounded, color: Colors.white70, size: 20),
+                        Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              Text('Liked Songs',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white)),
+                              Text('Your favourite tracks',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 12, color: Colors.white70)),
+                            ])),
+                        const Icon(Icons.chevron_right_rounded,
+                            color: Colors.white70, size: 20),
                       ]),
                     ),
                   ),
@@ -384,29 +490,37 @@ class _LibraryTabState extends State<LibraryTab> {
 
             if (_loading)
               const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight)),
+                child: Center(
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.purpleLight)),
               )
 
             // ── Albums filter ─────────────────────────────────────────
             else if (_filter == 2 && _albumsLoading)
               const SliverFillRemaining(
                 hasScrollBody: false,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight)),
+                child: Center(
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.purpleLight)),
               )
-
             else if (_filter == 2)
               _albums.isEmpty
                   ? SliverFillRemaining(
                       hasScrollBody: false,
                       child: Center(
-                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        child:
+                            Column(mainAxisSize: MainAxisSize.min, children: [
                           const Text('💿', style: TextStyle(fontSize: 48)),
                           const SizedBox(height: 12),
                           Text('No albums yet',
-                              style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.text)),
+                              style: GoogleFonts.outfit(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.text)),
                           const SizedBox(height: 6),
                           Text('Like an album to save it here',
-                              style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3)),
+                              style: GoogleFonts.outfit(
+                                  fontSize: 13, color: AppColors.text3)),
                         ]),
                       ),
                     )
@@ -414,62 +528,98 @@ class _LibraryTabState extends State<LibraryTab> {
                       delegate: SliverChildBuilderDelegate(
                         (ctx, i) {
                           final album = _albums[i];
-                          final name = (album['title'] ?? 'Unknown Album').toString();
+                          final name =
+                              (album['title'] ?? 'Unknown Album').toString();
                           final artist = (album['artist'] ?? '').toString();
                           final cover = album['cover_xl']?.toString();
                           final albumId = album['id'];
                           return GestureDetector(
                             onTap: () {
                               if (albumId != null) {
-                                final id = albumId is int ? albumId : int.tryParse(albumId.toString());
+                                final id = albumId is int
+                                    ? albumId
+                                    : int.tryParse(albumId.toString());
                                 if (id != null) {
-                                  Navigator.push(ctx, MaterialPageRoute(
-                                    builder: (_) => AlbumScreen(albumId: id),
-                                  ));
+                                  Navigator.push(
+                                      ctx,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            AlbumScreen(albumId: id),
+                                      ));
                                 }
                               }
                             },
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 7),
                               child: Row(children: [
                                 Container(
-                                  width: 56, height: 56,
+                                  width: 56,
+                                  height: 56,
                                   decoration: BoxDecoration(
                                     gradient: AppColors.gradMixed,
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: cover != null
                                       ? ClipRRect(
-                                          borderRadius: BorderRadius.circular(10),
+                                          borderRadius:
+                                              BorderRadius.circular(10),
                                           child: CachedNetworkImage(
-                                              imageUrl: cover, fit: BoxFit.cover,
-                                              errorWidget: (_, __, ___) => const Center(
-                                                  child: Text('💿', style: TextStyle(fontSize: 22)))))
-                                      : const Center(child: Text('💿', style: TextStyle(fontSize: 22))),
+                                              imageUrl: cover,
+                                              fit: BoxFit.cover,
+                                              errorWidget: (_, __, ___) =>
+                                                  const Center(
+                                                      child: Text('💿',
+                                                          style: TextStyle(
+                                                              fontSize: 22)))))
+                                      : const Center(
+                                          child: Text('💿',
+                                              style: TextStyle(fontSize: 22))),
                                 ),
                                 const SizedBox(width: 14),
-                                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                  Text(name, style: GoogleFonts.outfit(
-                                      fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.text),
-                                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                                  Row(children: [
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      margin: const EdgeInsets.only(right: 6),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.purple.withOpacity(0.15),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text('Album', style: GoogleFonts.outfit(
-                                          fontSize: 10, fontWeight: FontWeight.w700,
-                                          color: AppColors.purpleLight)),
-                                    ),
-                                    Expanded(child: Text(artist, style: GoogleFonts.outfit(
-                                        fontSize: 12, color: AppColors.text3),
-                                        maxLines: 1, overflow: TextOverflow.ellipsis)),
-                                  ]),
-                                ])),
-                                const Icon(Icons.chevron_right_rounded, color: AppColors.text3, size: 20),
+                                Expanded(
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                      Text(name,
+                                          style: GoogleFonts.outfit(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600,
+                                              color: AppColors.text),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis),
+                                      Row(children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 2),
+                                          margin:
+                                              const EdgeInsets.only(right: 6),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.purple
+                                                .withOpacity(0.15),
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                          ),
+                                          child: Text('Album',
+                                              style: GoogleFonts.outfit(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w700,
+                                                  color:
+                                                      AppColors.purpleLight)),
+                                        ),
+                                        Expanded(
+                                            child: Text(artist,
+                                                style: GoogleFonts.outfit(
+                                                    fontSize: 12,
+                                                    color: AppColors.text3),
+                                                maxLines: 1,
+                                                overflow:
+                                                    TextOverflow.ellipsis)),
+                                      ]),
+                                    ])),
+                                const Icon(Icons.chevron_right_rounded,
+                                    color: AppColors.text3, size: 20),
                               ]),
                             ),
                           );
@@ -482,22 +632,28 @@ class _LibraryTabState extends State<LibraryTab> {
             else if (_filter == 3 && _artistsLoading)
               const SliverFillRemaining(
                 hasScrollBody: false,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight)),
+                child: Center(
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.purpleLight)),
               )
-
             else if (_filter == 3)
               _artists.isEmpty
                   ? SliverFillRemaining(
                       hasScrollBody: false,
                       child: Center(
-                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        child:
+                            Column(mainAxisSize: MainAxisSize.min, children: [
                           const Text('🎤', style: TextStyle(fontSize: 48)),
                           const SizedBox(height: 12),
                           Text('No followed artists yet',
-                              style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.text)),
+                              style: GoogleFonts.outfit(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.text)),
                           const SizedBox(height: 6),
                           Text('Follow artists to see them here',
-                              style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3)),
+                              style: GoogleFonts.outfit(
+                                  fontSize: 13, color: AppColors.text3)),
                         ]),
                       ),
                     )
@@ -505,35 +661,44 @@ class _LibraryTabState extends State<LibraryTab> {
                       delegate: SliverChildBuilderDelegate(
                         (ctx, i) {
                           final artist = _artists[i];
-                          final name = (artist['name'] ?? 'Unknown Artist').toString();
-                          final pic = artist['picture_medium']?.toString()
-                              ?? artist['picture_xl']?.toString()
-                              ?? artist['picture']?.toString()
-                              ?? artist['image_url']?.toString();
+                          final name =
+                              (artist['name'] ?? 'Unknown Artist').toString();
+                          final pic = artist['picture_medium']?.toString() ??
+                              artist['picture_xl']?.toString() ??
+                              artist['picture']?.toString() ??
+                              artist['image_url']?.toString();
                           final fans = artist['nb_fan'];
                           final artistId = artist['id'];
-                          final fansNum = fans is int ? fans : int.tryParse(fans?.toString() ?? '') ?? 0;
+                          final fansNum = fans is int
+                              ? fans
+                              : int.tryParse(fans?.toString() ?? '') ?? 0;
                           final fansStr = fansNum >= 1000000
                               ? '${(fansNum / 1000000).toStringAsFixed(1)}M followers'
                               : fansNum >= 1000
                                   ? '${(fansNum / 1000).toStringAsFixed(0)}K followers'
-                                  : fansNum > 0 ? '$fansNum followers' : 'Artist';
+                                  : fansNum > 0
+                                      ? '$fansNum followers'
+                                      : 'Artist';
                           return GestureDetector(
                             onTap: () {
                               if (artistId != null) {
-                                Navigator.push(ctx, MaterialPageRoute(
-                                  builder: (_) => ArtistScreen(
-                                    artistId: artistId.toString(),
-                                    artistName: name,
-                                  ),
-                                ));
+                                Navigator.push(
+                                    ctx,
+                                    MaterialPageRoute(
+                                      builder: (_) => ArtistScreen(
+                                        artistId: artistId.toString(),
+                                        artistName: name,
+                                      ),
+                                    ));
                               }
                             },
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 7),
                               child: Row(children: [
                                 Container(
-                                  width: 56, height: 56,
+                                  width: 56,
+                                  height: 56,
                                   decoration: BoxDecoration(
                                     gradient: AppColors.gradPink,
                                     shape: BoxShape.circle,
@@ -541,25 +706,42 @@ class _LibraryTabState extends State<LibraryTab> {
                                   child: pic != null
                                       ? ClipOval(
                                           child: CachedNetworkImage(
-                                              imageUrl: pic, fit: BoxFit.cover,
+                                              imageUrl: pic,
+                                              fit: BoxFit.cover,
                                               errorWidget: (_, __, ___) => Center(
-                                                  child: Text(name[0].toUpperCase(),
+                                                  child: Text(
+                                                      name[0].toUpperCase(),
                                                       style: GoogleFonts.outfit(
-                                                          fontSize: 20, fontWeight: FontWeight.w700,
-                                                          color: Colors.white)))))
+                                                          fontSize: 20,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                          color:
+                                                              Colors.white)))))
                                       : Center(
                                           child: Text(name[0].toUpperCase(),
                                               style: GoogleFonts.outfit(
-                                                  fontSize: 20, fontWeight: FontWeight.w700,
+                                                  fontSize: 20,
+                                                  fontWeight: FontWeight.w700,
                                                   color: Colors.white))),
                                 ),
                                 const SizedBox(width: 14),
-                                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                  Text(name, style: GoogleFonts.outfit(
-                                      fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.text)),
-                                  Text(fansStr, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-                                ])),
-                                const Icon(Icons.chevron_right_rounded, color: AppColors.text3, size: 20),
+                                Expanded(
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                      Text(name,
+                                          style: GoogleFonts.outfit(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600,
+                                              color: AppColors.text)),
+                                      Text(fansStr,
+                                          style: GoogleFonts.outfit(
+                                              fontSize: 12,
+                                              color: AppColors.text3)),
+                                    ])),
+                                const Icon(Icons.chevron_right_rounded,
+                                    color: AppColors.text3, size: 20),
                               ]),
                             ),
                           );
@@ -576,18 +758,28 @@ class _LibraryTabState extends State<LibraryTab> {
                     const Text('🎵', style: TextStyle(fontSize: 56)),
                     const SizedBox(height: 14),
                     Text('Your library is empty',
-                        style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.text)),
+                        style: GoogleFonts.outfit(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.text)),
                     const SizedBox(height: 6),
                     Text('Create your first playlist',
-                        style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+                        style: GoogleFonts.outfit(
+                            fontSize: 14, color: AppColors.text2)),
                     const SizedBox(height: 20),
                     GestureDetector(
                       onTap: _openCreatePlaylist,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                        decoration: BoxDecoration(gradient: AppColors.primaryBtn, borderRadius: BorderRadius.circular(14)),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 24, vertical: 12),
+                        decoration: BoxDecoration(
+                            gradient: AppColors.primaryBtn,
+                            borderRadius: BorderRadius.circular(14)),
                         child: Text('Create Playlist',
-                            style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
+                            style: GoogleFonts.outfit(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white)),
                       ),
                     ),
                   ]),
@@ -637,23 +829,29 @@ class _SubFilter extends StatelessWidget {
   final String label;
   final bool active;
   final VoidCallback onTap;
-  const _SubFilter({required this.label, required this.active, required this.onTap});
+  const _SubFilter(
+      {required this.label, required this.active, required this.onTap});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: active ? AppColors.purple.withOpacity(0.25) : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: active ? AppColors.purple : AppColors.border),
-      ),
-      child: Text(label, style: GoogleFonts.outfit(
-          fontSize: 12, fontWeight: FontWeight.w600,
-          color: active ? AppColors.purpleLight : AppColors.text3)),
-    ),
-  );
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: active
+                ? AppColors.purple.withOpacity(0.25)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border:
+                Border.all(color: active ? AppColors.purple : AppColors.border),
+          ),
+          child: Text(label,
+              style: GoogleFonts.outfit(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: active ? AppColors.purpleLight : AppColors.text3)),
+        ),
+      );
 }
 
 // ── Badge widget ────────────────────────────────────────────────────────────
@@ -692,9 +890,11 @@ class _VisibilityBadge extends StatelessWidget {
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)),
-      child: Text(label, style: GoogleFonts.outfit(
-          fontSize: 10, fontWeight: FontWeight.w700, color: text)),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)),
+      child: Text(label,
+          style: GoogleFonts.outfit(
+              fontSize: 10, fontWeight: FontWeight.w700, color: text)),
     );
   }
 }
@@ -710,10 +910,13 @@ class _PlaylistItem extends StatelessWidget {
     final id = playlist['id'] as int? ?? 0;
     final title = (playlist['title'] ?? 'Untitled').toString();
 
-    Widget item(IconData icon, String label, VoidCallback onTap, {Color? color}) {
+    Widget item(IconData icon, String label, VoidCallback onTap,
+        {Color? color}) {
       return ListTile(
         leading: Icon(icon, size: 22, color: color ?? AppColors.text3),
-        title: Text(label, style: GoogleFonts.outfit(fontSize: 15, color: color ?? AppColors.text)),
+        title: Text(label,
+            style: GoogleFonts.outfit(
+                fontSize: 15, color: color ?? AppColors.text)),
         onTap: onTap,
       );
     }
@@ -731,26 +934,39 @@ class _PlaylistItem extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 36, height: 4,
+                width: 36,
+                height: 4,
                 margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(2)),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
                 child: Row(children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(
                       color: AppColors.purple.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(6),
                     ),
-                    child: Text('Playlist', style: GoogleFonts.outfit(
-                        fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.purpleLight)),
+                    child: Text('Playlist',
+                        style: GoogleFonts.outfit(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.purpleLight)),
                   ),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(title,
-                      style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text),
-                      maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  Expanded(
+                      child: Text(title,
+                          style: GoogleFonts.outfit(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.text),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis)),
                 ]),
               ),
               const SizedBox(height: 8),
@@ -763,9 +979,12 @@ class _PlaylistItem extends StatelessWidget {
               }),
               item(Icons.add_rounded, 'Add tracks', () {
                 Navigator.pop(ctx);
-                Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => PlaylistScreen(playlistId: id, playlistTitle: title),
-                ));
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          PlaylistScreen(playlistId: id, playlistTitle: title),
+                    ));
               }),
               item(Icons.download_outlined, 'Download', () {
                 Navigator.pop(ctx);
@@ -775,9 +994,12 @@ class _PlaylistItem extends StatelessWidget {
               }),
               item(Icons.edit_rounded, 'Edit playlist', () {
                 Navigator.pop(ctx);
-                Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => CreatePlaylistScreen(existingPlaylist: playlist),
-                )).then((_) => onRefresh());
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          CreatePlaylistScreen(existingPlaylist: playlist),
+                    )).then((_) => onRefresh());
               }),
               item(Icons.delete_rounded, 'Delete playlist', () {
                 Navigator.pop(ctx);
@@ -798,7 +1020,8 @@ class _PlaylistItem extends StatelessWidget {
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Rename Playlist',
-            style: GoogleFonts.outfit(fontWeight: FontWeight.w800, color: AppColors.text)),
+            style: GoogleFonts.outfit(
+                fontWeight: FontWeight.w800, color: AppColors.text)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -806,21 +1029,30 @@ class _PlaylistItem extends StatelessWidget {
           decoration: InputDecoration(
             hintText: 'Playlist name',
             hintStyle: GoogleFonts.outfit(color: AppColors.text3),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: AppColors.border)),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+            focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: AppColors.purple)),
-            filled: true, fillColor: AppColors.glass,
+            filled: true,
+            fillColor: AppColors.glass,
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
-              child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel',
+                  style: GoogleFonts.outfit(color: AppColors.text3))),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.purple,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-            child: Text('Save', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w700)),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.purple,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12))),
+            child: Text('Save',
+                style: GoogleFonts.outfit(
+                    color: Colors.white, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -841,17 +1073,24 @@ class _PlaylistItem extends StatelessWidget {
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Delete Playlist',
-            style: GoogleFonts.outfit(fontWeight: FontWeight.w800, color: AppColors.text)),
+            style: GoogleFonts.outfit(
+                fontWeight: FontWeight.w800, color: AppColors.text)),
         content: Text('This action cannot be undone.',
             style: GoogleFonts.outfit(color: AppColors.text2)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
-              child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel',
+                  style: GoogleFonts.outfit(color: AppColors.text3))),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-            child: Text('Delete', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w700)),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12))),
+            child: Text('Delete',
+                style: GoogleFonts.outfit(
+                    color: Colors.white, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -874,16 +1113,19 @@ class _PlaylistItem extends StatelessWidget {
     final visibility = (playlist['visibility'] ?? 'private').toString();
 
     return GestureDetector(
-      onTap: () => Navigator.push(context,
-          MaterialPageRoute(builder: (_) => PlaylistScreen(
-            playlistId: id,
-            playlistTitle: title.toString(),
-          ))),
+      onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => PlaylistScreen(
+                    playlistId: id,
+                    playlistTitle: title.toString(),
+                  ))),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
         child: Row(children: [
           Container(
-            width: 56, height: 56,
+            width: 56,
+            height: 56,
             decoration: BoxDecoration(
               gradient: AppColors.gradMixed,
               borderRadius: BorderRadius.circular(10),
@@ -891,22 +1133,33 @@ class _PlaylistItem extends StatelessWidget {
             child: coverUrl != null
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(10),
-                    child: CachedNetworkImage(imageUrl: coverUrl, fit: BoxFit.cover,
+                    child: CachedNetworkImage(
+                        imageUrl: coverUrl,
+                        fit: BoxFit.cover,
                         placeholder: (_, __) => const SizedBox(),
-                        errorWidget: (_, __, ___) => const Center(child: Text('🎵', style: TextStyle(fontSize: 22)))))
-                : const Center(child: Text('🎵', style: TextStyle(fontSize: 22))),
+                        errorWidget: (_, __, ___) => const Center(
+                            child: Text('🎵', style: TextStyle(fontSize: 22)))))
+                : const Center(
+                    child: Text('🎵', style: TextStyle(fontSize: 22))),
           ),
           const SizedBox(width: 14),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(title,
-                  style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.text),
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
+                  style: GoogleFonts.outfit(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.text),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
               const SizedBox(height: 4),
               Row(children: [
                 _VisibilityBadge(visibility),
                 const SizedBox(width: 6),
-                Text('$trackCount songs', style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+                Text('$trackCount songs',
+                    style: GoogleFonts.outfit(
+                        fontSize: 12, color: AppColors.text3)),
               ]),
             ]),
           ),
@@ -915,7 +1168,8 @@ class _PlaylistItem extends StatelessWidget {
             behavior: HitTestBehavior.opaque,
             child: const Padding(
               padding: EdgeInsets.all(8),
-              child: Icon(Icons.more_vert_rounded, size: 20, color: AppColors.text3),
+              child: Icon(Icons.more_vert_rounded,
+                  size: 20, color: AppColors.text3),
             ),
           ),
         ]),
@@ -940,11 +1194,13 @@ class _PlaylistGridItem extends StatelessWidget {
     final visibility = (playlist['visibility'] ?? 'private').toString();
 
     return GestureDetector(
-      onTap: () => Navigator.push(context,
-          MaterialPageRoute(builder: (_) => PlaylistScreen(
-            playlistId: id,
-            playlistTitle: title.toString(),
-          ))),
+      onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => PlaylistScreen(
+                    playlistId: id,
+                    playlistTitle: title.toString(),
+                  ))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         AspectRatio(
           aspectRatio: 1,
@@ -956,22 +1212,33 @@ class _PlaylistGridItem extends StatelessWidget {
             child: coverUrl != null
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(14),
-                    child: CachedNetworkImage(imageUrl: coverUrl, fit: BoxFit.cover,
-                        errorWidget: (_, __, ___) => const Center(child: Text('🎵', style: TextStyle(fontSize: 36)))))
-                : const Center(child: Text('🎵', style: TextStyle(fontSize: 36))),
+                    child: CachedNetworkImage(
+                        imageUrl: coverUrl,
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) => const Center(
+                            child: Text('🎵', style: TextStyle(fontSize: 36)))))
+                : const Center(
+                    child: Text('🎵', style: TextStyle(fontSize: 36))),
           ),
         ),
         const SizedBox(height: 6),
         Text(title.toString(),
-            style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text),
-            maxLines: 1, overflow: TextOverflow.ellipsis),
+            style: GoogleFonts.outfit(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.text),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis),
         const SizedBox(height: 2),
         Row(children: [
           _VisibilityBadge(visibility),
           const SizedBox(width: 6),
-          Flexible(child: Text('$trackCount songs',
-              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3),
-              maxLines: 1, overflow: TextOverflow.ellipsis)),
+          Flexible(
+              child: Text('$trackCount songs',
+                  style:
+                      GoogleFonts.outfit(fontSize: 11, color: AppColors.text3),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis)),
         ]),
       ]),
     );

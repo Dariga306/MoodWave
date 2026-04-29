@@ -37,6 +37,106 @@ class _SearchTabState extends State<SearchTab> {
   bool _searching = false;
   bool _hasQuery = false;
 
+  String _normalizeSearchText(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9а-яё]+'), ' ')
+        .trim();
+  }
+
+  int _scoreSearchMatch(
+    String query,
+    String primary, {
+    String secondary = '',
+  }) {
+    final q = _normalizeSearchText(query);
+    final first = _normalizeSearchText(primary);
+    final second = _normalizeSearchText(secondary);
+    if (q.isEmpty) return 0;
+
+    var score = 0;
+    if (first == q) score += 120;
+    if (first.startsWith(q)) score += 70;
+    if (first.contains(q)) score += 40;
+    if (second == q) score += 30;
+    if (second.startsWith(q)) score += 20;
+    if (second.contains(q)) score += 10;
+    return score;
+  }
+
+  List<Map<String, dynamic>> _sortAlbums(
+    List<Map<String, dynamic>> items,
+    String query,
+  ) {
+    final sorted = List<Map<String, dynamic>>.from(items);
+    sorted.sort((a, b) {
+      final aScore = _scoreSearchMatch(
+        query,
+        a['title']?.toString() ?? '',
+        secondary: a['artist']?.toString() ?? '',
+      );
+      final bScore = _scoreSearchMatch(
+        query,
+        b['title']?.toString() ?? '',
+        secondary: b['artist']?.toString() ?? '',
+      );
+      if (aScore != bScore) return bScore.compareTo(aScore);
+      final aTracks = int.tryParse('${a['nb_tracks'] ?? 0}') ?? 0;
+      final bTracks = int.tryParse('${b['nb_tracks'] ?? 0}') ?? 0;
+      if (aTracks != bTracks) return bTracks.compareTo(aTracks);
+      return (a['title']?.toString() ?? '')
+          .toLowerCase()
+          .compareTo((b['title']?.toString() ?? '').toLowerCase());
+    });
+    return sorted;
+  }
+
+  List<Map<String, dynamic>> _sortTracks(
+    List<Map<String, dynamic>> items,
+    String query,
+  ) {
+    final sorted = List<Map<String, dynamic>>.from(items);
+    sorted.sort((a, b) {
+      final aScore = _scoreSearchMatch(
+        query,
+        a['title']?.toString() ?? a['trackName']?.toString() ?? '',
+        secondary: a['artist']?.toString() ?? a['artistName']?.toString() ?? '',
+      );
+      final bScore = _scoreSearchMatch(
+        query,
+        b['title']?.toString() ?? b['trackName']?.toString() ?? '',
+        secondary: b['artist']?.toString() ?? b['artistName']?.toString() ?? '',
+      );
+      if (aScore != bScore) return bScore.compareTo(aScore);
+      return (a['title']?.toString() ?? a['trackName']?.toString() ?? '')
+          .toLowerCase()
+          .compareTo(
+            (b['title']?.toString() ?? b['trackName']?.toString() ?? '')
+                .toLowerCase(),
+          );
+    });
+    return sorted;
+  }
+
+  List<Map<String, dynamic>> _sortArtists(
+    List<Map<String, dynamic>> items,
+    String query,
+  ) {
+    final sorted = List<Map<String, dynamic>>.from(items);
+    sorted.sort((a, b) {
+      final aScore = _scoreSearchMatch(query, a['name']?.toString() ?? '');
+      final bScore = _scoreSearchMatch(query, b['name']?.toString() ?? '');
+      if (aScore != bScore) return bScore.compareTo(aScore);
+      final aFans = int.tryParse('${a['nb_fan'] ?? 0}') ?? 0;
+      final bFans = int.tryParse('${b['nb_fan'] ?? 0}') ?? 0;
+      if (aFans != bFans) return bFans.compareTo(aFans);
+      return (a['name']?.toString() ?? '')
+          .toLowerCase()
+          .compareTo((b['name']?.toString() ?? '').toLowerCase());
+    });
+    return sorted;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -62,7 +162,8 @@ class _SearchTabState extends State<SearchTab> {
   Future<void> _loadTrending() async {
     try {
       final resp = await ApiService().globalSearch('');
-      final trending = (resp['trending'] as List?)?.map((e) => e.toString()).toList() ?? [];
+      final trending =
+          (resp['trending'] as List?)?.map((e) => e.toString()).toList() ?? [];
       if (!mounted) return;
       setState(() => _trendingSearches = trending.take(10).toList());
     } catch (_) {}
@@ -133,6 +234,21 @@ class _SearchTabState extends State<SearchTab> {
     );
   }
 
+  void _openAlbum(Map<String, dynamic> album) {
+    final albumId = int.tryParse(album['id'].toString()) ?? 0;
+    if (albumId <= 0) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AlbumScreen(
+          albumId: albumId,
+          initialTitle: album['title']?.toString(),
+          initialCover: album['cover_xl']?.toString(),
+        ),
+      ),
+    );
+  }
+
   void _useHistoryItem(Map<String, dynamic> item) {
     final query = item['query']?.toString() ?? '';
     if (query.isEmpty) return;
@@ -158,13 +274,13 @@ class _SearchTabState extends State<SearchTab> {
       _hasQuery = true;
       _searching = true;
     });
-    _suggestionDebounce = Timer(const Duration(milliseconds: 150), () async {
+    _suggestionDebounce = Timer(const Duration(milliseconds: 90), () async {
       final sug = await ApiService().getSearchSuggestions(q.trim());
       if (!mounted) return;
       setState(() => _suggestions = sug);
     });
     _debounce = Timer(
-      const Duration(milliseconds: 300),
+      const Duration(milliseconds: 220),
       () => _search(q.trim()),
     );
   }
@@ -196,7 +312,13 @@ class _SearchTabState extends State<SearchTab> {
       ]);
       if (!mounted) return;
 
-      final tracks = (results[0] as List?) ?? [];
+      final tracks = _sortTracks(
+        ((results[0] as List?) ?? [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
+        q,
+      );
 
       final seenArtistIds = <String>{};
       final artists = <Map<String, dynamic>>[];
@@ -208,14 +330,17 @@ class _SearchTabState extends State<SearchTab> {
         }
       }
 
-      final albums = ((results[2] as List?) ?? [])
-          .whereType<Map>()
-          .map((e) => Map<String, dynamic>.from(e))
-          .toList();
+      final albums = _sortAlbums(
+        ((results[2] as List?) ?? [])
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList(),
+        q,
+      );
 
       setState(() {
         _tracks = tracks;
-        _artists = artists;
+        _artists = _sortArtists(artists, artistQuery);
         _albums = albums;
         _searching = false;
       });
@@ -228,9 +353,7 @@ class _SearchTabState extends State<SearchTab> {
   List<Widget> _buildSuggestions() {
     final q = _ctrl.text.trim();
     if (q.isEmpty) return [];
-    final items = _suggestions.isNotEmpty
-        ? _suggestions
-        : [q, '$q song', '$q official audio', '$q lyrics', '$q remix'];
+    final items = _suggestions.isNotEmpty ? _suggestions : [q];
     return items
         .map((s) => _SuggestionRow(
               text: s,
@@ -279,19 +402,9 @@ class _SearchTabState extends State<SearchTab> {
 
     // Albums
     for (final album in albumList) {
-      final albumId = int.tryParse(album['id'].toString()) ?? 0;
       widgets.add(_FlatAlbumRow(
         album: album,
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => AlbumScreen(
-              albumId: albumId,
-              initialTitle: album['title']?.toString(),
-              initialCover: album['cover_xl']?.toString(),
-            ),
-          ),
-        ),
+        onTap: () => _openAlbum(album),
       ));
     }
 
@@ -301,7 +414,41 @@ class _SearchTabState extends State<SearchTab> {
       widgets.add(_FlatTrackRow(track: t, onTap: () => _openTrack(t)));
     }
 
+    if (trackList.isNotEmpty || artistList.isNotEmpty || albumList.isNotEmpty) {
+      widgets.add(
+        _ShowAllResultsRow(
+          query: _ctrl.text.trim(),
+          onTap: _openAllResults,
+        ),
+      );
+    }
+
     return widgets;
+  }
+
+  void _openAllResults() {
+    final query = _ctrl.text.trim();
+    if (query.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _SearchResultsScreen(
+          query: query,
+          initialTracks: _tracks
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList(),
+          initialArtists: _artists
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList(),
+          initialAlbums: _albums
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList(),
+        ),
+      ),
+    );
   }
 
   Future<void> _openArtist(Map<String, dynamic> artist) async {
@@ -566,23 +713,53 @@ class _SearchTabState extends State<SearchTab> {
                     childAspectRatio: 1.4,
                     children: [
                       _ExploreCard(
-                          '🌍', 'Discover', AppColors.gradBlue,
-                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscoverScreen()))),
+                          '🌍',
+                          'Discover',
+                          AppColors.gradBlue,
+                          () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const DiscoverScreen()))),
                       _ExploreCard(
-                          '🏙', 'Charts', AppColors.gradPurple,
-                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CityChartsScreen()))),
+                          '🏙',
+                          'Charts',
+                          AppColors.gradPurple,
+                          () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const CityChartsScreen()))),
                       _ExploreCard(
-                          '📻', 'Radio', AppColors.gradMixed,
-                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RadioScreen()))),
+                          '📻',
+                          'Radio',
+                          AppColors.gradMixed,
+                          () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const RadioScreen()))),
                       _ExploreCard(
-                          '🎉', 'Party', AppColors.gradPink,
-                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BrowseRoomsScreen()))),
+                          '🎉',
+                          'Party',
+                          AppColors.gradPink,
+                          () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const BrowseRoomsScreen()))),
                       _ExploreCard(
-                          '✦', 'AI Mix', AppColors.gradOrange,
-                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AIPlaylistScreen()))),
+                          '✦',
+                          'AI Mix',
+                          AppColors.gradOrange,
+                          () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const AIPlaylistScreen()))),
                       _ExploreCard(
-                          '🌨', 'Weather', AppColors.gradCyan,
-                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WeatherScreen()))),
+                          '🌨',
+                          'Weather',
+                          AppColors.gradCyan,
+                          () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const WeatherScreen()))),
                     ],
                   ),
                 ),
@@ -606,12 +783,18 @@ class _SearchTabState extends State<SearchTab> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF7c3aed), Color(0xFFa855f7)],
                         ),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => const GenreTracksScreen(
-                            genre: 'Pop', emoji: '🎤',
-                            gradient: LinearGradient(colors: [Color(0xFF7c3aed), Color(0xFFa855f7)]),
-                          ),
-                        )),
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const GenreTracksScreen(
+                                genre: 'Pop',
+                                emoji: '🎤',
+                                gradient: LinearGradient(colors: [
+                                  Color(0xFF7c3aed),
+                                  Color(0xFFa855f7)
+                                ]),
+                              ),
+                            )),
                       ),
                       _GenreCard(
                         emoji: '🎸',
@@ -619,12 +802,18 @@ class _SearchTabState extends State<SearchTab> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF1e3a8a), Color(0xFF3b82f6)],
                         ),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => const GenreTracksScreen(
-                            genre: 'Rock', emoji: '🎸',
-                            gradient: LinearGradient(colors: [Color(0xFF1e3a8a), Color(0xFF3b82f6)]),
-                          ),
-                        )),
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const GenreTracksScreen(
+                                genre: 'Rock',
+                                emoji: '🎸',
+                                gradient: LinearGradient(colors: [
+                                  Color(0xFF1e3a8a),
+                                  Color(0xFF3b82f6)
+                                ]),
+                              ),
+                            )),
                       ),
                       _GenreCard(
                         emoji: '✨',
@@ -632,12 +821,18 @@ class _SearchTabState extends State<SearchTab> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF9d174d), Color(0xFFec4899)],
                         ),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => const GenreTracksScreen(
-                            genre: 'K-Pop', emoji: '✨',
-                            gradient: LinearGradient(colors: [Color(0xFF9d174d), Color(0xFFec4899)]),
-                          ),
-                        )),
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const GenreTracksScreen(
+                                genre: 'K-Pop',
+                                emoji: '✨',
+                                gradient: LinearGradient(colors: [
+                                  Color(0xFF9d174d),
+                                  Color(0xFFec4899)
+                                ]),
+                              ),
+                            )),
                       ),
                       _GenreCard(
                         emoji: '🎤',
@@ -645,12 +840,18 @@ class _SearchTabState extends State<SearchTab> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF1c1917), Color(0xFF57534e)],
                         ),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => const GenreTracksScreen(
-                            genre: 'Hip-Hop', emoji: '🎤',
-                            gradient: LinearGradient(colors: [Color(0xFF1c1917), Color(0xFF57534e)]),
-                          ),
-                        )),
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const GenreTracksScreen(
+                                genre: 'Hip-Hop',
+                                emoji: '🎤',
+                                gradient: LinearGradient(colors: [
+                                  Color(0xFF1c1917),
+                                  Color(0xFF57534e)
+                                ]),
+                              ),
+                            )),
                       ),
                       _GenreCard(
                         emoji: '🎹',
@@ -658,12 +859,18 @@ class _SearchTabState extends State<SearchTab> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF164e63), Color(0xFF06b6d4)],
                         ),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => const GenreTracksScreen(
-                            genre: 'Electronic', emoji: '🎹',
-                            gradient: LinearGradient(colors: [Color(0xFF164e63), Color(0xFF06b6d4)]),
-                          ),
-                        )),
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const GenreTracksScreen(
+                                genre: 'Electronic',
+                                emoji: '🎹',
+                                gradient: LinearGradient(colors: [
+                                  Color(0xFF164e63),
+                                  Color(0xFF06b6d4)
+                                ]),
+                              ),
+                            )),
                       ),
                       _GenreCard(
                         emoji: '🌙',
@@ -671,12 +878,18 @@ class _SearchTabState extends State<SearchTab> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF3b0764), Color(0xFF7c3aed)],
                         ),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => const GenreTracksScreen(
-                            genre: 'Ambient', emoji: '🌙',
-                            gradient: LinearGradient(colors: [Color(0xFF3b0764), Color(0xFF7c3aed)]),
-                          ),
-                        )),
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const GenreTracksScreen(
+                                genre: 'Ambient',
+                                emoji: '🌙',
+                                gradient: LinearGradient(colors: [
+                                  Color(0xFF3b0764),
+                                  Color(0xFF7c3aed)
+                                ]),
+                              ),
+                            )),
                       ),
                     ],
                   ),
@@ -703,7 +916,11 @@ class _SearchTabState extends State<SearchTab> {
                       height: 104,
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
-                          colors: [Color(0xFF5B21B6), Color(0xFF7C3AED), Color(0xFFA855F7)],
+                          colors: [
+                            Color(0xFF5B21B6),
+                            Color(0xFF7C3AED),
+                            Color(0xFFA855F7)
+                          ],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
@@ -713,9 +930,11 @@ class _SearchTabState extends State<SearchTab> {
                         children: [
                           // Decorative music note circles
                           Positioned(
-                            right: 70, top: -10,
+                            right: 70,
+                            top: -10,
                             child: Container(
-                              width: 80, height: 80,
+                              width: 80,
+                              height: 80,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: Colors.white.withOpacity(0.06),
@@ -723,9 +942,11 @@ class _SearchTabState extends State<SearchTab> {
                             ),
                           ),
                           Positioned(
-                            right: 10, bottom: -20,
+                            right: 10,
+                            bottom: -20,
                             child: Container(
-                              width: 100, height: 100,
+                              width: 100,
+                              height: 100,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: Colors.white.withOpacity(0.06),
@@ -734,14 +955,18 @@ class _SearchTabState extends State<SearchTab> {
                           ),
                           // Small playlist card (right side)
                           Positioned(
-                            right: 16, top: 0, bottom: 0,
+                            right: 16,
+                            top: 0,
+                            bottom: 0,
                             child: Center(
                               child: Container(
-                                width: 72, height: 72,
+                                width: 72,
+                                height: 72,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(10),
                                   color: Colors.white.withOpacity(0.18),
-                                  border: Border.all(color: Colors.white.withOpacity(0.25)),
+                                  border: Border.all(
+                                      color: Colors.white.withOpacity(0.25)),
                                 ),
                                 child: const Center(
                                   child: Icon(Icons.library_music_rounded,
@@ -975,8 +1200,7 @@ class _ForYouScreenState extends State<_ForYouScreen> {
                                 const SizedBox(height: 4),
                                 Text(widget.subtitle,
                                     style: GoogleFonts.outfit(
-                                        fontSize: 14,
-                                        color: Colors.white70)),
+                                        fontSize: 14, color: Colors.white70)),
                                 const SizedBox(height: 12),
                                 Text(
                                   '${_tracks.length} songs',
@@ -1006,9 +1230,11 @@ class _ForYouScreenState extends State<_ForYouScreen> {
                                 .toList();
                             final first = Map<String, dynamic>.from(queue.first)
                               ..['queue'] = queue;
-                            Navigator.push(context,
+                            Navigator.push(
+                                context,
                                 MaterialPageRoute(
-                                    builder: (_) => PlayerScreen(track: first)));
+                                    builder: (_) =>
+                                        PlayerScreen(track: first)));
                           },
                           child: Container(
                             width: 52,
@@ -1038,8 +1264,7 @@ class _ForYouScreenState extends State<_ForYouScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text('🎵',
-                              style: TextStyle(fontSize: 48)),
+                          const Text('🎵', style: TextStyle(fontSize: 48)),
                           const SizedBox(height: 12),
                           Text('Nothing here yet',
                               style: GoogleFonts.outfit(
@@ -1129,8 +1354,7 @@ class _ForYouScreenState extends State<_ForYouScreen> {
                               if (dur.isNotEmpty)
                                 Text(dur,
                                     style: GoogleFonts.outfit(
-                                        fontSize: 12,
-                                        color: AppColors.text3)),
+                                        fontSize: 12, color: AppColors.text3)),
                             ]),
                           ),
                         );
@@ -1163,7 +1387,9 @@ class _ExploreCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(label,
                 style: GoogleFonts.outfit(
-                    fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white)),
           ])));
 }
 
@@ -1451,8 +1677,8 @@ class _SuggestionRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   text,
-                  style: GoogleFonts.outfit(
-                      fontSize: 15, color: AppColors.text),
+                  style:
+                      GoogleFonts.outfit(fontSize: 15, color: AppColors.text),
                 ),
               ),
               const Icon(Icons.north_west_rounded,
@@ -1461,6 +1687,324 @@ class _SuggestionRow extends StatelessWidget {
           ),
         ),
       );
+}
+
+class _ShowAllResultsRow extends StatelessWidget {
+  final String query;
+  final VoidCallback onTap;
+
+  const _ShowAllResultsRow({
+    required this.query,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 4),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(color: Colors.white.withOpacity(0.04)),
+            ),
+          ),
+          child: Text(
+            'Show all results for "$query"',
+            style: GoogleFonts.outfit(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: AppColors.green,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchResultsScreen extends StatefulWidget {
+  final String query;
+  final List<Map<String, dynamic>> initialTracks;
+  final List<Map<String, dynamic>> initialArtists;
+  final List<Map<String, dynamic>> initialAlbums;
+
+  const _SearchResultsScreen({
+    required this.query,
+    required this.initialTracks,
+    required this.initialArtists,
+    required this.initialAlbums,
+  });
+
+  @override
+  State<_SearchResultsScreen> createState() => _SearchResultsScreenState();
+}
+
+class _SearchResultsScreenState extends State<_SearchResultsScreen> {
+  late List<Map<String, dynamic>> _tracks;
+  late List<Map<String, dynamic>> _artists;
+  late List<Map<String, dynamic>> _albums;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _tracks = widget.initialTracks;
+    _artists = widget.initialArtists;
+    _albums = widget.initialAlbums;
+    _load();
+  }
+
+  String _normalize(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9а-яё]+'), ' ')
+        .trim();
+  }
+
+  int _score(String query, String primary, {String secondary = ''}) {
+    final q = _normalize(query);
+    final p = _normalize(primary);
+    final s = _normalize(secondary);
+    if (q.isEmpty) return 0;
+    var score = 0;
+    if (p == q) score += 120;
+    if (p.startsWith(q)) score += 70;
+    if (p.contains(q)) score += 40;
+    if (s == q) score += 30;
+    if (s.startsWith(q)) score += 20;
+    if (s.contains(q)) score += 10;
+    return score;
+  }
+
+  Future<void> _load() async {
+    try {
+      final artistQuery = widget.query;
+      final results = await Future.wait([
+        ApiService().searchTracksWithFallback(widget.query, limit: 30),
+        ApiService().searchArtistsList(artistQuery, limit: 20),
+        ApiService().searchAlbums(widget.query, limit: 24),
+      ]);
+      if (!mounted) return;
+
+      final tracks = (results[0] as List<Map<String, dynamic>>).toList()
+        ..sort((a, b) => _score(
+              widget.query,
+              b['title']?.toString() ?? '',
+              secondary: b['artist']?.toString() ?? '',
+            ).compareTo(
+              _score(
+                widget.query,
+                a['title']?.toString() ?? '',
+                secondary: a['artist']?.toString() ?? '',
+              ),
+            ));
+      final artists = (results[1] as List<Map<String, dynamic>>).toList()
+        ..sort((a, b) =>
+            _score(widget.query, b['name']?.toString() ?? '').compareTo(
+              _score(widget.query, a['name']?.toString() ?? ''),
+            ));
+      final albums = (results[2] as List<Map<String, dynamic>>).toList()
+        ..sort((a, b) => _score(
+              widget.query,
+              b['title']?.toString() ?? '',
+              secondary: b['artist']?.toString() ?? '',
+            ).compareTo(
+              _score(
+                widget.query,
+                a['title']?.toString() ?? '',
+                secondary: a['artist']?.toString() ?? '',
+              ),
+            ));
+
+      setState(() {
+        _tracks = tracks;
+        _artists = artists;
+        _albums = albums;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  void _openTrack(Map<String, dynamic> track) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => PlayerScreen(track: track)),
+    );
+  }
+
+  void _openArtist(Map<String, dynamic> artist) {
+    final artistId = artist['id']?.toString();
+    if (artistId == null || artistId.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ArtistScreen(
+          artistId: artistId,
+          artistName: artist['name']?.toString() ?? 'Unknown',
+        ),
+      ),
+    );
+  }
+
+  void _openAlbum(Map<String, dynamic> album) {
+    final albumId = int.tryParse(album['id'].toString()) ?? 0;
+    if (albumId <= 0) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AlbumScreen(
+          albumId: albumId,
+          initialTitle: album['title']?.toString(),
+          initialCover: album['cover_xl']?.toString(),
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 20, bottom: 10),
+      child: Text(
+        title,
+        style: GoogleFonts.outfit(
+          fontSize: 18,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: SafeArea(
+        bottom: false,
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () => Navigator.pop(context),
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: const Icon(
+                              Icons.arrow_back_ios_new_rounded,
+                              size: 16,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Results',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              Text(
+                                '"${widget.query}"',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.outfit(
+                                  fontSize: 13,
+                                  color: AppColors.text3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_loading)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 24),
+                        child: LinearProgressIndicator(
+                          color: AppColors.purpleLight,
+                          backgroundColor: Colors.transparent,
+                          minHeight: 2,
+                        ),
+                      ),
+                    if (_artists.isNotEmpty) ...[
+                      _sectionTitle('Artists'),
+                      ..._artists
+                          .map((artist) => _FlatArtistRow(
+                                artist: artist,
+                                onTap: () => _openArtist(artist),
+                              ))
+                          .toList(),
+                    ],
+                    if (_albums.isNotEmpty) ...[
+                      _sectionTitle('Albums'),
+                      ..._albums
+                          .map((album) => _FlatAlbumRow(
+                                album: album,
+                                onTap: () => _openAlbum(album),
+                              ))
+                          .toList(),
+                    ],
+                    if (_tracks.isNotEmpty) ...[
+                      _sectionTitle('Tracks'),
+                      ..._tracks
+                          .map((track) => _FlatTrackRow(
+                                track: track,
+                                onTap: () => _openTrack(track),
+                              ))
+                          .toList(),
+                    ],
+                    if (!_loading &&
+                        _artists.isEmpty &&
+                        _albums.isEmpty &&
+                        _tracks.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 40),
+                        child: Center(
+                          child: Text(
+                            'No results found for "${widget.query}"',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.outfit(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.text2,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _FlatArtistRow extends StatelessWidget {
@@ -1558,9 +2102,7 @@ class _FlatAlbumRow extends StatelessWidget {
                       height: 52,
                       fit: BoxFit.cover,
                       placeholder: (_, __) => Container(
-                          width: 52,
-                          height: 52,
-                          color: AppColors.surface),
+                          width: 52, height: 52, color: AppColors.surface),
                       errorWidget: (_, __, ___) => Container(
                           width: 52,
                           height: 52,
@@ -1595,8 +2137,8 @@ class _FlatAlbumRow extends StatelessWidget {
               ),
             ),
             Text('Album',
-                style: GoogleFonts.outfit(
-                    fontSize: 12, color: AppColors.text3)),
+                style:
+                    GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
           ],
         ),
       ),
@@ -1637,9 +2179,7 @@ class _FlatTrackRow extends StatelessWidget {
                       height: 52,
                       fit: BoxFit.cover,
                       placeholder: (_, __) => Container(
-                          width: 52,
-                          height: 52,
-                          color: AppColors.surface),
+                          width: 52, height: 52, color: AppColors.surface),
                       errorWidget: (_, __, ___) => Container(
                           width: 52,
                           height: 52,
@@ -1675,8 +2215,44 @@ class _FlatTrackRow extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.more_vert_rounded,
-                size: 18, color: AppColors.text3),
+            GestureDetector(
+              onTap: () => showTrackMenu(
+                context,
+                track,
+                onPlayNow: onTap,
+                onGoToArtist: () async {
+                  final artistName =
+                      (track['artist'] ?? track['artistName'] ?? '').toString();
+                  final directId = track['artist_id']?.toString();
+                  if (directId != null &&
+                      directId.isNotEmpty &&
+                      context.mounted) {
+                    Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => ArtistScreen(
+                          artistId: directId, artistName: artistName),
+                    ));
+                    return;
+                  }
+                  if (artistName.isEmpty) return;
+                  final candidates = await ApiService()
+                      .searchArtistsList(artistName, limit: 6);
+                  if (!context.mounted || candidates.isEmpty) return;
+                  final artistId = candidates.first['id']?.toString();
+                  if (artistId == null ||
+                      artistId.isEmpty ||
+                      !context.mounted) return;
+                  Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => ArtistScreen(
+                      artistId: artistId,
+                      artistName: candidates.first['name']?.toString() ??
+                          artistName,
+                    ),
+                  ));
+                },
+              ),
+              child: const Icon(Icons.more_vert_rounded,
+                  size: 18, color: AppColors.text3),
+            ),
           ],
         ),
       ),
