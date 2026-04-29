@@ -343,6 +343,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final updates = <String, dynamic>{
         'first_name': _firstNameCtrl.text.trim(),
         'last_name': _lastNameCtrl.text.trim(),
+        'username': _usernameCtrl.text.trim(),
         'city': _cityCtrl.text.trim(),
         'bio': _bioCtrl.text.trim(),
         'display_name': _firstNameCtrl.text.trim(),
@@ -701,8 +702,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   _buildField(
                       'USERNAME', _usernameCtrl, Icons.alternate_email_rounded,
                       hint: 'username',
-                      readOnly: true,
-                      subtitle: 'Username cannot be changed'),
+                      subtitle: 'Can be changed once every 30 days'),
                   const SizedBox(height: 14),
                   _buildField('CITY', _cityCtrl, Icons.location_city_rounded,
                       hint: 'Your city'),

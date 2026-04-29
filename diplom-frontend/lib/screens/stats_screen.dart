@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../services/api_service.dart';
@@ -120,7 +121,7 @@ class _StatsScreenState extends State<StatsScreen> {
                                       title: 'This week',
                                       showDateUnderTitle: true,
                                       onShare: () =>
-                                          _showWeekSummary(sections.first),
+                                          _shareWeekSummary(sections.first),
                                       onOpenTopArtists: () =>
                                           _openTopArtists(sections.first),
                                       onOpenTopTracks: () =>
@@ -150,7 +151,7 @@ class _StatsScreenState extends State<StatsScreen> {
                                         title: title,
                                         showDateUnderTitle: index == 0,
                                         onShare: () =>
-                                            _showWeekSummary(section),
+                                            _shareWeekSummary(section),
                                         onOpenTopArtists: () =>
                                             _openTopArtists(section),
                                         onOpenTopTracks: () =>
@@ -190,92 +191,23 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
-  void _showWeekSummary(_WeeklyStatsSection section) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF181818),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      builder: (context) {
-        final theme = GoogleFonts.outfit();
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 42,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 18),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                ),
-                Text(
-                  section.rangeLabel,
-                  style: theme.copyWith(
-                    fontSize: 14,
-                    color: Colors.white.withValues(alpha: 0.6),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  section.insightTitle,
-                  style: theme.copyWith(
-                    fontSize: 26,
-                    height: 1.08,
-                    fontWeight: FontWeight.w900,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  section.insightSubtitle,
-                  style: theme.copyWith(
-                    fontSize: 15,
-                    height: 1.35,
-                    color: Colors.white.withValues(alpha: 0.7),
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 22),
-                _BottomSheetMetricRow(
-                  label: 'Plays',
-                  value: '${section.totalPlays}',
-                ),
-                _BottomSheetMetricRow(
-                  label: 'Artists',
-                  value: '${section.uniqueArtists}',
-                ),
-                _BottomSheetMetricRow(
-                  label: 'Tracks',
-                  value: '${section.uniqueTracks}',
-                ),
-                _BottomSheetMetricRow(
-                  label: 'Top artist',
-                  value: section.topArtists.isNotEmpty
-                      ? section.topArtists.first.name
-                      : '—',
-                ),
-                _BottomSheetMetricRow(
-                  label: 'Top track',
-                  value: section.topTracks.isNotEmpty
-                      ? section.topTracks.first.title
-                      : '—',
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+  Future<void> _shareWeekSummary(_WeeklyStatsSection section) async {
+    final topArtist = section.topArtists.isNotEmpty
+        ? section.topArtists.first.name
+        : '—';
+    final topTrack = section.topTracks.isNotEmpty
+        ? '${section.topTracks.first.title} — ${section.topTracks.first.artist}'
+        : '—';
+    final text =
+        '🎵 ${section.rangeLabel}\n'
+        '${section.insightTitle}\n\n'
+        'Plays: ${section.totalPlays}  |  Artists: ${section.uniqueArtists}  |  Tracks: ${section.uniqueTracks}\n'
+        'Top artist: $topArtist\n'
+        'Top track: $topTrack\n\n'
+        'via MoodWave';
+    await Share.share(text, subject: 'My MoodWave Week');
   }
+
 }
 
 class _StatsHeader extends StatelessWidget {
@@ -1088,15 +1020,6 @@ class _ArtistRankRow extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Text(
-                '${artist.plays}',
-                style: GoogleFonts.outfit(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white.withValues(alpha: 0.45),
-                ),
-              ),
               const SizedBox(width: 8),
               GestureDetector(
                 onTap: () => _openArtist(context),
@@ -1298,45 +1221,6 @@ class _StatsErrorState extends StatelessWidget {
   }
 }
 
-class _BottomSheetMetricRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _BottomSheetMetricRow({
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: GoogleFonts.outfit(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: Colors.white.withValues(alpha: 0.54),
-              ),
-            ),
-          ),
-          Text(
-            value,
-            style: GoogleFonts.outfit(
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _RoundActionButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
@@ -1425,18 +1309,21 @@ class _CoverImage extends StatelessWidget {
 
   const _CoverImage({required this.imageUrl});
 
+  static Widget _fallback() => Container(
+        color: const Color(0xFF252527),
+        child: const Center(
+          child: Icon(Icons.music_note_rounded, color: Colors.white54, size: 30),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
+    if (imageUrl.trim().isEmpty || imageUrl == 'null') return _fallback();
     return CachedNetworkImage(
       imageUrl: imageUrl,
       fit: BoxFit.cover,
-      errorWidget: (_, __, ___) => Container(
-        color: const Color(0xFF252527),
-        child: const Center(
-          child:
-              Icon(Icons.music_note_rounded, color: Colors.white54, size: 30),
-        ),
-      ),
+      placeholder: (_, __) => _fallback(),
+      errorWidget: (_, __, ___) => _fallback(),
     );
   }
 }

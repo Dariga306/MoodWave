@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 from app.dependencies import get_db, get_current_user
 from app.models.rooms import ListeningRoom, RoomParticipant, RoomParticipantStatus
 from app.models.music import ListeningHistory, TrackCache, Playlist
-from app.models.social import Friend, FriendStatus, UserFollow
+from app.models.social import ArtistFollow, Friend, FriendStatus, UserFollow
 from app.models.user import User, UserGenre, UserMood, TasteVector
 from app.schemas.auth import (
     ChangePasswordRequest,
@@ -750,6 +750,14 @@ async def update_me(
         )
         if existing:
             raise HTTPException(status_code=400, detail="Username already taken")
+        if current_user.last_username_change:
+            days_since = (datetime.utcnow() - current_user.last_username_change).days
+            if days_since < 30:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Вы сможете сменить ник через {30 - days_since} дней",
+                )
+        data["last_username_change"] = datetime.utcnow()
 
     if avatar_file is not None:
         data["avatar_url"] = await _save_profile_image(
@@ -1169,7 +1177,11 @@ async def get_me_stats(
     )
     following_count = await db.scalar(
         select(func.count(UserFollow.id)).where(UserFollow.follower_id == current_user.id)
-    )
+    ) or 0
+    artist_following_count = await db.scalar(
+        select(func.count(ArtistFollow.id)).where(ArtistFollow.user_id == current_user.id)
+    ) or 0
+    following_count += artist_following_count
     # Unique artists from listening history
     unique_artists_q = (
         select(func.count(func.distinct(TrackCache.artist)))

@@ -50,9 +50,17 @@ class _QueueScreenState extends State<QueueScreen> {
   }
 
   String _fmt(dynamic durationMs) {
-    final ms =
-        durationMs is int ? durationMs : int.tryParse('$durationMs') ?? 0;
+    int ms;
+    if (durationMs is int) {
+      ms = durationMs;
+    } else if (durationMs is double) {
+      ms = durationMs.round();
+    } else {
+      ms = int.tryParse('$durationMs') ?? 0;
+    }
     if (ms <= 0) return '';
+    // Auto-detect: values ≤ 9999 are raw seconds, not milliseconds
+    if (ms <= 9999) ms *= 1000;
     return '${ms ~/ 60000}:${((ms % 60000) ~/ 1000).toString().padLeft(2, '0')}';
   }
 
@@ -225,6 +233,7 @@ class _QueueScreenState extends State<QueueScreen> {
                 ? Center(child: Text('Queue is empty',
                     style: GoogleFonts.outfit(fontSize: 15, color: AppColors.text3)))
                 : ReorderableListView.builder(
+                    buildDefaultDragHandles: false,
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     itemCount: upNext.length,
                     onReorder: (oldIdx, newIdx) {

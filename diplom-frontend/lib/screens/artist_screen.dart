@@ -361,6 +361,7 @@ class _ArtistScreenState extends State<ArtistScreen> {
                                     builder: (_) => _ThisIsScreen(
                                       artistName: artist['name']?.toString() ?? widget.artistName,
                                       artistImageUrl: imageUrl,
+                                      artistId: _resolvedId ?? widget.artistId,
                                       tracks: tracks
                                           .whereType<Map>()
                                           .map((t) => Map<String, dynamic>.from(t))
@@ -994,27 +995,66 @@ class _RelatedArtistCard extends StatelessWidget {
 
 // ─── "This Is" full playlist screen ──────────────────────────────────────────
 
-class _ThisIsScreen extends StatelessWidget {
+class _ThisIsScreen extends StatefulWidget {
   final String artistName;
   final String? artistImageUrl;
+  final String? artistId;
   final List<Map<String, dynamic>> tracks;
 
   const _ThisIsScreen({
     required this.artistName,
     required this.artistImageUrl,
+    this.artistId,
     required this.tracks,
   });
 
+  @override
+  State<_ThisIsScreen> createState() => _ThisIsScreenState();
+}
+
+class _ThisIsScreenState extends State<_ThisIsScreen> {
+  bool _saved = false;
+  bool _saving = false;
+
   String _formatDuration(dynamic durationMs) {
-    final value =
-        durationMs is int ? durationMs : int.tryParse('$durationMs') ?? 0;
-    if (value <= 0) return '';
-    return '${value ~/ 60000}:${((value % 60000) ~/ 1000).toString().padLeft(2, '0')}';
+    int ms;
+    if (durationMs is int) {
+      ms = durationMs;
+    } else if (durationMs is double) {
+      ms = durationMs.round();
+    } else {
+      ms = int.tryParse('$durationMs') ?? 0;
+    }
+    if (ms <= 0) return '';
+    if (ms <= 9999) ms *= 1000;
+    return '${ms ~/ 60000}:${((ms % 60000) ~/ 1000).toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _saveToLibrary() async {
+    if (_saving) return;
+    final id = widget.artistId;
+    if (id == null || id.isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      await ApiService().followArtist(id);
+      if (!mounted) return;
+      setState(() => _saved = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Artist saved to Library'), duration: Duration(seconds: 2)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not save artist'), duration: Duration(seconds: 2)),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final queue = tracks;
+    final queue = widget.tracks;
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: CustomScrollView(
@@ -1027,9 +1067,9 @@ class _ThisIsScreen extends StatelessWidget {
                 SizedBox(
                   height: 260,
                   width: double.infinity,
-                  child: artistImageUrl != null
+                  child: widget.artistImageUrl != null
                       ? CachedNetworkImage(
-                          imageUrl: artistImageUrl!,
+                          imageUrl: widget.artistImageUrl!,
                           fit: BoxFit.cover,
                           placeholder: (_, __) =>
                               Container(color: const Color(0xFF140B2A)),
@@ -1075,7 +1115,7 @@ class _ThisIsScreen extends StatelessWidget {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                artistName,
+                                widget.artistName,
                                 style: GoogleFonts.outfit(
                                   fontSize: 30,
                                   fontWeight: FontWeight.w900,
@@ -1085,7 +1125,7 @@ class _ThisIsScreen extends StatelessWidget {
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                '${tracks.length} songs',
+                                '${widget.tracks.length} songs',
                                 style: GoogleFonts.outfit(
                                   fontSize: 13,
                                   color: Colors.white54,
@@ -1173,6 +1213,28 @@ class _ThisIsScreen extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                       color: AppColors.text,
                     ),
+                  ),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: _saveToLibrary,
+                    child: _saving
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.purpleLight,
+                            ),
+                          )
+                        : Icon(
+                            _saved
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            color: _saved
+                                ? AppColors.pink
+                                : AppColors.text2,
+                            size: 28,
+                          ),
                   ),
                 ],
               ),

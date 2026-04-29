@@ -87,7 +87,6 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _audioReady = false;
   bool _ytPlaying = false;
   bool _audioPlaying = false;
-  bool _noPreview = false;
   bool _isLiked = false;
   bool _shuffle = false;
   int _repeatMode = 0; // 0=off 1=repeat-all 2=repeat-one
@@ -351,7 +350,6 @@ class _PlayerScreenState extends State<PlayerScreen>
       _audioReady = false;
       _ytPlaying = false;
       _audioPlaying = false;
-      _noPreview = false;
       _trackEnded = false;
       _position = Duration.zero;
       _duration = Duration.zero;
@@ -476,7 +474,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
 
     if (url == null || url.isEmpty) {
-      if (mounted) setState(() => _noPreview = true);
       return;
     }
 
@@ -525,10 +522,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
     } catch (_) {
       if (mounted) {
-        setState(() {
-          _audioReady = false;
-          _noPreview = true;
-        });
+        setState(() => _audioReady = false);
       }
     }
   }
@@ -865,26 +859,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                       _topBar(),
                       const SizedBox(height: 28),
                       _coverArtBox(),
-                      if (!_usingYoutube && _audioReady)
-                        Container(
-                          margin: const EdgeInsets.only(top: 10),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.07),
-                            borderRadius: BorderRadius.circular(100),
-                            border: Border.all(
-                                color: Colors.white.withOpacity(0.12)),
-                          ),
-                          child: Text(
-                            'Preview only',
-                            style: GoogleFonts.outfit(
-                              fontSize: 11,
-                              color: Colors.white38,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
                       if (_currentLyricLine != null &&
                           _currentLyricLine!.isNotEmpty)
                         GestureDetector(

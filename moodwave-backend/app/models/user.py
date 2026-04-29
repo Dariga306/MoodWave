@@ -62,6 +62,9 @@ class User(Base):
     delete_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     deletion_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
+    # Username change cooldown
+    last_username_change: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
