@@ -2,8 +2,11 @@ import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 
+import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/common_widgets.dart';
@@ -30,7 +33,7 @@ class _AlbumScreenState extends State<AlbumScreen> {
   Map<String, dynamic>? _album;
   bool _loading = true;
   bool _isLiked = false;
-  bool _downloadToggle = false;
+  bool _likeLoading = false;
 
   @override
   void initState() {
@@ -40,15 +43,52 @@ class _AlbumScreenState extends State<AlbumScreen> {
 
   Future<void> _load() async {
     try {
-      final data = await ApiService().getAlbumDetail(widget.albumId);
+      final results = await Future.wait([
+        ApiService().getAlbumDetail(widget.albumId),
+        ApiService().getAlbumLikedStatus(widget.albumId.toString()),
+      ]);
       if (!mounted) return;
       setState(() {
-        _album = data;
+        _album = results[0] as Map<String, dynamic>;
+        _isLiked = results[1] as bool;
         _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _toggleLike() async {
+    if (_likeLoading) return;
+    setState(() => _likeLoading = true);
+    try {
+      final albumId = widget.albumId.toString();
+      final title = _album?['title']?.toString() ?? widget.initialTitle ?? '';
+      final artist = _album?['artist']?.toString() ?? '';
+      final cover = _album?['cover_xl']?.toString() ?? widget.initialCover;
+      if (_isLiked) {
+        await ApiService().unlikeAlbum(albumId);
+        if (!mounted) return;
+        setState(() { _isLiked = false; _likeLoading = false; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Album removed from Library')),
+        );
+      } else {
+        await ApiService().likeAlbum(
+          albumId: albumId,
+          albumName: title,
+          artistName: artist,
+          coverUrl: cover,
+        );
+        if (!mounted) return;
+        setState(() { _isLiked = true; _likeLoading = false; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Album saved to Library')),
+        );
+      }
+    } catch (_) {
+      if (mounted) setState(() => _likeLoading = false);
     }
   }
 
@@ -66,8 +106,11 @@ class _AlbumScreenState extends State<AlbumScreen> {
           .toString();
 
   void _playAll(List<dynamic> tracks) {
-    final list = tracks.whereType<Map>().map((t) => Map<String, dynamic>.from(t)).toList();
+    var list = tracks.whereType<Map>().map((t) => Map<String, dynamic>.from(t)).toList();
     if (list.isEmpty) return;
+    if (context.read<PlayerProvider>().shuffleOn) {
+      list.shuffle(Random());
+    }
     final first = Map<String, dynamic>.from(list.first)..['queue'] = list;
     Navigator.push(context, MaterialPageRoute(builder: (_) => PlayerScreen(track: first)));
   }
@@ -200,30 +243,21 @@ class _AlbumScreenState extends State<AlbumScreen> {
                             const SizedBox(height: 16),
                             // ── Action buttons row ──────────────────────────
                             Row(children: [
-                              // Heart
+                              // Heart (save to Library)
                               GestureDetector(
-                                onTap: () => setState(() => _isLiked = !_isLiked),
-                                child: Icon(
-                                  _isLiked
-                                      ? Icons.favorite_rounded
-                                      : Icons.favorite_border_rounded,
-                                  color: _isLiked ? AppColors.pink : AppColors.text3,
-                                  size: 28,
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              // Download toggle
-                              GestureDetector(
-                                onTap: () => setState(() => _downloadToggle = !_downloadToggle),
-                                child: Icon(
-                                  _downloadToggle
-                                      ? Icons.download_done_rounded
-                                      : Icons.download_outlined,
-                                  color: _downloadToggle
-                                      ? AppColors.purpleLight
-                                      : AppColors.text3,
-                                  size: 26,
-                                ),
+                                onTap: _likeLoading ? null : _toggleLike,
+                                child: _likeLoading
+                                    ? const SizedBox(
+                                        width: 28, height: 28,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2, color: AppColors.pink))
+                                    : Icon(
+                                        _isLiked
+                                            ? Icons.bookmark_rounded
+                                            : Icons.bookmark_border_rounded,
+                                        color: _isLiked ? AppColors.purpleLight : AppColors.text3,
+                                        size: 28,
+                                      ),
                               ),
                               const SizedBox(width: 16),
                               // Three dots
@@ -233,21 +267,37 @@ class _AlbumScreenState extends State<AlbumScreen> {
                                     color: AppColors.text3, size: 26),
                               ),
                               const Spacer(),
-                              // Shuffle
+                              // Shuffle toggle
                               if (tracks.isNotEmpty)
-                                GestureDetector(
-                                  onTap: () => _shufflePlay(tracks),
-                                  child: Container(
-                                    width: 44,
-                                    height: 44,
-                                    margin: const EdgeInsets.only(right: 14),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.surface,
-                                      shape: BoxShape.circle,
-                                      border: Border.all(color: AppColors.border),
+                                Consumer<PlayerProvider>(
+                                  builder: (_, provider, __) => GestureDetector(
+                                    onTap: () {
+                                      HapticFeedback.lightImpact();
+                                      provider.toggleShuffle();
+                                    },
+                                    child: AnimatedContainer(
+                                      duration: const Duration(milliseconds: 200),
+                                      width: 44,
+                                      height: 44,
+                                      margin: const EdgeInsets.only(right: 14),
+                                      decoration: BoxDecoration(
+                                        color: provider.shuffleOn
+                                            ? AppColors.purpleLight.withOpacity(0.2)
+                                            : AppColors.surface,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: provider.shuffleOn
+                                              ? AppColors.purpleLight
+                                              : AppColors.border,
+                                          width: provider.shuffleOn ? 1.5 : 1,
+                                        ),
+                                      ),
+                                      child: Icon(Icons.shuffle_rounded,
+                                          size: 20,
+                                          color: provider.shuffleOn
+                                              ? AppColors.purpleLight
+                                              : Colors.white),
                                     ),
-                                    child: const Icon(Icons.shuffle_rounded,
-                                        color: Colors.white, size: 20),
                                   ),
                                 ),
                               // Play

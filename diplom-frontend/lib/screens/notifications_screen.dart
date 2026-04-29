@@ -11,7 +11,7 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
   int _filter = 0;
-  final _filters = ['All', 'Matches', 'Friends'];
+  final _filters = ['All', 'Matches', 'Friends', 'Music'];
   List<Map<String, dynamic>> _notifs = [];
   bool _loading = true;
 
@@ -41,6 +41,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         n['type'] == 'match' || n['type'] == 'taste_match').toList();
     if (_filter == 2) return _notifs.where((n) =>
         n['type'] == 'friend_request' || n['type'] == 'new_follower').toList();
+    if (_filter == 3) return _notifs.where((n) =>
+        n['type'] == 'new_release').toList();
     return _notifs;
   }
 
@@ -128,7 +130,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               if (type == 'new_follower') {
                                 return _NewFollowerCard(notif: n);
                               }
-                              if (type == 'new_album') {
+                              if (type == 'new_album' || type == 'new_release') {
                                 return _NewAlbumCard(notif: n);
                               }
                               return _MatchCard(notif: n);
@@ -386,34 +388,46 @@ class _NewAlbumCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final artist = notif['artist_name'] as String? ?? '?';
-    final album = notif['album_name'] as String? ?? 'New release';
+    final album = (notif['album_title'] ?? notif['album_name']) as String? ?? 'New release';
+    final coverUrl = notif['cover_url'] as String?;
     final time = notif['time'] as String? ?? '';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Stack(children: [
-          Container(
-            width: 46, height: 46,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(colors: [Color(0xFF065f46), Color(0xFF10b981)]),
-              shape: BoxShape.circle,
-            ),
-            child: const Center(child: Text('💿', style: TextStyle(fontSize: 20)))),
-          Positioned(bottom: -2, right: -2,
-            child: Container(width: 20, height: 20,
-              decoration: BoxDecoration(color: const Color(0xFF10b981), shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.bg, width: 2)),
-              child: const Center(child: Text('🎵', style: TextStyle(fontSize: 9))))),
-        ]),
+        Container(
+          width: 48, height: 48,
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(colors: [Color(0xFF6D28D9), Color(0xFFDB2777)]),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: coverUrl != null && coverUrl.isNotEmpty
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(coverUrl, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                          const Center(child: Text('💿', style: TextStyle(fontSize: 20)))))
+              : const Center(child: Text('💿', style: TextStyle(fontSize: 20))),
+        ),
         const SizedBox(width: 14),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.purpleLight.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(100),
+            ),
+            child: Text('New Release',
+                style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w700,
+                    color: AppColors.purpleLight)),
+          ),
+          const SizedBox(height: 4),
           RichText(text: TextSpan(
             style: GoogleFonts.outfit(fontSize: 14, height: 1.5, color: AppColors.text),
             children: [
               TextSpan(text: artist,
-                  style: GoogleFonts.outfit(color: const Color(0xFF5eead4), fontWeight: FontWeight.w600)),
-              const TextSpan(text: ' released '),
+                  style: GoogleFonts.outfit(color: AppColors.purpleLight, fontWeight: FontWeight.w600)),
+              const TextSpan(text: ' · '),
               TextSpan(text: album,
                   style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
             ],

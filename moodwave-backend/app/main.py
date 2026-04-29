@@ -7,6 +7,7 @@ from pathlib import Path
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -19,7 +20,7 @@ from sqlalchemy import delete, text
 from app.config import settings
 from app.database import AsyncSessionLocal, Base, engine
 from app.models.music import ListeningHistory
-from app.routers import auth, music, weather, match, chat, social, rooms, playlists, search, charts, debug, admin, radio, trending
+from app.routers import auth, music, weather, match, chat, social, rooms, playlists, search, charts, debug, admin, radio, trending, moods
 from app.services import firebase as firebase_svc
 from app.services.matching import recalculate_all_vectors
 from app.services.email_service import send_account_deletion_email
@@ -185,6 +186,7 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -232,6 +234,7 @@ app.include_router(debug.router, tags=["debug"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(radio.router, prefix="/radio", tags=["radio"])
 app.include_router(trending.router, prefix="/trending", tags=["trending"])
+app.include_router(moods.router, prefix="/moods", tags=["moods"])
 
 
 @app.get(

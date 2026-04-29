@@ -53,8 +53,9 @@ class ApiService {
   ApiService._internal() {
     _dio = Dio(BaseOptions(
       baseUrl: ApiService.baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 15),
+      connectTimeout: const Duration(seconds: 6),
+      receiveTimeout: const Duration(seconds: 10),
+      sendTimeout: const Duration(seconds: 8),
       headers: {'Content-Type': 'application/json'},
     ));
 
@@ -468,6 +469,15 @@ class ApiService {
     return resp.data as List;
   }
 
+  Future<List<dynamic>> getMoodTracks(String moodKey) async {
+    try {
+      final resp = await _dio.get('/moods/${Uri.encodeComponent(moodKey)}/tracks');
+      return resp.data as List? ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<List<dynamic>> getLikedTracks({int limit = 100}) async {
     try {
       final resp = await _dio
@@ -532,6 +542,52 @@ class ApiService {
     });
   }
 
+  Future<void> unlikeTrack(String spotifyId) async {
+    await _dio.post('/tracks/${Uri.encodeComponent(spotifyId)}/like',
+        data: {'action': 'unliked'});
+  }
+
+  Future<List<Map<String, dynamic>>> getLikedAlbums() async {
+    try {
+      final resp = await _dio.get('/albums/liked');
+      return (resp.data as List? ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<bool> likeAlbum({
+    required String albumId,
+    required String albumName,
+    String artistName = '',
+    String? coverUrl,
+  }) async {
+    final resp = await _dio.post('/albums/$albumId/like', data: {
+      'album_id': albumId,
+      'album_name': albumName,
+      'artist_name': artistName,
+      if (coverUrl != null) 'cover_url': coverUrl,
+    });
+    return resp.data['liked'] as bool? ?? true;
+  }
+
+  Future<bool> unlikeAlbum(String albumId) async {
+    final resp = await _dio.delete('/albums/$albumId/like');
+    return resp.data['liked'] as bool? ?? false;
+  }
+
+  Future<bool> getAlbumLikedStatus(String albumId) async {
+    try {
+      final resp = await _dio.get('/albums/$albumId/liked-status');
+      return resp.data['liked'] as bool? ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> skipTrack(
     String spotifyId, {
     int timeListenedMs = 0,
@@ -553,13 +609,13 @@ class ApiService {
     return resp.data;
   }
 
-  Future<List<Map<String, dynamic>>> searchPlaylists(String q) async {
+  Future<List<Map<String, dynamic>>> searchPlaylists(String q, {int limit = 10}) async {
     try {
-      final resp = await globalSearch(q, type: 'playlists');
-      return ((resp['playlists'] as List?) ?? [])
-          .whereType<Map>()
-          .map((e) => Map<String, dynamic>.from(e))
-          .toList();
+      final resp = await _dio.get('/playlists/search',
+          queryParameters: {'q': q, 'limit': limit});
+      final raw = resp.data;
+      final list = raw is Map ? (raw['playlists'] as List?) ?? [] : raw as List? ?? [];
+      return list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
     } catch (_) {
       return [];
     }
@@ -568,6 +624,16 @@ class ApiService {
   Future<List<dynamic>> getTrending() async {
     final resp = await _dio.get('/search/trending');
     return resp.data as List? ?? [];
+  }
+
+  Future<List<String>> getSearchSuggestions(String q) async {
+    try {
+      final resp = await _dio.get('/search/suggestions',
+          queryParameters: {'q': q, 'limit': 8});
+      return (resp.data as List? ?? []).map((e) => e.toString()).toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   Future<List<Map<String, dynamic>>> getSearchHistory({int limit = 20}) async {
@@ -607,8 +673,8 @@ class ApiService {
     await _dio.delete('/search/history');
   }
 
-  Future<Map<String, dynamic>> getUserStats() async {
-    final resp = await _dio.get('/users/me/stats');
+  Future<Map<String, dynamic>> getUserStats({String period = 'all_time'}) async {
+    final resp = await _dio.get('/users/me/stats', queryParameters: {'period': period});
     return resp.data as Map<String, dynamic>;
   }
 

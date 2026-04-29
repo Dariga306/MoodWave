@@ -123,6 +123,61 @@ async def trending_searches(
     return await get_trending_searches(redis, limit)
 
 
+@router.get(
+    "/suggestions",
+    summary="Get search autocomplete suggestions",
+    description="Returns up to 8 autocomplete suggestions from user history and trending queries.",
+)
+async def get_search_suggestions(
+    q: str = Query(default=""),
+    limit: int = Query(default=8, ge=1, le=20),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    query = q.strip()
+    if len(query) < 1:
+        return []
+
+    redis = request.app.state.redis
+    suggestions: list[str] = []
+    seen: set[str] = set()
+
+    # From user's recent search history (prefix match)
+    rows = (
+        await db.execute(
+            select(SearchHistory.query)
+            .where(
+                SearchHistory.user_id == current_user.id,
+                SearchHistory.query.ilike(f"{query}%"),
+            )
+            .order_by(desc(SearchHistory.created_at))
+            .limit(20)
+        )
+    ).scalars().all()
+    for row in rows:
+        key = row.strip().lower()
+        if key not in seen:
+            seen.add(key)
+            suggestions.append(row.strip())
+
+    # From trending searches matching the prefix
+    try:
+        trending = await get_trending_searches(redis, limit=50)
+        for t in trending:
+            key = t.strip().lower()
+            if key not in seen and key.startswith(query.lower()):
+                seen.add(key)
+                suggestions.append(t.strip())
+    except Exception:
+        pass
+
+    if query.lower() not in seen:
+        suggestions.insert(0, query)
+
+    return suggestions[:limit]
+
+
 # ---------------------------------------------------------------------------
 # GET /search/playlists?q=  — playlist search
 # ---------------------------------------------------------------------------

@@ -109,6 +109,14 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> reload() async {
+    try {
+      final fresh = await _api.getMe();
+      _user = fresh;
+      notifyListeners();
+    } catch (_) {}
+  }
+
   String _parseError(Exception e) {
     if (e is DioException) {
       final data = e.response?.data;

@@ -1,70 +1,56 @@
-import httpx
+import asyncio
 import logging
-
-from app.config import settings
+import os
+import subprocess
+import sys
 
 logger = logging.getLogger(__name__)
 
 
-async def search_video_id(title: str, artist: str) -> str | None:
-    """Find YouTube video ID for a track. Tries multiple query strategies."""
-    if not settings.YOUTUBE_API_KEY:
-        return None
+def _yt_dlp_exe() -> str:
+    """Return path to yt-dlp executable, preferring the venv's copy."""
+    scripts_dir = os.path.dirname(sys.executable)
+    candidate = os.path.join(scripts_dir, "yt-dlp.exe" if sys.platform == "win32" else "yt-dlp")
+    return candidate if os.path.isfile(candidate) else "yt-dlp"
 
+
+async def search_video_id(title: str, artist: str) -> str | None:
+    """Search YouTube using yt-dlp subprocess (no API key needed)."""
     queries = [
         f"{title} {artist} official audio",
-        f"{title} {artist} audio",
         f"{title} {artist}",
-        f"{artist} {title}",  # reversed order helps for some CIS artists
     ]
+    loop = asyncio.get_event_loop()
+    for query in queries:
+        video_id = await loop.run_in_executor(None, _ytdlp_subprocess, query)
+        if video_id:
+            return video_id
+    return None
 
-    async with httpx.AsyncClient(timeout=8) as client:
-        for query in queries:
-            try:
-                resp = await client.get(
-                    "https://www.googleapis.com/youtube/v3/search",
-                    params={
-                        "part": "snippet",
-                        "q": query,
-                        "type": "video",
-                        "videoCategoryId": "10",  # Music category
-                        "maxResults": 1,
-                        "key": settings.YOUTUBE_API_KEY,
-                    },
-                )
-                if resp.status_code == 200:
-                    items = resp.json().get("items", [])
-                    if items:
-                        video_id = items[0]["id"]["videoId"]
-                        logger.debug(
-                            "YouTube found videoId=%s via query=%r", video_id, query
-                        )
-                        return video_id
-                elif resp.status_code == 403:
-                    # Quota exceeded — stop trying
-                    logger.warning("YouTube API quota exceeded")
-                    return None
-            except Exception as e:
-                logger.error("YouTube search error for query=%r: %s", query, e)
 
-    # Last resort: search without music category filter
+def _ytdlp_subprocess(query: str) -> str | None:
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.get(
-                "https://www.googleapis.com/youtube/v3/search",
-                params={
-                    "part": "snippet",
-                    "q": f"{title} {artist}",
-                    "type": "video",
-                    "maxResults": 3,
-                    "key": settings.YOUTUBE_API_KEY,
-                },
-            )
-            if resp.status_code == 200:
-                items = resp.json().get("items", [])
-                if items:
-                    return items[0]["id"]["videoId"]
+        result = subprocess.run(
+            [
+                _yt_dlp_exe(),
+                "--no-playlist",
+                "--get-id",
+                "--no-warnings",
+                "--quiet",
+                "--no-check-certificates",
+                f"ytsearch1:{query}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        output = result.stdout.strip()
+        first_line = output.split("\n")[0].strip() if output else ""
+        if len(first_line) == 11:
+            logger.debug("yt-dlp found videoId=%s for query=%r", first_line, query)
+            return first_line
+    except subprocess.TimeoutExpired:
+        logger.warning("yt-dlp subprocess timeout for query=%r", query)
     except Exception as e:
-        logger.error("YouTube fallback search error: %s", e)
-
+        logger.error("yt-dlp subprocess error for query=%r: %s", query, e)
     return None

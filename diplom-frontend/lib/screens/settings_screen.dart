@@ -458,9 +458,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().user;
-    final displayName = user?['display_name'] ?? user?['username'] ?? 'User';
     final city = user?['city'] ?? '';
-    final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U';
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -478,66 +476,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         color: AppColors.text,
                         letterSpacing: -0.02 * 26)),
               ),
-              // User card
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: GestureDetector(
-                  onTap: _openEditProfile,
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(colors: [
-                        AppColors.purpleDark.withOpacity(0.1),
-                        AppColors.pink.withOpacity(0.07),
-                      ]),
-                      borderRadius: BorderRadius.circular(20),
-                      border:
-                          Border.all(color: AppColors.purple.withOpacity(0.2)),
-                    ),
-                    child: Row(children: [
-                      Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                              gradient: AppColors.gradMixed,
-                              shape: BoxShape.circle),
-                          child: Center(
-                              child: Text(initial,
-                                  style: GoogleFonts.outfit(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.w800,
-                                      color: Colors.white)))),
-                      const SizedBox(width: 14),
-                      Expanded(
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                            Text(displayName,
-                                style: GoogleFonts.outfit(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.text)),
-                            if (city.isNotEmpty)
-                              Text(city,
-                                  style: GoogleFonts.outfit(
-                                      fontSize: 12, color: AppColors.text3)),
-                          ])),
-                      const Icon(Icons.chevron_right_rounded,
-                          color: AppColors.text3),
-                    ]),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
               _SettingsGroup(label: 'Account', children: [
-                GestureDetector(
-                  onTap: _openEditProfile,
-                  child: _SettingRow(
-                      emoji: '👤',
-                      bg: AppColors.purple.withOpacity(0.15),
-                      name: 'Edit Profile',
-                      sub: 'Photo, name, username'),
-                ),
                 GestureDetector(
                   onTap: () => Navigator.push(
                       context,

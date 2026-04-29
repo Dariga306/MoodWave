@@ -30,8 +30,6 @@ class _LibraryTabState extends State<LibraryTab> {
   List<dynamic> _playlists = [];
   List<Map<String, dynamic>> _albums = [];
   List<Map<String, dynamic>> _artists = [];
-  Set<String> _likedTrackAlbumIds = {};
-  Map<String, int> _albumLikedCount = {};
   bool _loading = true;
   bool _albumsLoaded = false;
   bool _albumsLoading = false;
@@ -45,6 +43,10 @@ class _LibraryTabState extends State<LibraryTab> {
   }
 
   Future<void> _load() async {
+    setState(() {
+      _albumsLoaded = false;
+      _artistsLoaded = false;
+    });
     try {
       final data = await ApiService().getPlaylists();
       if (!mounted) return;
@@ -56,49 +58,25 @@ class _LibraryTabState extends State<LibraryTab> {
       if (!mounted) return;
       setState(() => _loading = false);
     }
+    if (_filter == 2) _loadAlbums();
+    if (_filter == 3) _loadArtists();
   }
 
   Future<void> _loadAlbums() async {
     if (_albumsLoaded) return;
     setState(() => _albumsLoading = true);
     try {
-      final results = await Future.wait([
-        ApiService().getListeningHistory(limit: 200),
-        ApiService().getLikedTracks(),
-      ]);
+      final raw = await ApiService().getLikedAlbums();
       if (!mounted) return;
-      final history = results[0] as List;
-      final liked = results[1] as List;
-
-      // Count liked tracks per album
-      final likedAlbumCount = <String, int>{};
-      for (final t in liked) {
-        if (t is! Map) continue;
-        final aid = t['album_id']?.toString() ?? '';
-        if (aid.isNotEmpty && aid != 'null') {
-          likedAlbumCount[aid] = (likedAlbumCount[aid] ?? 0) + 1;
-        }
-      }
-
-      final seen = <String>{};
-      final albums = <Map<String, dynamic>>[];
-      for (final item in history) {
-        if (item is! Map) continue;
-        final albumId = item['album_id']?.toString() ?? '';
-        if (albumId.isEmpty || albumId == 'null') continue;
-        if (seen.contains(albumId)) continue;
-        seen.add(albumId);
-        albums.add({
-          'id': item['album_id'],
-          'title': item['album']?.toString() ?? 'Unknown Album',
-          'artist': item['artist']?.toString() ?? '',
-          'cover_xl': item['cover_url']?.toString(),
-          'liked_count': likedAlbumCount[albumId] ?? 0,
-        });
-      }
+      final albums = raw.map((item) => {
+        'id': item['id'],
+        'title': item['album_name']?.toString() ?? 'Unknown Album',
+        'artist': item['artist_name']?.toString() ?? '',
+        'cover_xl': item['cover_url']?.toString(),
+        'liked_count': 0,
+      }).toList();
       setState(() {
         _albums = albums;
-        _albumLikedCount = likedAlbumCount;
         _albumsLoaded = true;
         _albumsLoading = false;
       });
@@ -427,7 +405,7 @@ class _LibraryTabState extends State<LibraryTab> {
                           Text('No albums yet',
                               style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.text)),
                           const SizedBox(height: 6),
-                          Text('Albums you listen to will appear here',
+                          Text('Like an album to save it here',
                               style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3)),
                         ]),
                       ),
@@ -440,7 +418,6 @@ class _LibraryTabState extends State<LibraryTab> {
                           final artist = (album['artist'] ?? '').toString();
                           final cover = album['cover_xl']?.toString();
                           final albumId = album['id'];
-                          final likedCount = album['liked_count'] as int? ?? 0;
                           return GestureDetector(
                             onTap: () {
                               if (albumId != null) {
@@ -492,16 +469,6 @@ class _LibraryTabState extends State<LibraryTab> {
                                         maxLines: 1, overflow: TextOverflow.ellipsis)),
                                   ]),
                                 ])),
-                                if (likedCount > 0)
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 8),
-                                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                      const Icon(Icons.favorite_rounded, size: 12, color: AppColors.pink),
-                                      const SizedBox(width: 3),
-                                      Text('$likedCount', style: GoogleFonts.outfit(
-                                          fontSize: 12, color: AppColors.pink, fontWeight: FontWeight.w600)),
-                                    ]),
-                                  ),
                                 const Icon(Icons.chevron_right_rounded, color: AppColors.text3, size: 20),
                               ]),
                             ),
@@ -634,7 +601,7 @@ class _LibraryTabState extends State<LibraryTab> {
                     crossAxisCount: 2,
                     mainAxisSpacing: 14,
                     crossAxisSpacing: 14,
-                    childAspectRatio: 0.85,
+                    childAspectRatio: 0.75,
                   ),
                   delegate: SliverChildBuilderDelegate(
                     (_, i) => _PlaylistGridItem(
@@ -811,10 +778,6 @@ class _PlaylistItem extends StatelessWidget {
                 Navigator.push(context, MaterialPageRoute(
                   builder: (_) => CreatePlaylistScreen(existingPlaylist: playlist),
                 )).then((_) => onRefresh());
-              }),
-              item(Icons.title_rounded, 'Rename', () {
-                Navigator.pop(ctx);
-                _renamePlaylist(context, id, title);
               }),
               item(Icons.delete_rounded, 'Delete playlist', () {
                 Navigator.pop(ctx);
@@ -998,14 +961,17 @@ class _PlaylistGridItem extends StatelessWidget {
                 : const Center(child: Text('🎵', style: TextStyle(fontSize: 36))),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         Text(title.toString(),
             style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text),
             maxLines: 1, overflow: TextOverflow.ellipsis),
+        const SizedBox(height: 2),
         Row(children: [
           _VisibilityBadge(visibility),
           const SizedBox(width: 6),
-          Text('$trackCount songs', style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
+          Flexible(child: Text('$trackCount songs',
+              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3),
+              maxLines: 1, overflow: TextOverflow.ellipsis)),
         ]),
       ]),
     );

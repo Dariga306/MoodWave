@@ -1,12 +1,17 @@
+import 'dart:math';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 
+import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../utils/show_snackbar.dart';
 import '../widgets/common_widgets.dart';
+import 'create_playlist_screen.dart';
 import 'player_screen.dart';
 
 class PlaylistScreen extends StatefulWidget {
@@ -68,15 +73,47 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
 
   void _playAll(List tracks) {
     if (tracks.isEmpty) return;
-    final queue = tracks
+    var queue = tracks
         .whereType<Map>()
         .map((t) => Map<String, dynamic>.from(t))
         .toList();
+    if (context.read<PlayerProvider>().shuffleOn) {
+      final rng = Random();
+      for (int i = queue.length - 1; i > 0; i--) {
+        final j = rng.nextInt(i + 1);
+        final tmp = queue[i];
+        queue[i] = queue[j];
+        queue[j] = tmp;
+      }
+    }
     final first = Map<String, dynamic>.from(queue.first)..['queue'] = queue;
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => PlayerScreen(track: first)),
     );
+  }
+
+  void _shufflePlay(List tracks) {
+    if (tracks.isEmpty) return;
+    final queue = tracks
+        .whereType<Map>()
+        .map((t) => Map<String, dynamic>.from(t))
+        .toList();
+    // Fisher-Yates shuffle
+    final rng = Random();
+    for (int i = queue.length - 1; i > 0; i--) {
+      final j = rng.nextInt(i + 1);
+      final tmp = queue[i];
+      queue[i] = queue[j];
+      queue[j] = tmp;
+    }
+    final first = Map<String, dynamic>.from(queue.first)..['queue'] = queue;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Shuffle on', style: GoogleFonts.outfit(fontSize: 13)),
+          backgroundColor: AppColors.surface, behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 1)),
+    );
+    Navigator.push(context, MaterialPageRoute(builder: (_) => PlayerScreen(track: first)));
   }
 
   Future<void> _renamePlaylist() async {
@@ -206,30 +243,32 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
             ),
             const SizedBox(height: 10),
             const Divider(color: Colors.white10, height: 1),
+            item(Icons.play_arrow_rounded, 'Play now', () {
+              Navigator.pop(ctx);
+              final trackList = (_playlist?['tracks'] as List?) ?? [];
+              _playAll(trackList);
+            }),
+            item(Icons.shuffle_rounded, 'Shuffle and play', () {
+              Navigator.pop(ctx);
+              final trackList = (_playlist?['tracks'] as List?) ?? [];
+              _shufflePlay(trackList);
+            }),
             item(Icons.add_rounded, 'Add tracks', () {
               Navigator.pop(ctx);
               _addTracksDialog();
             }),
-            item(Icons.edit_rounded, 'Rename', () {
+            item(Icons.edit_rounded, 'Edit playlist', () {
               Navigator.pop(ctx);
-              _renamePlaylist();
-            }),
-            item(Icons.description_outlined, 'Edit description', () {
-              Navigator.pop(ctx);
-              _editDescriptionDialog();
+              if (_playlist == null) return;
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => CreatePlaylistScreen(existingPlaylist: _playlist),
+              )).then((_) => _load());
             }),
             item(Icons.share_outlined, 'Share', () {
               Navigator.pop(ctx);
               Clipboard.setData(ClipboardData(text: 'Check out my playlist: $title on MoodWave'));
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                 content: Text('Copied to clipboard'),
-                duration: Duration(seconds: 2),
-              ));
-            }),
-            item(Icons.download_outlined, 'Download', () {
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Download coming soon'),
                 duration: Duration(seconds: 2),
               ));
             }),
@@ -369,21 +408,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                         fontSize: 15,
                                         fontWeight: FontWeight.w700,
                                         color: AppColors.text)),
-                                GestureDetector(
-                                  onTap: _showPlaylistMenu,
-                                  child: Container(
-                                    width: 40, height: 40,
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: List.generate(3, (_) => Container(
-                                        width: 4, height: 4,
-                                        margin: const EdgeInsets.symmetric(vertical: 1.5),
-                                        decoration: const BoxDecoration(
-                                            color: AppColors.text2, shape: BoxShape.circle),
-                                      )),
-                                    ),
-                                  ),
-                                ),
+                                const SizedBox(width: 40),
                               ],
                             ),
                             const SizedBox(height: 20),
@@ -477,15 +502,34 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                             const SizedBox(height: 16),
                             // Controls
                             Row(children: [
-                              Container(
-                                width: 52, height: 52,
-                                decoration: BoxDecoration(
-                                  color: AppColors.glass,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: AppColors.border),
+                              Consumer<PlayerProvider>(
+                                builder: (_, provider, __) => GestureDetector(
+                                  onTap: () {
+                                    HapticFeedback.lightImpact();
+                                    provider.toggleShuffle();
+                                  },
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 200),
+                                    width: 52, height: 52,
+                                    decoration: BoxDecoration(
+                                      color: provider.shuffleOn
+                                          ? AppColors.purpleLight.withOpacity(0.2)
+                                          : AppColors.glass,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: provider.shuffleOn
+                                            ? AppColors.purpleLight
+                                            : AppColors.border,
+                                        width: provider.shuffleOn ? 1.5 : 1,
+                                      ),
+                                    ),
+                                    child: Icon(Icons.shuffle_rounded,
+                                        size: 22,
+                                        color: provider.shuffleOn
+                                            ? AppColors.purpleLight
+                                            : AppColors.text3),
+                                  ),
                                 ),
-                                child: const Icon(Icons.shuffle_rounded,
-                                    size: 22, color: AppColors.purpleLight),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
@@ -527,15 +571,18 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                 ),
                               ),
                               const SizedBox(width: 12),
-                              Container(
-                                width: 52, height: 52,
-                                decoration: BoxDecoration(
-                                  color: AppColors.glass,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: AppColors.border),
+                              GestureDetector(
+                                onTap: _showPlaylistMenu,
+                                child: Container(
+                                  width: 52, height: 52,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.glass,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: AppColors.border),
+                                  ),
+                                  child: const Icon(Icons.more_horiz_rounded,
+                                      size: 22, color: AppColors.text2),
                                 ),
-                                child: const Icon(Icons.more_horiz_rounded,
-                                    size: 22, color: AppColors.text2),
                               ),
                             ]),
                           ],

@@ -2,7 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../screens/artist_screen.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 
@@ -512,13 +512,49 @@ void showTrackMenu(
                 _showAddToPlaylistDialog(context, track);
               },
             ),
-            if (onGoToArtist != null && artist.isNotEmpty)
+            if (artist.isNotEmpty)
               _TrackMenuItem(
                 icon: Icons.person_rounded,
                 label: 'Go to artist',
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(ctx);
-                  onGoToArtist();
+                  if (onGoToArtist != null) {
+                    onGoToArtist();
+                    return;
+                  }
+                  final artistId = track['artist_id']?.toString() ?? '';
+                  if (artistId.isNotEmpty) {
+                    Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => ArtistScreen(
+                          artistId: artistId, artistName: artist),
+                    ));
+                    return;
+                  }
+                  try {
+                    final results = await ApiService()
+                        .searchArtistsList(artist, limit: 1);
+                    if (results.isNotEmpty) {
+                      final id = results.first['id']?.toString() ?? '';
+                      if (id.isNotEmpty && context.mounted) {
+                        Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => ArtistScreen(
+                              artistId: id, artistName: artist),
+                        ));
+                        return;
+                      }
+                    }
+                  } catch (_) {}
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Artist not found',
+                            style: GoogleFonts.outfit(color: Colors.white)),
+                        backgroundColor: AppColors.purpleDark,
+                        behavior: SnackBarBehavior.floating,
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  }
                 },
               ),
             if (onViewAlbum != null)
@@ -528,16 +564,6 @@ void showTrackMenu(
                 onTap: () {
                   Navigator.pop(ctx);
                   onViewAlbum();
-                },
-              ),
-            if (previewUrl != null && previewUrl.isNotEmpty)
-              _TrackMenuItem(
-                icon: Icons.download_outlined,
-                label: 'Download preview',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  launchUrl(Uri.parse(previewUrl),
-                      mode: LaunchMode.externalApplication);
                 },
               ),
             _TrackMenuItem(

@@ -108,10 +108,6 @@ class _PlayerScreenState extends State<PlayerScreen>
   // Progress heartbeat
   Timer? _progressTimer;
 
-  // Like animation
-  late final AnimationController _likeController;
-  late final Animation<double> _likeScale;
-
   String get _title =>
       (_track['title'] ?? _track['trackName'] ?? 'Unknown').toString();
   String get _artist =>
@@ -164,15 +160,6 @@ class _PlayerScreenState extends State<PlayerScreen>
       vsync: this,
       duration: const Duration(seconds: 4),
     )..repeat(reverse: true);
-    _likeController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 400),
-    );
-    _likeScale = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.45), weight: 40),
-      TweenSequenceItem(tween: Tween(begin: 1.45, end: 0.88), weight: 30),
-      TweenSequenceItem(tween: Tween(begin: 0.88, end: 1.0), weight: 30),
-    ]).animate(CurvedAnimation(parent: _likeController, curve: Curves.easeOut));
     // Register toggle callback with PlayerProvider
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -201,7 +188,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     _sleepTimer?.cancel();
     _progressTimer?.cancel();
     _floatController.dispose();
-    _likeController.dispose();
     _ytStateSubscription?.cancel();
     _ytPositionSubscription?.cancel();
     _audioPositionSubscription?.cancel();
@@ -490,7 +476,11 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     try {
       await _player.setUrl(url);
-      _duration = _player.duration ?? Duration.zero;
+      // Prefer full track duration from metadata over the 30s preview duration
+      final trackDurationMs = _track['duration_ms'] as int?;
+      _duration = (trackDurationMs != null && trackDurationMs > 0)
+          ? Duration(milliseconds: trackDurationMs)
+          : (_player.duration ?? Duration.zero);
       _audioReady = true;
 
       _audioPositionSubscription = _player.positionStream.listen((position) {
@@ -500,7 +490,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
       _audioDurationSubscription = _player.durationStream.listen((duration) {
         if (!mounted || duration == null) return;
-        setState(() => _duration = duration);
+        // Only override if track metadata did not provide a duration
+        final metaMs = _track['duration_ms'] as int?;
+        if (metaMs == null || metaMs <= 0) {
+          setState(() => _duration = duration);
+        }
       });
       _audioStateSubscription = _player.playerStateStream.listen((state) {
         if (!mounted) return;
@@ -661,7 +655,6 @@ class _PlayerScreenState extends State<PlayerScreen>
       );
       if (!mounted) return;
       setState(() => _isLiked = !_isLiked);
-      if (_isLiked) _likeController.forward(from: 0);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Added to Liked Songs'),
@@ -866,6 +859,26 @@ class _PlayerScreenState extends State<PlayerScreen>
                       _topBar(),
                       const SizedBox(height: 28),
                       _coverArtBox(),
+                      if (!_usingYoutube && _audioReady)
+                        Container(
+                          margin: const EdgeInsets.only(top: 10),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.07),
+                            borderRadius: BorderRadius.circular(100),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.12)),
+                          ),
+                          child: Text(
+                            'Preview only',
+                            style: GoogleFonts.outfit(
+                              fontSize: 11,
+                              color: Colors.white38,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
                       if (_currentLyricLine != null &&
                           _currentLyricLine!.isNotEmpty)
                         GestureDetector(
@@ -1070,19 +1083,12 @@ class _PlayerScreenState extends State<PlayerScreen>
               ],
             ),
           ),
-          AnimatedBuilder(
-            animation: _likeScale,
-            builder: (_, child) => Transform.scale(
-              scale: _likeScale.value,
-              child: child,
-            ),
-            child: IconButton(
-              onPressed: _toggleLike,
-              icon: Icon(
-                _isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                color: _isLiked ? AppColors.pink : AppColors.text2,
-                size: 24,
-              ),
+          IconButton(
+            onPressed: _toggleLike,
+            icon: Icon(
+              _isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              color: _isLiked ? AppColors.pink : AppColors.text2,
+              size: 24,
             ),
           ),
         ],

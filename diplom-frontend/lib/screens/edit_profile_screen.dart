@@ -66,6 +66,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   bool _showBannerPicker = false;
   Uint8List? _avatarBytes;
   Uint8List? _bannerBytes;
+  String? _savedAvatarUrl;
+  String? _savedBannerUrl;
 
   @override
   void initState() {
@@ -81,6 +83,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _isPublic = widget.user['is_public'] ?? true;
     _showActivity = widget.user['show_activity'] ?? true;
     _gender = widget.user['gender'];
+    _savedAvatarUrl = widget.user['avatar_url'] as String?;
+    _savedBannerUrl = widget.user['banner_url'] as String?;
   }
 
   Future<void> _pickAvatarImage() async {
@@ -305,6 +309,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       );
       if (!mounted) return;
       context.read<AuthProvider>().updateUser(updatedUser);
+      setState(() {
+        _savedAvatarUrl = updatedUser['avatar_url'] as String?;
+        _savedBannerUrl = updatedUser['banner_url'] as String?;
+        _avatarBytes = null;
+        _bannerBytes = null;
+      });
       showSuccessSnackBar(context, 'Profile updated successfully!');
       Navigator.of(context).pop(true);
     } on DioException catch (e) {
@@ -325,8 +335,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             ? _firstNameCtrl.text
             : widget.user['display_name'] ?? 'U')[0]
         .toUpperCase();
-    final avatarUrl = widget.user['avatar_url'] as String? ?? '';
-    final bannerUrl = widget.user['banner_url'] as String? ?? '';
+    final avatarUrl = _savedAvatarUrl ?? '';
+    final bannerUrl = _savedBannerUrl ?? '';
     final bannerColors = _bannerGradients[_bannerPreset];
     final avatarColors = _avatarGradients[_avatarPreset];
 

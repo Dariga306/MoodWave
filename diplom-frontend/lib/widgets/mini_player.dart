@@ -15,26 +15,43 @@ class MiniPlayer extends StatefulWidget {
 
 class _MiniPlayerState extends State<MiniPlayer>
     with SingleTickerProviderStateMixin {
-  double _dragOffset = 0;
+  double _dragOffsetY = 0;
+  double _dragOffsetX = 0;
   bool _dismissing = false;
 
   void _onDragUpdate(DragUpdateDetails d) {
-    if (d.delta.dy > 0) {
-      setState(() => _dragOffset += d.delta.dy);
+    if (d.delta.dy.abs() > d.delta.dx.abs()) {
+      if (d.delta.dy > 0) setState(() => _dragOffsetY += d.delta.dy);
+    } else {
+      setState(() => _dragOffsetX += d.delta.dx);
     }
   }
 
   void _onDragEnd(DragEndDetails d, PlayerProvider provider) {
-    final velocity = d.primaryVelocity ?? 0;
-    if (velocity > 250 || _dragOffset > 60) {
-      setState(() => _dismissing = true);
-      Future.delayed(const Duration(milliseconds: 180), () {
-        provider.clear();
-        if (mounted) setState(() { _dragOffset = 0; _dismissing = false; });
-      });
+    final velY = d.primaryVelocity ?? 0;
+    final velX = d.velocity.pixelsPerSecond.dx;
+
+    if (_dragOffsetY.abs() > _dragOffsetX.abs()) {
+      // Vertical drag — dismiss
+      if (velY > 250 || _dragOffsetY > 60) {
+        setState(() => _dismissing = true);
+        Future.delayed(const Duration(milliseconds: 180), () {
+          provider.clear();
+          if (mounted) setState(() { _dragOffsetY = 0; _dismissing = false; });
+        });
+      } else {
+        setState(() => _dragOffsetY = 0);
+      }
     } else {
-      setState(() => _dragOffset = 0);
+      // Horizontal drag — skip track
+      if (velX < -400 || _dragOffsetX < -60) {
+        provider.nextTrack();
+      } else if (velX > 400 || _dragOffsetX > 60) {
+        provider.prevTrack();
+      }
+      setState(() => _dragOffsetX = 0);
     }
+    setState(() { _dragOffsetY = 0; _dragOffsetX = 0; });
   }
 
   @override
@@ -54,7 +71,7 @@ class _MiniPlayerState extends State<MiniPlayer>
         return AnimatedSlide(
           offset: _dismissing
               ? const Offset(0, 1)
-              : Offset(0, _dragOffset / 200),
+              : Offset(_dragOffsetX / 300, _dragOffsetY / 200),
           duration: _dismissing
               ? const Duration(milliseconds: 200)
               : Duration.zero,
@@ -63,11 +80,11 @@ class _MiniPlayerState extends State<MiniPlayer>
               context,
               MaterialPageRoute(builder: (_) => PlayerScreen(track: track)),
             ),
-            onVerticalDragUpdate: _onDragUpdate,
-            onVerticalDragEnd: (d) => _onDragEnd(d, provider),
+            onPanUpdate: _onDragUpdate,
+            onPanEnd: (d) => _onDragEnd(d, provider),
             child: Container(
               margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              height: 64,
+              height: 66,
               decoration: BoxDecoration(
                 color: const Color(0xFF1E1040),
                 borderRadius: BorderRadius.circular(18),
@@ -84,16 +101,24 @@ class _MiniPlayerState extends State<MiniPlayer>
                 borderRadius: BorderRadius.circular(18),
                 child: Stack(
                   children: [
+                    // Progress bar at bottom
                     Align(
                       alignment: Alignment.bottomLeft,
-                      child: Container(
-                        height: 2,
-                        width: double.infinity,
-                        color: Colors.white.withOpacity(0.06),
+                      child: FractionallySizedBox(
+                        widthFactor: provider.progress.clamp(0.0, 1.0),
+                        child: Container(
+                          height: 2,
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [AppColors.purple, AppColors.purpleLight],
+                            ),
+                          ),
+                        ),
                       ),
                     ),
+                    // Track row
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 2),
                       child: Row(
                         children: [
                           Container(

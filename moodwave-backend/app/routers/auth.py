@@ -755,7 +755,10 @@ async def update_me(
     await db.commit()
     await db.refresh(current_user)
     if {"is_public", "username", "display_name"} & set(data.keys()):
-        await cache_svc.invalidate_all_search_results(request.app.state.redis)
+        try:
+            await cache_svc.invalidate_all_search_results(request.app.state.redis)
+        except Exception:
+            pass
 
     genres = (await db.execute(select(UserGenre).where(UserGenre.user_id == current_user.id))).scalars().all()
     moods = (await db.execute(select(UserMood).where(UserMood.user_id == current_user.id))).scalars().all()
@@ -1041,14 +1044,29 @@ async def deactivate_account(
 async def get_me_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    period: str = Query(default="all_time"),
 ):
     from sqlalchemy import desc as sa_desc
 
-    songs_count = await db.scalar(
-        select(func.count(ListeningHistory.id)).where(ListeningHistory.user_id == current_user.id)
-    )
     month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     year_start = datetime.utcnow().replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    week_start_dt = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start_dt = week_start_dt - timedelta(days=week_start_dt.weekday())
+
+    if period == "month":
+        date_from = month_start
+    elif period == "week":
+        date_from = week_start_dt
+    else:
+        date_from = None
+
+    base_filter = [ListeningHistory.user_id == current_user.id]
+    if date_from is not None:
+        base_filter.append(ListeningHistory.created_at >= date_from)
+
+    songs_count = await db.scalar(
+        select(func.count(ListeningHistory.id)).where(*base_filter)
+    )
     this_month_count = await db.scalar(
         select(func.count(ListeningHistory.id)).where(
             ListeningHistory.user_id == current_user.id,
@@ -1068,60 +1086,142 @@ async def get_me_stats(
         select(func.count(UserFollow.id)).where(UserFollow.follower_id == current_user.id)
     )
     # Unique artists from listening history
-    unique_artists_count = await db.scalar(
+    unique_artists_q = (
         select(func.count(func.distinct(TrackCache.artist)))
         .join(ListeningHistory, ListeningHistory.spotify_track_id == TrackCache.spotify_id)
-        .where(ListeningHistory.user_id == current_user.id)
+        .where(*base_filter)
         .where(TrackCache.artist.isnot(None))
         .where(TrackCache.artist != "")
     )
-    # Playlists created
+    unique_artists_count = await db.scalar(unique_artists_q)
+    # Playlists created — owner_id is the correct column name
     playlists_count = await db.scalar(
-        select(func.count(Playlist.id)).where(Playlist.user_id == current_user.id)
+        select(func.count(Playlist.id)).where(Playlist.owner_id == current_user.id)
     )
-    # Total listening time (sum of track durations) this year
+    # Total listening time (sum of track durations)
+    time_filter = base_filter if date_from is not None else [
+        ListeningHistory.user_id == current_user.id,
+        ListeningHistory.created_at >= year_start,
+    ]
     total_ms = await db.scalar(
         select(func.sum(TrackCache.duration_ms))
         .join(ListeningHistory, ListeningHistory.spotify_track_id == TrackCache.spotify_id)
-        .where(ListeningHistory.user_id == current_user.id)
-        .where(ListeningHistory.created_at >= year_start)
+        .where(*time_filter)
         .where(TrackCache.duration_ms.isnot(None))
     )
     total_hours = round((total_ms or 0) / 3_600_000, 1)
-    # Top 3 artists by play count
+    # Top 10 artists by play count
     top_artists_rows = (await db.execute(
         select(TrackCache.artist, func.count(ListeningHistory.id).label("plays"))
         .join(ListeningHistory, ListeningHistory.spotify_track_id == TrackCache.spotify_id)
-        .where(ListeningHistory.user_id == current_user.id)
+        .where(*base_filter)
         .where(TrackCache.artist.isnot(None))
         .where(TrackCache.artist != "")
         .group_by(TrackCache.artist)
         .order_by(sa_desc("plays"))
-        .limit(3)
+        .limit(10)
     )).all()
     top_artists = [{"name": r.artist, "plays": r.plays} for r in top_artists_rows]
+    # Top 10 tracks by play count
+    top_tracks_rows = (await db.execute(
+        select(
+            TrackCache.title,
+            TrackCache.artist,
+            TrackCache.cover_url,
+            func.count(ListeningHistory.id).label("plays"),
+        )
+        .join(ListeningHistory, ListeningHistory.spotify_track_id == TrackCache.spotify_id)
+        .where(*base_filter)
+        .where(TrackCache.title.isnot(None))
+        .group_by(TrackCache.title, TrackCache.artist, TrackCache.cover_url)
+        .order_by(sa_desc("plays"))
+        .limit(10)
+    )).all()
+    top_tracks = [
+        {"title": r.title, "artist": r.artist, "cover_url": r.cover_url, "play_count": r.plays}
+        for r in top_tracks_rows
+    ]
     # User genre preferences
     genres = (await db.execute(
         select(UserGenre.genre).where(UserGenre.user_id == current_user.id).limit(5)
     )).scalars().all()
     # Real genre counts from listening history (JSONB unnest)
     from sqlalchemy import text as sa_text
-    genre_counts_rows = (await db.execute(sa_text("""
+    date_clause = "AND lh.created_at >= :date_from" if date_from is not None else ""
+    genre_counts_rows = (await db.execute(sa_text(f"""
         SELECT genre_val, COUNT(*) AS plays
         FROM listening_history lh
         JOIN track_cache tc ON lh.spotify_track_id = tc.spotify_id,
              jsonb_array_elements_text(tc.genres) AS genre_val
         WHERE lh.user_id = :uid
+          {date_clause}
           AND jsonb_typeof(tc.genres) = 'array'
           AND genre_val <> ''
         GROUP BY genre_val
         ORDER BY plays DESC
         LIMIT 8
-    """), {"uid": current_user.id})).all()
+    """), {"uid": current_user.id, "date_from": date_from})).all()
     genre_counts = [{"name": r.genre_val, "plays": r.plays} for r in genre_counts_rows]
+    # Listening by time of day
+    listening_time_rows = (await db.execute(sa_text(f"""
+        SELECT
+            CASE
+                WHEN EXTRACT(HOUR FROM created_at) BETWEEN 6 AND 11 THEN 'morning'
+                WHEN EXTRACT(HOUR FROM created_at) BETWEEN 12 AND 17 THEN 'afternoon'
+                WHEN EXTRACT(HOUR FROM created_at) BETWEEN 18 AND 23 THEN 'evening'
+                ELSE 'night'
+            END AS period,
+            COUNT(*) AS plays
+        FROM listening_history
+        WHERE user_id = :uid
+        {date_clause}
+        GROUP BY period
+    """), {"uid": current_user.id, "date_from": date_from})).all()
+    listening_by_time = {"morning": 0, "afternoon": 0, "evening": 0, "night": 0}
+    for r in listening_time_rows:
+        listening_by_time[r.period] = r.plays
+    # Listening streak (consecutive days)
+    streak_rows = (await db.execute(sa_text("""
+        SELECT DISTINCT DATE(created_at) AS day
+        FROM listening_history
+        WHERE user_id = :uid
+        ORDER BY day DESC
+    """), {"uid": current_user.id})).all()
+    streak_days = [r.day for r in streak_rows]
+    current_streak = 0
+    best_streak = 0
+    if streak_days:
+        today = date.today()
+        cur = 0
+        prev = None
+        for d in streak_days:
+            if prev is None:
+                if d >= today - timedelta(days=1):
+                    cur = 1
+                else:
+                    cur = 0
+            elif (prev - d).days == 1:
+                cur += 1
+            else:
+                best_streak = max(best_streak, cur)
+                cur = 1
+            prev = d
+        best_streak = max(best_streak, cur)
+        if streak_days and streak_days[0] >= today - timedelta(days=1):
+            current_streak = cur
+    # Week count
+    this_week_count = await db.scalar(
+        select(func.count(ListeningHistory.id)).where(
+            ListeningHistory.user_id == current_user.id,
+            ListeningHistory.created_at >= week_start_dt,
+        )
+    )
 
     return {
         "songs_count": songs_count or 0,
+        "songs_played_total": songs_count or 0,
+        "songs_played_month": this_month_count or 0,
+        "songs_played_week": this_week_count or 0,
         "this_month_count": this_month_count or 0,
         "friends_count": friends_count or 0,
         "followers_count": followers_count or 0,
@@ -1130,8 +1230,12 @@ async def get_me_stats(
         "playlists_count": playlists_count or 0,
         "total_hours": total_hours,
         "top_artists": top_artists,
+        "top_tracks": top_tracks,
         "genres": list(genres),
         "genre_counts": genre_counts,
+        "listening_by_time": listening_by_time,
+        "current_streak": current_streak,
+        "best_streak": best_streak,
         "user_id": current_user.id,
     }
 

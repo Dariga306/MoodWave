@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Boolean, DateTime, Integer, Float, ForeignKey, Text, Enum
+from sqlalchemy import String, Boolean, DateTime, Integer, Float, ForeignKey, Text, Enum, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import JSONB
 import enum
@@ -44,6 +44,10 @@ class TrackCache(Base):
 
 class ListeningHistory(Base):
     __tablename__ = "listening_history"
+    __table_args__ = (
+        Index('ix_lh_user_created', 'user_id', 'created_at'),
+        Index('ix_lh_user_track', 'user_id', 'spotify_track_id'),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -75,6 +79,9 @@ class Playlist(Base):
 
 class PlaylistTrack(Base):
     __tablename__ = "playlist_tracks"
+    __table_args__ = (
+        Index('ix_pt_playlist_position', 'playlist_id', 'position'),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     playlist_id: Mapped[int] = mapped_column(ForeignKey("playlists.id", ondelete="CASCADE"), index=True)
@@ -83,3 +90,18 @@ class PlaylistTrack(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     playlist: Mapped["Playlist"] = relationship(back_populates="tracks")
+
+
+class LikedAlbum(Base):
+    __tablename__ = "liked_albums"
+    __table_args__ = (
+        Index('ix_liked_albums_user', 'user_id', 'liked_at'),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    album_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    album_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    artist_name: Mapped[str] = mapped_column(String(255), nullable=False, default='')
+    cover_url: Mapped[Optional[str]] = mapped_column(Text)
+    liked_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
