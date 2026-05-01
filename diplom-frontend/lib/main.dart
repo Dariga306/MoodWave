@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:youtube_player_iframe/youtube_player_iframe.dart' as yt;
 import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'providers/player_provider.dart';
@@ -58,7 +59,9 @@ class MoodWaveApp extends StatelessWidget {
           backgroundColor: Colors.transparent,
           elevation: 0,
           titleTextStyle: GoogleFonts.outfit(
-            fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
           ),
           iconTheme: const IconThemeData(color: Colors.white),
         ),
@@ -74,6 +77,39 @@ class MoodWaveApp extends StatelessWidget {
         splashColor: Colors.transparent,
       ),
       home: const SplashScreen(),
+      builder: (context, child) => Stack(
+        children: [
+          if (child != null) child,
+          const _PersistentPlaybackHost(),
+        ],
+      ),
+    );
+  }
+}
+
+class _PersistentPlaybackHost extends StatelessWidget {
+  const _PersistentPlaybackHost();
+
+  @override
+  Widget build(BuildContext context) {
+    final controller =
+        context.select<PlayerProvider, yt.YoutubePlayerController?>(
+      (player) => player.youtubeController,
+    );
+
+    if (controller == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned(
+      left: -500,
+      top: -500,
+      width: 320,
+      height: 180,
+      child: IgnorePointer(
+        ignoring: true,
+        child: yt.YoutubePlayer(controller: controller),
+      ),
     );
   }
 }

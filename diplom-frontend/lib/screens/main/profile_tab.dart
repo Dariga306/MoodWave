@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/media_url.dart';
 import '../artist_screen.dart';
 import '../edit_profile_screen.dart';
 import '../extra_screens.dart';
@@ -24,6 +25,7 @@ class _ProfileTabState extends State<ProfileTab> {
   int? _followingCount;
   int? _userId;
   bool _statsLoaded = false;
+  int _lastProfileRevision = 0;
 
   @override
   void initState() {
@@ -37,18 +39,13 @@ class _ProfileTabState extends State<ProfileTab> {
 
   Future<void> _loadStats() async {
     try {
-      final results = await Future.wait([
-        ApiService().getUserStats(),
-        ApiService().getFollowedArtists().catchError((_) => <dynamic>[]),
-      ]);
-      final data = results[0] as Map<String, dynamic>;
-      final artistList = results[1] as List;
+      final data = await ApiService().getMe();
       if (!mounted) return;
+      context.read<AuthProvider>().updateUser(data);
       setState(() {
-        _followersCount = data['followers_count'] as int? ?? 0;
-        final userFollowing = data['following_count'] as int? ?? 0;
-        _followingCount = userFollowing + artistList.length;
-        _userId = data['user_id'] as int?;
+        _followersCount = (data['followers_count'] as num?)?.toInt() ?? 0;
+        _followingCount = (data['following_count'] as num?)?.toInt() ?? 0;
+        _userId = (data['id'] as num?)?.toInt();
         _statsLoaded = true;
       });
     } catch (_) {
@@ -62,7 +59,10 @@ class _ProfileTabState extends State<ProfileTab> {
     Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => _SocialScreen(userId: _userId!, initialTab: 0),
+          builder: (_) => _ConnectionsScreen(
+            userId: _userId!,
+            mode: _ConnectionMode.followers,
+          ),
         ));
   }
 
@@ -71,8 +71,21 @@ class _ProfileTabState extends State<ProfileTab> {
     Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => _SocialScreen(userId: _userId!, initialTab: 1),
+          builder: (_) => _ConnectionsScreen(
+            userId: _userId!,
+            mode: _ConnectionMode.following,
+          ),
         ));
+  }
+
+  void _handleProfileRevision(int revision) {
+    if (revision == _lastProfileRevision) return;
+    _lastProfileRevision = revision;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _load();
+      }
+    });
   }
 
   static String _genderToPronouns(String gender) {
@@ -95,13 +108,23 @@ class _ProfileTabState extends State<ProfileTab> {
 
   @override
   Widget build(BuildContext context) {
+    final profileRevision =
+        context.select<AuthProvider, int>((auth) => auth.profileRevision);
+    _handleProfileRevision(profileRevision);
     final user = context.watch<AuthProvider>().user;
     final displayName = user?['display_name'] ?? user?['username'] ?? 'User';
     final username = user?['username'] ?? '';
     final city = user?['city'] ?? '';
     final bio = user?['bio'] as String? ?? '';
-    final avatarUrl = user?['avatar_url'] as String? ?? '';
-    final bannerUrl = user?['banner_url'] as String? ?? '';
+    final mediaVersion = user?['updated_at'];
+    final avatarUrl = buildMediaUrl(
+      user?['avatar_url'] as String?,
+      version: mediaVersion,
+    );
+    final bannerUrl = buildMediaUrl(
+      user?['banner_url'] as String?,
+      version: mediaVersion,
+    );
     final gender = user?['gender'] as String? ?? '';
     final pronouns = _genderToPronouns(gender);
     final avatarPreset = user?['avatar_preset'] as int? ?? 0;
@@ -531,20 +554,18 @@ class _NavRow extends StatelessWidget {
   }
 }
 
-// ─── Followers / Following combined screen ────────────────────────────────────
+enum _ConnectionMode { followers, following }
 
-class _SocialScreen extends StatefulWidget {
+class _ConnectionsScreen extends StatefulWidget {
   final int userId;
-  final int initialTab; // 0 = Followers, 1 = Following
-  const _SocialScreen({required this.userId, required this.initialTab});
+  final _ConnectionMode mode;
+  const _ConnectionsScreen({required this.userId, required this.mode});
 
   @override
-  State<_SocialScreen> createState() => _SocialScreenState();
+  State<_ConnectionsScreen> createState() => _ConnectionsScreenState();
 }
 
-class _SocialScreenState extends State<_SocialScreen>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
+class _ConnectionsScreenState extends State<_ConnectionsScreen> {
   List<Map<String, dynamic>> _followers = [];
   List<Map<String, dynamic>> _followingUsers = [];
   List<Map<String, dynamic>> _followingArtists = [];
@@ -553,39 +574,33 @@ class _SocialScreenState extends State<_SocialScreen>
   @override
   void initState() {
     super.initState();
-    _tabController =
-        TabController(length: 2, vsync: this, initialIndex: widget.initialTab);
     _load();
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
   }
 
   Future<void> _load() async {
     try {
-      final results = await Future.wait([
-        ApiService()
-            .getUserFollowers(widget.userId)
-            .catchError((_) => <Map<String, dynamic>>[]),
-        ApiService()
-            .getUserFollowing(widget.userId)
-            .catchError((_) => <Map<String, dynamic>>[]),
-        ApiService()
-            .getFollowedArtistsDetails()
-            .then((list) => list
-                .whereType<Map>()
-                .map((e) => Map<String, dynamic>.from(e))
-                .toList())
-            .catchError((_) => <Map<String, dynamic>>[]),
-      ]);
+      final results = widget.mode == _ConnectionMode.followers
+          ? await Future.wait([
+              ApiService()
+                  .getUserFollowers(widget.userId)
+                  .catchError((_) => <Map<String, dynamic>>[]),
+            ])
+          : await Future.wait([
+              ApiService()
+                  .getUserFollowing(widget.userId)
+                  .catchError((_) => <Map<String, dynamic>>[]),
+              ApiService()
+                  .getUserFollowingArtists(widget.userId)
+                  .catchError((_) => <Map<String, dynamic>>[]),
+            ]);
       if (!mounted) return;
       setState(() {
-        _followers = results[0];
-        _followingUsers = results[1];
-        _followingArtists = results[2];
+        if (widget.mode == _ConnectionMode.followers) {
+          _followers = results[0] as List<Map<String, dynamic>>;
+        } else {
+          _followingUsers = results[0] as List<Map<String, dynamic>>;
+          _followingArtists = results[1] as List<Map<String, dynamic>>;
+        }
         _loading = false;
       });
     } catch (_) {
@@ -742,34 +757,21 @@ class _SocialScreenState extends State<_SocialScreen>
   @override
   Widget build(BuildContext context) {
     final followingAll = [..._followingUsers, ..._followingArtists];
+    final isFollowers = widget.mode == _ConnectionMode.followers;
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
         backgroundColor: AppColors.bg,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppColors.text),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
-          child: TabBar(
-            controller: _tabController,
-            tabs: [
-              Tab(
-                  text: _loading
-                      ? 'Followers'
-                      : 'Followers (${_followers.length})'),
-              Tab(
-                  text: _loading
-                      ? 'Following'
-                      : 'Following (${followingAll.length})'),
-            ],
-            labelStyle:
-                GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w700),
-            unselectedLabelStyle:
-                GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w500),
-            labelColor: AppColors.text,
-            unselectedLabelColor: AppColors.text3,
-            indicatorColor: AppColors.purpleLight,
-            indicatorWeight: 2,
+        title: Text(
+          isFollowers
+              ? 'Followers${_loading ? '' : ' (${_followers.length})'}'
+              : 'Following${_loading ? '' : ' (${followingAll.length})'}',
+          style: GoogleFonts.outfit(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: AppColors.text,
           ),
         ),
       ),
@@ -777,29 +779,50 @@ class _SocialScreenState extends State<_SocialScreen>
           ? const Center(
               child: CircularProgressIndicator(
                   strokeWidth: 2, color: AppColors.purpleLight))
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                // ── Followers tab ──────────────────────────────────────
-                _followers.isEmpty
-                    ? _emptyState('No followers yet')
-                    : ListView(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        children: _followers.map((u) => _userRow(u)).toList()),
-
-                // ── Following tab (users + artists) ────────────────────
-                followingAll.isEmpty
-                    ? _emptyState('Not following anyone yet')
-                    : ListView(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        children: [
+          : isFollowers
+              ? (_followers.isEmpty
+                  ? _emptyState('No followers yet')
+                  : ListView(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      children: _followers.map((u) => _userRow(u)).toList(),
+                    ))
+              : (followingAll.isEmpty
+                  ? _emptyState('Not following anyone yet')
+                  : ListView(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      children: [
+                        if (_followingUsers.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 6, 20, 4),
+                            child: Text(
+                              'People',
+                              style: GoogleFonts.outfit(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.text3,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ),
                           ..._followingUsers.map((u) => _userRow(u)),
+                        ],
+                        if (_followingArtists.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+                            child: Text(
+                              'Artists',
+                              style: GoogleFonts.outfit(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.text3,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ),
                           ..._followingArtists.map((a) => _artistRow(a)),
                         ],
-                      ),
-              ],
-            ),
+                      ],
+                    )),
     );
   }
 }
-

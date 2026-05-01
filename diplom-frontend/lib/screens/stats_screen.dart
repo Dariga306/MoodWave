@@ -1020,14 +1020,6 @@ class _ArtistRankRow extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: () => _openArtist(context),
-                child: Icon(
-                  Icons.more_horiz_rounded,
-                  color: Colors.white.withValues(alpha: 0.48),
-                ),
-              ),
             ],
           ),
         ),
@@ -1148,17 +1140,6 @@ class _TrackRankRow extends StatelessWidget {
                         ),
                       ),
                     ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: GestureDetector(
-                  onTap: () => _showActions(context),
-                  child: Icon(
-                    Icons.more_horiz_rounded,
-                    color: Colors.white.withValues(alpha: 0.48),
                   ),
                 ),
               ),

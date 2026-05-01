@@ -429,7 +429,7 @@ async def get_notifications(
 
 
 @router.post(
-    "/users/{user_id}/follow",
+    "/users/{user_id:int}/follow",
     summary="Follow user",
     description="Follows a user (subscribe). Idempotent.",
 )
@@ -456,7 +456,7 @@ async def follow_user(
 
 
 @router.delete(
-    "/users/{user_id}/follow",
+    "/users/{user_id:int}/follow",
     summary="Unfollow user",
     description="Unfollows a user (unsubscribe).",
 )
@@ -476,7 +476,7 @@ async def unfollow_user(
 
 
 @router.get(
-    "/users/{user_id}/followers",
+    "/users/{user_id:int}/followers",
     summary="Get user followers",
     description="Returns paginated list of followers for a user.",
 )
@@ -500,7 +500,7 @@ async def get_user_followers(
 
 
 @router.get(
-    "/users/{user_id}/following",
+    "/users/{user_id:int}/following",
     summary="Get user following",
     description="Returns paginated list of users that a user is following.",
 )
@@ -524,7 +524,7 @@ async def get_user_following(
 
 
 @router.post(
-    "/users/me/following/{deezer_artist_id}",
+    "/users/me/following/{deezer_artist_id:int}",
     summary="Follow artist",
     description="Follows a Deezer artist for the current user.",
 )
@@ -546,7 +546,7 @@ async def follow_artist(
 
 
 @router.delete(
-    "/users/me/following/{deezer_artist_id}",
+    "/users/me/following/{deezer_artist_id:int}",
     summary="Unfollow artist",
     description="Removes a followed Deezer artist for the current user.",
 )
@@ -584,21 +584,12 @@ async def list_followed_artists(
     return list(rows)
 
 
-@router.get(
-    "/users/me/following/details",
-    summary="List followed artists with profiles",
-    description="Returns full Deezer artist profiles for the current user's followed artists (limit 10).",
-)
-async def list_followed_artists_details(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+async def _followed_artist_profiles(db: AsyncSession, user_id: int) -> list[dict]:
     rows = (
         await db.execute(
             select(ArtistFollow.deezer_artist_id)
-            .where(ArtistFollow.user_id == current_user.id)
+            .where(ArtistFollow.user_id == user_id)
             .order_by(ArtistFollow.created_at.desc())
-            .limit(10)
         )
     ).scalars().all()
 
@@ -609,4 +600,38 @@ async def list_followed_artists_details(
         *[deezer_service.get_artist(artist_id) for artist_id in rows],
         return_exceptions=True,
     )
-    return [a for a in artists if isinstance(a, dict) and a]
+    payload: list[dict] = []
+    for artist_id, artist in zip(rows, artists):
+        if isinstance(artist, dict) and artist:
+            payload.append(artist)
+        else:
+            payload.append({"id": artist_id, "name": f"Artist {artist_id}"})
+    return payload
+
+
+@router.get(
+    "/users/me/following/details",
+    summary="List followed artists with profiles",
+    description="Returns full Deezer artist profiles for the current user's followed artists (limit 10).",
+)
+async def list_followed_artists_details(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await _followed_artist_profiles(db, current_user.id)
+
+
+@router.get(
+    "/users/{user_id:int}/following/artists",
+    summary="Get followed artists for user",
+    description="Returns Deezer artist profiles followed by the requested user.",
+)
+async def get_user_following_artists(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return await _followed_artist_profiles(db, user_id)

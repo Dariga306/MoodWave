@@ -54,8 +54,7 @@ class EditProfileScreen extends StatefulWidget {
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
-  late TextEditingController _firstNameCtrl;
-  late TextEditingController _lastNameCtrl;
+  late TextEditingController _nameCtrl;
   late TextEditingController _usernameCtrl;
   late TextEditingController _cityCtrl;
   late TextEditingController _bioCtrl;
@@ -75,9 +74,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _firstNameCtrl = TextEditingController(
-        text: widget.user['first_name'] ?? widget.user['display_name'] ?? '');
-    _lastNameCtrl = TextEditingController(text: widget.user['last_name'] ?? '');
+    _nameCtrl = TextEditingController(
+        text: widget.user['display_name'] ?? widget.user['first_name'] ?? '');
     _usernameCtrl = TextEditingController(text: widget.user['username'] ?? '');
     _cityCtrl = TextEditingController(text: widget.user['city'] ?? '');
     _bioCtrl = TextEditingController(text: widget.user['bio'] ?? '');
@@ -324,8 +322,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   void dispose() {
-    _firstNameCtrl.dispose();
-    _lastNameCtrl.dispose();
+    _nameCtrl.dispose();
     _usernameCtrl.dispose();
     _cityCtrl.dispose();
     _bioCtrl.dispose();
@@ -333,42 +330,58 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _save() async {
-    if (_firstNameCtrl.text.trim().isEmpty) {
-      showErrorSnackBar(context, 'First name cannot be empty');
+    if (_nameCtrl.text.trim().isEmpty) {
+      showErrorSnackBar(context, 'Name cannot be empty');
       return;
     }
     setState(() => _saving = true);
     try {
       final auth = context.read<AuthProvider>();
       final updates = <String, dynamic>{
-        'first_name': _firstNameCtrl.text.trim(),
-        'last_name': _lastNameCtrl.text.trim(),
+        'display_name': _nameCtrl.text.trim(),
         'username': _usernameCtrl.text.trim(),
         'city': _cityCtrl.text.trim(),
         'bio': _bioCtrl.text.trim(),
-        'display_name': _firstNameCtrl.text.trim(),
         'avatar_preset': _avatarPreset,
         'banner_preset': _bannerPreset,
         'is_public': _isPublic,
         'show_activity': _showActivity,
         if (_gender != null) 'gender': _gender,
       };
+
+      // Clear old cached images before updating if new ones are being uploaded
+      if (_avatarBytes != null &&
+          _savedAvatarUrl != null &&
+          _savedAvatarUrl!.isNotEmpty) {
+        await CachedNetworkImage.evictFromCache(_savedAvatarUrl!);
+      }
+      if (_bannerBytes != null &&
+          _savedBannerUrl != null &&
+          _savedBannerUrl!.isNotEmpty) {
+        await CachedNetworkImage.evictFromCache(_savedBannerUrl!);
+      }
+
       final updatedUser = await ApiService().updateMe(
         updates,
         avatarBytes: _avatarBytes,
         bannerBytes: _bannerBytes,
       );
       if (!mounted) return;
+
       final nextAvatarUrl = updatedUser['avatar_url'] as String?;
       final nextBannerUrl = updatedUser['banner_url'] as String?;
+
+      // Clear newly cached images to ensure fresh load
       if (nextAvatarUrl != null && nextAvatarUrl.isNotEmpty) {
         await CachedNetworkImage.evictFromCache(nextAvatarUrl);
       }
       if (nextBannerUrl != null && nextBannerUrl.isNotEmpty) {
         await CachedNetworkImage.evictFromCache(nextBannerUrl);
       }
+
       auth.updateUser(updatedUser);
       await auth.reload();
+      auth.bumpProfileRevision();
       if (!mounted) return;
       setState(() {
         _savedAvatarUrl = nextAvatarUrl;
@@ -392,8 +405,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final initial = (_firstNameCtrl.text.isNotEmpty
-            ? _firstNameCtrl.text
+    final initial = (_nameCtrl.text.isNotEmpty
+            ? _nameCtrl.text
             : widget.user['display_name'] ?? 'U')[0]
         .toUpperCase();
     final avatarUrl = _savedAvatarUrl ?? '';
@@ -691,13 +704,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           fontSize: 11, color: AppColors.text3)),
                   const SizedBox(height: 20),
 
-                  _buildField('FIRST NAME', _firstNameCtrl,
-                      Icons.person_outline_rounded,
-                      hint: 'Your first name'),
-                  const SizedBox(height: 14),
-                  _buildField(
-                      'LAST NAME', _lastNameCtrl, Icons.person_outline_rounded,
-                      hint: 'Your last name (optional)'),
+                  _buildField('NAME', _nameCtrl, Icons.person_outline_rounded,
+                      hint: 'Your name'),
                   const SizedBox(height: 14),
                   _buildField(
                       'USERNAME', _usernameCtrl, Icons.alternate_email_rounded,

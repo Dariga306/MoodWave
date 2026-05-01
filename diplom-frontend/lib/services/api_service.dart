@@ -142,6 +142,44 @@ class ApiService {
     return items.whereType<Map>().map(_normalizeTrack).toList();
   }
 
+  Map<String, dynamic> _playlistTrackPayload(Map<String, dynamic> rawTrack) {
+    final track = _normalizeTrack(rawTrack);
+    final spotifyTrackId = (track['spotify_track_id'] ??
+            track['spotify_id'] ??
+            track['deezer_id'] ??
+            track['track_id'] ??
+            track['trackId'] ??
+            track['id'])
+        .toString();
+
+    final durationValue =
+        track['duration_ms'] ?? track['trackTimeMillis'] ?? track['duration'];
+
+    int? durationMs;
+    if (durationValue is int) {
+      durationMs = durationValue;
+    } else if (durationValue is double) {
+      durationMs = durationValue.round();
+    } else if (durationValue != null) {
+      durationMs = int.tryParse(durationValue.toString());
+    }
+
+    if (durationMs != null && durationMs > 0 && durationMs <= 9999) {
+      durationMs *= 1000;
+    }
+
+    return {
+      'spotify_track_id': spotifyTrackId,
+      'title': (track['title'] ?? track['trackName'] ?? 'Unknown').toString(),
+      'artist': (track['artist'] ?? track['artistName'] ?? '').toString(),
+      'album': track['album']?.toString(),
+      'genre': track['genre']?.toString(),
+      'cover_url': (track['cover_url'] ?? track['artworkUrl100'])?.toString(),
+      'preview_url': (track['preview_url'] ?? track['previewUrl'])?.toString(),
+      if (durationMs != null) 'duration_ms': durationMs,
+    };
+  }
+
   String _normalizeText(String value) {
     return value
         .toLowerCase()
@@ -427,7 +465,98 @@ class ApiService {
 
   Future<Map<String, dynamic>> getArtistProfile(String artistId) async {
     final resp = await _dio.get('/artists/$artistId/profile');
-    return Map<String, dynamic>.from(resp.data as Map);
+    final data = Map<String, dynamic>.from(resp.data as Map);
+    final artist = data['artist'];
+    if (artist is Map) {
+      data['artist'] = _normalizeArtistMap(Map<String, dynamic>.from(artist));
+    }
+    return data;
+  }
+
+  Map<String, dynamic> _normalizeArtistMap(Map<String, dynamic> artist) {
+    final id =
+        artist['id'] ?? artist['deezer_artist_id'] ?? artist['artist_id'];
+    final name = (artist['name'] ??
+            artist['artist_name'] ??
+            artist['title'] ??
+            (id == null ? 'Artist' : 'Artist $id'))
+        .toString();
+    final picture = (artist['picture_xl'] ??
+            artist['picture_big'] ??
+            artist['picture_medium'] ??
+            artist['picture'] ??
+            artist['image_url'] ??
+            artist['photo_url'] ??
+            artist['avatar_url'])
+        ?.toString();
+    return {
+      ...artist,
+      'id': id,
+      'name': name,
+      if (picture != null && picture.isNotEmpty) ...{
+        'picture_xl': artist['picture_xl'] ?? picture,
+        'picture_big': artist['picture_big'] ?? picture,
+        'picture_medium': artist['picture_medium'] ?? picture,
+        'picture': artist['picture'] ?? picture,
+        'image_url': artist['image_url'] ?? picture,
+      },
+      'nb_fan': artist['nb_fan'] ?? artist['fans'] ?? artist['followers'] ?? 0,
+      'nb_album': artist['nb_album'] ?? artist['album_count'] ?? 0,
+    };
+  }
+
+  bool _needsArtistHydration(Map<String, dynamic> artist) {
+    final name = (artist['name'] ?? '').toString();
+    final picture = (artist['picture_xl'] ??
+            artist['picture_big'] ??
+            artist['picture_medium'] ??
+            artist['picture'] ??
+            artist['image_url'])
+        ?.toString();
+    return name.isEmpty ||
+        RegExp(r'^Artist\s+\d+$').hasMatch(name) ||
+        picture == null ||
+        picture.isEmpty;
+  }
+
+  Future<Map<String, dynamic>> _hydrateArtist(dynamic item) async {
+    if (item is num || item is String) {
+      final id = item.toString();
+      try {
+        final profile = await getArtistProfile(id);
+        final artist = profile['artist'];
+        if (artist is Map) {
+          return _normalizeArtistMap(Map<String, dynamic>.from(artist));
+        }
+      } catch (_) {}
+      return {'id': item, 'name': 'Artist $item'};
+    }
+
+    if (item is! Map) return {};
+    final artist = _normalizeArtistMap(Map<String, dynamic>.from(item));
+    final id = artist['id'];
+    if (id == null || !_needsArtistHydration(artist)) return artist;
+
+    try {
+      final profile = await getArtistProfile(id.toString());
+      final resolved = profile['artist'];
+      if (resolved is Map && resolved.isNotEmpty) {
+        return _normalizeArtistMap(Map<String, dynamic>.from(resolved));
+      }
+    } catch (_) {}
+    return artist;
+  }
+
+  Future<List<Map<String, dynamic>>> _hydrateArtists(List raw) async {
+    final hydrated = await Future.wait(raw.map(_hydrateArtist));
+    return hydrated
+        .where((artist) => artist.isNotEmpty)
+        .map((artist) => Map<String, dynamic>.from(artist))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> hydrateArtists(List raw) {
+    return _hydrateArtists(raw);
   }
 
   Future<Map<String, dynamic>> getArtistDiscography(String artistId) async {
@@ -778,7 +907,10 @@ class ApiService {
 
   Future<void> addTrackToPlaylist(
       int playlistId, Map<String, dynamic> track) async {
-    await _dio.post('/playlists/$playlistId/tracks', data: track);
+    await _dio.post(
+      '/playlists/$playlistId/tracks',
+      data: _playlistTrackPayload(track),
+    );
   }
 
   Future<void> updatePlaylist(int playlistId,
@@ -912,6 +1044,16 @@ class ApiService {
   }
 
   Future<List> getFollowedArtists() async {
+    try {
+      final details = await getFollowedArtistsDetails();
+      if (details.isNotEmpty) {
+        return details
+            .whereType<Map>()
+            .map((item) => item['id'])
+            .where((id) => id != null)
+            .toList();
+      }
+    } catch (_) {}
     final resp = await _dio.get('/users/me/following');
     return resp.data as List? ?? [];
   }
@@ -919,10 +1061,58 @@ class ApiService {
   Future<List<dynamic>> getFollowedArtistsDetails() async {
     try {
       final resp = await _dio.get('/users/me/following/details');
-      return resp.data as List? ?? [];
+      final details = resp.data as List? ?? [];
+      if (details.isNotEmpty) {
+        return await _hydrateArtists(details);
+      }
+    } catch (_) {
+      // Fall through to the id-based fallback below.
+    }
+    try {
+      final ids = await getFollowedArtistIds();
+      final profiles = await Future.wait(
+        ids.map((id) async {
+          try {
+            return await getArtistProfile(id.toString());
+          } catch (_) {
+            return {
+              'id': id,
+              'name': 'Artist $id',
+            };
+          }
+        }),
+      );
+      return profiles.map((profile) {
+        final artist = profile['artist'];
+        if (artist is Map) {
+          return _normalizeArtistMap(Map<String, dynamic>.from(artist));
+        }
+        return profile;
+      }).toList();
     } catch (_) {
       return [];
     }
+  }
+
+  Future<List<Map<String, dynamic>>> getUserFollowingArtists(
+    int userId, {
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    try {
+      final resp = await _dio.get(
+        '/users/$userId/following/artists',
+        queryParameters: {'limit': limit, 'offset': offset},
+      );
+      return await _hydrateArtists(resp.data as List? ?? const []);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> getFollowedArtistIds() async {
+    final resp = await _dio.get('/users/me/following');
+    return resp.data as List? ?? [];
   }
 
   Future<List<dynamic>> getActiveRooms({int limit = 5}) async {

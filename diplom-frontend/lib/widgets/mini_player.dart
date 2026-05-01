@@ -36,8 +36,13 @@ class _MiniPlayerState extends State<MiniPlayer>
       if (velY > 250 || _dragOffsetY > 60) {
         setState(() => _dismissing = true);
         Future.delayed(const Duration(milliseconds: 180), () {
-          provider.clear();
-          if (mounted) setState(() { _dragOffsetY = 0; _dismissing = false; });
+          provider.stop();
+          if (mounted) {
+            setState(() {
+              _dragOffsetY = 0;
+              _dismissing = false;
+            });
+          }
         });
       } else {
         setState(() => _dragOffsetY = 0);
@@ -51,7 +56,10 @@ class _MiniPlayerState extends State<MiniPlayer>
       }
       setState(() => _dragOffsetX = 0);
     }
-    setState(() { _dragOffsetY = 0; _dragOffsetX = 0; });
+    setState(() {
+      _dragOffsetY = 0;
+      _dragOffsetX = 0;
+    });
   }
 
   @override
@@ -72,9 +80,8 @@ class _MiniPlayerState extends State<MiniPlayer>
           offset: _dismissing
               ? const Offset(0, 1)
               : Offset(_dragOffsetX / 300, _dragOffsetY / 200),
-          duration: _dismissing
-              ? const Duration(milliseconds: 200)
-              : Duration.zero,
+          duration:
+              _dismissing ? const Duration(milliseconds: 200) : Duration.zero,
           child: GestureDetector(
             onTap: () => Navigator.push(
               context,
@@ -175,7 +182,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                           ),
                           const SizedBox(width: 8),
                           GestureDetector(
-                            onTap: () => provider.toggleFromOutside(),
+                            onTap: () => provider.togglePlayPause(),
                             child: Container(
                               width: 38,
                               height: 38,
@@ -194,7 +201,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                           ),
                           const SizedBox(width: 6),
                           GestureDetector(
-                            onTap: () => provider.clear(),
+                            onTap: () => provider.stop(),
                             child: const Padding(
                               padding: EdgeInsets.all(4),
                               child: Icon(Icons.close_rounded,

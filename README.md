@@ -1,152 +1,214 @@
 # MoodWave
 
-MoodWave — дипломный проект, музыкальное приложение с рекомендациями на основе настроения и погоды, матчингом по музыкальному вкусу, чатом и совместным прослушиванием.
+MoodWave — дипломный музыкальный сервис: рекомендации по погоде и настроению, полноценный плеер, синхронизированные lyrics, библиотека, подписки на артистов, социальные функции, радио, чарты и админ-панель.
 
 **Авторы:** Джамаева Сабина, Нургалиева Дарига  
 **Научный руководитель:** Омиргалиев Руслан  
-**Astana IT University · 2026**
+**Astana IT University, 2026**
 
----
+## Что умеет приложение
 
-## Технологический стек
+- Home с блоками `Live Weather`, `Recently Played`, `You Might Like`, `AI Mixes`, `Choose Your Mood`, `Radio`, `This Is`, `Top in your city`, `Fresh Wave`, `Because you listened to` и `Friends are listening`.
+- Плеер с полными треками через YouTube IFrame, мини-плеером, очередью, shuffle/repeat и переходами между треками.
+- Lyrics через lrclib.net: синхронизированный текст, активная строка и переход к моменту песни по нажатию.
+- Поиск треков, артистов и альбомов на русском и английском.
+- Страницы артистов: топ-треки, альбомы, похожие артисты, follow/unfollow.
+- `This Is ...` подборки по артистам.
+- Библиотека: liked songs, плейлисты, сохранённые альбомы и подписки на артистов.
+- Профиль: аватар, баннер, followers/following, отдельные страницы подписчиков и подписок.
+- Погода и `Play Vibes`: подборка музыки под текущую погоду и город.
+- Mood Explore: Happy, Sad, Chill, Romantic, Workout, Focus, Party, Rainy, Angry, Dreamy.
+- Radio Explore: For You Radio, Mood Radio, Artist Radio, City Radio, Night Drive, Fresh Radio.
+- City charts: треки, артисты, альбомы и плейлисты по городу.
+- Социальные функции: музыкальный матчинг, друзья, чаты, listening rooms.
+- Админ-панель для управления пользователями и мониторинга.
 
-| | |
+## Технологии
+
+| Часть | Стек |
 |---|---|
-| Mobile / Web | Flutter 3, Dart |
-| Backend | Python 3.12, FastAPI, PostgreSQL 16, Redis 7 |
-| Аутентификация | Firebase Auth (Google, Email + верификация) |
-| Музыка | Deezer API, lrclib.net (синхронизированные тексты) |
-| Плеер | YouTube IFrame API (полные треки), just_audio (превью) |
-| Real-time | WebSocket, Firebase Realtime Database |
-| Админ-панель | React, Vite, TypeScript, Ant Design |
-| Инфраструктура | Docker, Docker Compose |
+| Frontend | Flutter, Dart, Provider, Dio |
+| Backend | Python 3.12, FastAPI, SQLAlchemy, Alembic |
+| Database | PostgreSQL 16 |
+| Cache / realtime jobs | Redis, APScheduler |
+| Auth | Firebase Auth, JWT |
+| Music data | Deezer API, YouTube, lrclib.net |
+| Admin panel | React, Vite, TypeScript, Ant Design |
+| Infra | Docker, Docker Compose |
 
----
+## Структура проекта
 
-## Функциональность
+```text
+diplom/
+├── diplom-frontend/      # Flutter app: web/mobile UI
+├── moodwave-backend/     # FastAPI backend
+├── admin-panel/          # React admin dashboard
+└── README.md
+```
 
-- Регистрация и вход (Email + верификация, Google OAuth)
-- Email-уведомления: верификация, сброс пароля, новый вход
-- Рекомендации треков по настроению и погоде (Live Weather → Play Vibes)
-- Плеер с синхронизированными текстами (lrclib.net, Spotify-стиль, тап по строке → перемотка)
-- Shuffle, Repeat (выкл / все / одна), автопереход между треками
-- Страница артиста: популярные треки, дискография, похожие артисты, подписка
-- "This Is {Artist}" — плейлист топ-треков (до 50 штук, с fallback через radio)
-- Страница альбома: полный трек-лист, Play All, Shuffle
-- Поиск треков и артистов (русский и английский, фаззи-матч)
-- История прослушиваний с группировкой по датам (Recently Played + Listening History)
-- Матчинг пользователей по музыкальному вкусу
-- Чат с совпавшими пользователями
-- Библиотека плейлистов
-- Live Rooms — совместное прослушивание
-- Radio For You — тематические радиостанции (Late Night, Morning Boost, Deep Focus)
-- Choose Your Mood — плейлисты по настроению (Study, Sport, Drive, Sleep, Party, Sad)
-- Hot Right Now — трендовые треки с бейджами NEW / HOT
-- Топ-чарты по городам
-- Админ-панель для управления пользователями и контентом
+## Требования
 
----
+- Flutter SDK 3.x
+- Python 3.12
+- Node.js 18+
+- PostgreSQL 16
+- Redis 7
+- Docker Desktop, если запускаешь backend через Docker
 
-## Запуск проекта
+В `moodwave-backend/` должны быть:
 
-### Необходимые файлы
-
-Перед запуском положи в `moodwave-backend/`:
 - `.env`
 - `firebase-credentials.json`
 
----
+Пример переменных лежит в `moodwave-backend/.env.example`.
+
+## Быстрый запуск
 
 ### 1. Backend
 
-```bash
-cd moodwave-backend
-docker compose up --build
-```
+Если база и Redis уже настроены локально:
 
-Бэкенд готов когда в логах появится: `INFO: Application startup complete.`  
-Swagger UI: http://localhost:8000/docs
-
-**Первый запуск — применить миграции БД:**
-
-```bash
-docker exec moodwave-backend-api-1 alembic upgrade head
-```
-
-Без Docker:
-
-```bash
-cd moodwave-backend
+```powershell
+cd C:\Users\Asus\diplom\moodwave-backend
 python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # Linux/macOS
+.\.venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
----
+Backend должен открыть:
 
-### 2. Админ-панель
+```text
+http://127.0.0.1:8000
+http://127.0.0.1:8000/docs
+http://127.0.0.1:8000/health
+```
 
-```bash
-cd admin-panel
+Если порт `8000` занят:
+
+```powershell
+netstat -ano | findstr :8000
+taskkill /PID <PID> /F
+```
+
+### 2. Flutter Web для разработки
+
+```powershell
+cd C:\Users\Asus\diplom\diplom-frontend
+flutter pub get
+flutter run -d chrome --web-port 5001
+```
+
+Открыть:
+
+```text
+http://localhost:5001/
+```
+
+### 3. Flutter Web как production-сборка
+
+Этот вариант удобен, когда нужно проверить именно собранный проект:
+
+```powershell
+cd C:\Users\Asus\diplom\diplom-frontend
+flutter build web --pwa-strategy=none
+python -m http.server 5001 -d build\web --bind 127.0.0.1
+```
+
+Открыть:
+
+```text
+http://localhost:5001/
+```
+
+Если браузер показывает старую версию, нажми `Ctrl + F5`.
+
+### 4. Admin panel
+
+```powershell
+cd C:\Users\Asus\diplom\admin-panel
 npm install
-echo "VITE_API_URL=http://localhost:8000" > .env
+Set-Content .env "VITE_API_URL=http://127.0.0.1:8000"
 npm run dev
 ```
 
-Открыть http://localhost:5173
+Открыть:
 
-Выдать права администратора:
-
-```sql
-UPDATE users SET is_admin = true WHERE email = 'your@email.com';
+```text
+http://localhost:5173/
 ```
 
----
+## Запуск backend через Docker
 
-### 3. Flutter (Web)
-
-```bash
-cd diplom-frontend
-flutter pub get
-flutter run -d chrome --web-port 5005
+```powershell
+cd C:\Users\Asus\diplom\moodwave-backend
+docker compose up --build
 ```
 
-Открыть http://localhost:5005
+Миграции:
 
----
+```powershell
+docker exec moodwave-backend-api-1 alembic upgrade head
+```
 
-### Запуск всего сразу (3 терминала)
+Docker-порты:
 
-| Терминал | Команда |
-|----------|---------|
-| 1 | `cd moodwave-backend && docker compose up` |
-| 2 | `cd admin-panel && npm run dev` |
-| 3 | `cd diplom-frontend && flutter run -d chrome --web-port 5005` |
+| Сервис | Порт |
+|---|---|
+| API | `8000` |
+| PostgreSQL | `5434` |
+| Redis | `6379` |
 
----
+## Основные URL
 
-## Порты
+| Назначение | URL |
+|---|---|
+| Flutter Web | `http://localhost:5001/` |
+| Backend API | `http://127.0.0.1:8000/` |
+| Swagger | `http://127.0.0.1:8000/docs` |
+| Health check | `http://127.0.0.1:8000/health` |
+| Admin panel | `http://localhost:5173/` |
 
-| Сервис | URL |
-|--------|-----|
-| API | http://localhost:8000 |
-| Swagger | http://localhost:8000/docs |
-| Админ-панель | http://localhost:5173 |
-| Flutter Web | http://localhost:5005 |
-| PostgreSQL | localhost:5434 |
-| Redis | localhost:6379 |
+## Полезные проверки
 
----
+Backend:
 
-## Решение проблем
+```powershell
+curl http://127.0.0.1:8000/health
+```
 
-| Проблема | Решение |
-|----------|---------|
-| Docker не запускается | Запусти Docker Desktop |
-| Порт занят | `netstat -ano` → найди PID → `taskkill /PID <pid> /F` |
-| Ошибка Alembic | Подожди 15 сек после `docker compose up` и повтори |
-| Flutter не достучится до бэкенда | Проверь http://localhost:8000/docs |
-| Админ: "Not authorized" | `UPDATE users SET is_admin = true WHERE email = 'your@email.com';` |
-| Письмо не приходит | Проверь `MAIL_USERNAME` и `MAIL_PASSWORD` в `.env` |
+Flutter:
+
+```powershell
+cd C:\Users\Asus\diplom\diplom-frontend
+flutter analyze
+flutter build web --pwa-strategy=none
+```
+
+Backend Python:
+
+```powershell
+cd C:\Users\Asus\diplom\moodwave-backend
+python -m py_compile app\main.py
+```
+
+## Частые проблемы
+
+| Проблема | Что сделать |
+|---|---|
+| `WinError 10013` или порт `8000` занят | Найти PID через `netstat -ano \| findstr :8000` и остановить `taskkill /PID <PID> /F` |
+| Frontend показывает старый Home | Нажать `Ctrl + F5`; при production-сборке использовать `--pwa-strategy=none` |
+| Flutter не видит backend | Проверить `http://127.0.0.1:8000/health` |
+| Подписки на артистов не отображаются | Проверить авторизацию и endpoint `/users/me/following/details` |
+| Письма не приходят | Проверить `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM` в `.env` |
+| Firebase ошибка | Проверить `firebase-credentials.json` и `FIREBASE_DATABASE_URL` |
+| Docker не запускается | Запустить Docker Desktop |
+
+## Статус
+
+Актуальный рабочий режим проекта:
+
+- Backend: `127.0.0.1:8000`
+- Flutter Web: `localhost:5001`
+- Admin panel: `localhost:5173`
+- Основной экран Home, Library, Following, Profile, Player и Search поддерживаются текущей backend-логикой.

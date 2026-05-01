@@ -6,6 +6,7 @@ import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/common_widgets.dart';
+import 'album_screen.dart';
 import 'artist_screen.dart';
 import 'player_screen.dart';
 
@@ -45,10 +46,17 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
 
   Future<void> _loadRoom() async {
     final roomId = _room['room_id'] as int?;
-    if (roomId == null) { setState(() => _loading = false); return; }
+    if (roomId == null) {
+      setState(() => _loading = false);
+      return;
+    }
     try {
       final details = await ApiService().getRoomDetails(roomId);
-      if (mounted) setState(() { _room = details; _loading = false; });
+      if (mounted)
+        setState(() {
+          _room = details;
+          _loading = false;
+        });
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -61,7 +69,10 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
     try {
       await ApiService().sendJoinRequest(roomId);
       if (!mounted) return;
-      setState(() { _joining = false; _joinRequested = true; });
+      setState(() {
+        _joining = false;
+        _joinRequested = true;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Join request sent! Waiting for host approval.',
@@ -95,7 +106,8 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
   Widget build(BuildContext context) {
     final name = (_room['name'] ?? 'Live Room').toString();
     final host = (_room['host'] as Map?)?.cast<String, dynamic>() ?? {};
-    final hostName = (host['first_name'] ?? host['username'] ?? 'Host').toString();
+    final hostName =
+        (host['first_name'] ?? host['username'] ?? 'Host').toString();
     final hostAvatar = host['avatar_url']?.toString();
     final participantCount = _room['participant_count'] ?? 0;
     final track = (_room['current_track'] as Map?)?.cast<String, dynamic>();
@@ -108,8 +120,9 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: _loading
-          ? const Center(child: CircularProgressIndicator(
-              strokeWidth: 2, color: AppColors.purpleLight))
+          ? const Center(
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: AppColors.purpleLight))
           : SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -125,20 +138,24 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                             GestureDetector(
                               onTap: () => Navigator.of(context).pop(),
                               child: Container(
-                                width: 40, height: 40,
+                                width: 40,
+                                height: 40,
                                 decoration: BoxDecoration(
                                     color: AppColors.glass,
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: AppColors.border)),
+                                    border:
+                                        Border.all(color: AppColors.border)),
                                 child: const Icon(Icons.arrow_back_rounded,
                                     size: 18, color: Colors.white),
                               ),
                             ),
                             Expanded(
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
                                 child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       AnimatedBuilder(
                                         animation: _blinkCtrl,
@@ -146,27 +163,39 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                                           padding: const EdgeInsets.symmetric(
                                               horizontal: 10, vertical: 4),
                                           decoration: BoxDecoration(
-                                            color: const Color(0xFFef4444).withOpacity(0.1),
-                                            borderRadius: BorderRadius.circular(100),
+                                            color: const Color(0xFFef4444)
+                                                .withOpacity(0.1),
+                                            borderRadius:
+                                                BorderRadius.circular(100),
                                             border: Border.all(
-                                                color: const Color(0xFFef4444).withOpacity(0.25)),
+                                                color: const Color(0xFFef4444)
+                                                    .withOpacity(0.25)),
                                           ),
-                                          child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                            Opacity(
-                                              opacity: 0.3 + 0.7 * _blinkCtrl.value,
-                                              child: Container(
-                                                  width: 7, height: 7,
-                                                  decoration: const BoxDecoration(
-                                                      color: Color(0xFFef4444),
-                                                      shape: BoxShape.circle)),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Text('LIVE PARTY',
-                                                style: GoogleFonts.outfit(
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w700,
-                                                    color: const Color(0xFFf87171))),
-                                          ]),
+                                          child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Opacity(
+                                                  opacity: 0.3 +
+                                                      0.7 * _blinkCtrl.value,
+                                                  child: Container(
+                                                      width: 7,
+                                                      height: 7,
+                                                      decoration:
+                                                          const BoxDecoration(
+                                                              color: Color(
+                                                                  0xFFef4444),
+                                                              shape: BoxShape
+                                                                  .circle)),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Text('LIVE PARTY',
+                                                    style: GoogleFonts.outfit(
+                                                        fontSize: 12,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                        color: const Color(
+                                                            0xFFf87171))),
+                                              ]),
                                         ),
                                       ),
                                       const SizedBox(height: 4),
@@ -180,18 +209,21 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                                               letterSpacing: -0.4)),
                                       Text('Hosted by $hostName',
                                           style: GoogleFonts.outfit(
-                                              fontSize: 12, color: AppColors.text2)),
+                                              fontSize: 12,
+                                              color: AppColors.text2)),
                                     ]),
                               ),
                             ),
                             GestureDetector(
                               onTap: _loadRoom,
                               child: Container(
-                                width: 40, height: 40,
+                                width: 40,
+                                height: 40,
                                 decoration: BoxDecoration(
                                     color: AppColors.glass,
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: AppColors.border)),
+                                    border:
+                                        Border.all(color: AppColors.border)),
                                 child: const Icon(Icons.refresh_rounded,
                                     size: 18, color: AppColors.text2),
                               ),
@@ -230,7 +262,9 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                           ),
                         if (isPlaying)
                           Positioned(
-                            bottom: 0, left: 0, right: 0,
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
                             child: SizedBox(
                               height: 40,
                               child: Row(
@@ -261,7 +295,8 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
                     child: Row(children: [
                       Container(
-                        width: 52, height: 52,
+                        width: 52,
+                        height: 52,
                         decoration: BoxDecoration(
                             gradient: AppColors.gradMixed,
                             borderRadius: BorderRadius.circular(13)),
@@ -275,8 +310,8 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                                         child: Text('🎵',
                                             style: TextStyle(fontSize: 24)))))
                             : const Center(
-                                child: Text('🎵',
-                                    style: TextStyle(fontSize: 24))),
+                                child:
+                                    Text('🎵', style: TextStyle(fontSize: 24))),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -339,11 +374,13 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                             Row(children: [
                               // Host avatar
                               Container(
-                                width: 36, height: 36,
+                                width: 36,
+                                height: 36,
                                 decoration: BoxDecoration(
                                     gradient: AppColors.gradMixed,
                                     shape: BoxShape.circle,
-                                    border: Border.all(color: AppColors.bg, width: 2)),
+                                    border: Border.all(
+                                        color: AppColors.bg, width: 2)),
                                 child: hostAvatar != null
                                     ? ClipOval(
                                         child: CachedNetworkImage(
@@ -354,7 +391,8 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                                                     hostName[0].toUpperCase(),
                                                     style: GoogleFonts.outfit(
                                                         fontSize: 13,
-                                                        fontWeight: FontWeight.w700,
+                                                        fontWeight:
+                                                            FontWeight.w700,
                                                         color: Colors.white)))))
                                     : Center(
                                         child: Text(hostName[0].toUpperCase(),
@@ -385,7 +423,9 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
                     child: GestureDetector(
-                      onTap: (_joining || _joinRequested) ? null : _sendJoinRequest,
+                      onTap: (_joining || _joinRequested)
+                          ? null
+                          : _sendJoinRequest,
                       child: Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(16),
@@ -404,7 +444,8 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                               ? null
                               : [
                                   BoxShadow(
-                                      color: AppColors.purpleDark.withOpacity(0.4),
+                                      color:
+                                          AppColors.purpleDark.withOpacity(0.4),
                                       blurRadius: 20,
                                       offset: const Offset(0, 4))
                                 ],
@@ -414,9 +455,11 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                             children: [
                               if (_joining)
                                 const SizedBox(
-                                    width: 16, height: 16,
+                                    width: 16,
+                                    height: 16,
                                     child: CircularProgressIndicator(
-                                        strokeWidth: 2, color: AppColors.purpleLight))
+                                        strokeWidth: 2,
+                                        color: AppColors.purpleLight))
                               else
                                 Icon(
                                     _joinRequested
@@ -474,12 +517,18 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   }
 
   Future<void> _loadTab(int tab) async {
-    setState(() { _loading = true; _tab = tab; });
+    setState(() {
+      _loading = true;
+      _tab = tab;
+    });
     try {
       final genre = _tabGenres[tab];
       final data = await ApiService().getCharts(genre: genre, limit: 20);
       if (!mounted) return;
-      setState(() { _tracks = data; _loading = false; });
+      setState(() {
+        _tracks = data;
+        _loading = false;
+      });
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -502,15 +551,25 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  Text('Discover', style: GoogleFonts.outfit(
-                      fontSize: 26, fontWeight: FontWeight.w800,
-                      color: AppColors.text, letterSpacing: -0.02 * 26)),
-                  Container(width: 40, height: 40,
-                    decoration: BoxDecoration(color: AppColors.glass,
-                        borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
-                    child: const Icon(Icons.tune_rounded, size: 18, color: AppColors.text2)),
-                ]),
+                child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Discover',
+                          style: GoogleFonts.outfit(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.text,
+                              letterSpacing: -0.02 * 26)),
+                      Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                              color: AppColors.glass,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppColors.border)),
+                          child: const Icon(Icons.tune_rounded,
+                              size: 18, color: AppColors.text2)),
+                    ]),
               ),
               SizedBox(
                 height: 36,
@@ -522,16 +581,23 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                     onTap: () => _loadTab(i),
                     child: Container(
                       margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 7),
                       decoration: BoxDecoration(
                         gradient: _tab == i ? AppColors.gradPurple : null,
                         color: _tab == i ? null : AppColors.glass,
                         borderRadius: BorderRadius.circular(100),
-                        border: Border.all(color: _tab == i ? AppColors.purple : AppColors.border),
+                        border: Border.all(
+                            color: _tab == i
+                                ? AppColors.purple
+                                : AppColors.border),
                       ),
-                      child: Text(_tabs[i], style: GoogleFonts.outfit(
-                          fontSize: 13, fontWeight: FontWeight.w600,
-                          color: _tab == i ? Colors.white : AppColors.text2)),
+                      child: Text(_tabs[i],
+                          style: GoogleFonts.outfit(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color:
+                                  _tab == i ? Colors.white : AppColors.text2)),
                     ),
                   ),
                 ),
@@ -548,57 +614,94 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                       const Color(0xFF08081C).withOpacity(0.9),
                     ]),
                     borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: AppColors.purple.withOpacity(0.2)),
+                    border:
+                        Border.all(color: AppColors.purple.withOpacity(0.2)),
                   ),
                   child: Stack(children: [
-                    Positioned(top: -30, right: -30,
-                      child: Container(width: 140, height: 140,
-                        decoration: BoxDecoration(shape: BoxShape.circle,
-                          gradient: RadialGradient(colors: [AppColors.purple.withOpacity(0.15), Colors.transparent])))),
-                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('🌍', style: TextStyle(fontSize: 48)),
-                      const SizedBox(height: 8),
-                      Text('Global Top 50', style: GoogleFonts.outfit(
-                          fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.02 * 22)),
-                      Text('Updated every 24 hours', style: GoogleFonts.outfit(
-                          fontSize: 13, color: const Color(0x99C8B4FF))),
-                      const SizedBox(height: 14),
-                      Row(children: [
-                        _GcStat('2.1B', 'plays today'),
-                        const SizedBox(width: 20),
-                        _GcStat('184', 'countries'),
-                        const SizedBox(width: 20),
-                        _GcStat('47M', 'listeners'),
-                      ]),
-                    ]),
+                    Positioned(
+                        top: -30,
+                        right: -30,
+                        child: Container(
+                            width: 140,
+                            height: 140,
+                            decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: RadialGradient(colors: [
+                                  AppColors.purple.withOpacity(0.15),
+                                  Colors.transparent
+                                ])))),
+                    Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('🌍', style: TextStyle(fontSize: 48)),
+                          const SizedBox(height: 8),
+                          Text('Global Top 50',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                  letterSpacing: -0.02 * 22)),
+                          Text('Updated every 24 hours',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 13,
+                                  color: const Color(0x99C8B4FF))),
+                          const SizedBox(height: 14),
+                          Row(children: [
+                            _GcStat('2.1B', 'plays today'),
+                            const SizedBox(width: 20),
+                            _GcStat('184', 'countries'),
+                            const SizedBox(width: 20),
+                            _GcStat('47M', 'listeners'),
+                          ]),
+                        ]),
                   ]),
                 ),
               ),
-              const SectionHeader(title: 'Trending by Country', action: 'All →'),
+              const SectionHeader(
+                  title: 'Trending by Country', action: 'All →'),
               const SizedBox(height: 8),
-              _CountryRow('🇺🇸', 'United States', "APT. — Rose ft. Bruno Mars", '1', isGold: true),
-              _CountryRow('🇰🇷', 'South Korea', 'How Sweet — NewJeans', '2', isSilver: true),
-              _CountryRow('🇰🇿', 'Kazakhstan', 'Sweater Weather — The Neighbourhood', '3', isBronze: true),
-              _CountryRow('🇬🇧', 'United Kingdom', "Good Luck Babe! — Chappell Roan", '4'),
+              _CountryRow(
+                  '🇺🇸', 'United States', "APT. — Rose ft. Bruno Mars", '1',
+                  isGold: true),
+              _CountryRow('🇰🇷', 'South Korea', 'How Sweet — NewJeans', '2',
+                  isSilver: true),
+              _CountryRow('🇰🇿', 'Kazakhstan',
+                  'Sweater Weather — The Neighbourhood', '3',
+                  isBronze: true),
+              _CountryRow('🇬🇧', 'United Kingdom',
+                  "Good Luck Babe! — Chappell Roan", '4'),
               const SizedBox(height: 16),
               const SectionHeader(title: 'Viral This Week', action: 'More →'),
               const SizedBox(height: 12),
-              _TrendBar("APT. · Rose ft. Bruno Mars", "412M plays", 0.95,
-                  const LinearGradient(colors: [Color(0xFF7c3aed), AppColors.pink])),
+              _TrendBar(
+                  "APT. · Rose ft. Bruno Mars",
+                  "412M plays",
+                  0.95,
+                  const LinearGradient(
+                      colors: [Color(0xFF7c3aed), AppColors.pink])),
               const SizedBox(height: 10),
-              _TrendBar("Die With A Smile · Lady Gaga", "389M", 0.82,
-                  const LinearGradient(colors: [Color(0xFF1e3a8a), AppColors.blue])),
+              _TrendBar(
+                  "Die With A Smile · Lady Gaga",
+                  "389M",
+                  0.82,
+                  const LinearGradient(
+                      colors: [Color(0xFF1e3a8a), AppColors.blue])),
               const SizedBox(height: 10),
-              _TrendBar("Espresso · Sabrina Carpenter", "340M", 0.74,
-                  const LinearGradient(colors: [Color(0xFF92400e), Color(0xFFf59e0b)])),
+              _TrendBar(
+                  "Espresso · Sabrina Carpenter",
+                  "340M",
+                  0.74,
+                  const LinearGradient(
+                      colors: [Color(0xFF92400e), Color(0xFFf59e0b)])),
               const SizedBox(height: 20),
               const SectionHeader(title: 'Top Tracks Now'),
               const SizedBox(height: 8),
               if (_loading)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.purpleLight)),
+                  child: Center(
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.purpleLight)),
                 )
               else
                 ..._tracks.asMap().entries.map((e) {
@@ -610,35 +713,63 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                   final coverUrl = track['cover_url']?.toString();
                   final dur = _fmt(track['duration_ms']);
                   return GestureDetector(
-                    onTap: () => Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => PlayerScreen(track: track))),
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => PlayerScreen(track: track))),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 9),
                       child: Row(children: [
-                        SizedBox(width: 22,
-                          child: Text('${i + 1}', textAlign: TextAlign.center,
-                              style: GoogleFonts.outfit(fontSize: 13,
-                                  fontWeight: FontWeight.w600, color: AppColors.text3))),
+                        SizedBox(
+                            width: 22,
+                            child: Text('${i + 1}',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.text3))),
                         const SizedBox(width: 12),
-                        Container(width: 46, height: 46,
-                          decoration: BoxDecoration(
-                              gradient: AppColors.gradMixed,
-                              borderRadius: BorderRadius.circular(11)),
-                          child: coverUrl != null
-                              ? ClipRRect(borderRadius: BorderRadius.circular(11),
-                                  child: Image.network(coverUrl, fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) =>
-                                          const Center(child: Text('🎵', style: TextStyle(fontSize: 20)))))
-                              : const Center(child: Text('🎵', style: TextStyle(fontSize: 20)))),
+                        Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                                gradient: AppColors.gradMixed,
+                                borderRadius: BorderRadius.circular(11)),
+                            child: coverUrl != null
+                                ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(11),
+                                    child: Image.network(coverUrl,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) =>
+                                            const Center(
+                                                child: Text('🎵',
+                                                    style: TextStyle(
+                                                        fontSize: 20)))))
+                                : const Center(
+                                    child: Text('🎵',
+                                        style: TextStyle(fontSize: 20)))),
                         const SizedBox(width: 12),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
-                          if (artist.isNotEmpty)
-                            Text(artist, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text2)),
-                        ])),
+                        Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              Text(title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.text)),
+                              if (artist.isNotEmpty)
+                                Text(artist,
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 12, color: AppColors.text2)),
+                            ])),
                         if (dur.isNotEmpty)
-                          Text(dur, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+                          Text(dur,
+                              style: GoogleFonts.outfit(
+                                  fontSize: 12, color: AppColors.text3)),
                       ]),
                     ),
                   );
@@ -656,11 +787,17 @@ class _GcStat extends StatelessWidget {
   final String value, label;
   const _GcStat(this.value, this.label);
   @override
-  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Text(value, style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w700,
-        color: const Color(0xE6C8B4FF))),
-    Text(label, style: GoogleFonts.outfit(fontSize: 12, color: const Color(0x80C8B4FF))),
-  ]);
+  Widget build(BuildContext context) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(value,
+            style: GoogleFonts.outfit(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: const Color(0xE6C8B4FF))),
+        Text(label,
+            style: GoogleFonts.outfit(
+                fontSize: 12, color: const Color(0x80C8B4FF))),
+      ]);
 }
 
 class _CountryRow extends StatelessWidget {
@@ -670,22 +807,39 @@ class _CountryRow extends StatelessWidget {
       {this.isGold = false, this.isSilver = false, this.isBronze = false});
   @override
   Widget build(BuildContext context) {
-    Color posColor = isGold ? const Color(0xFFf59e0b)
-        : isSilver ? const Color(0xFF94a3b8)
-        : isBronze ? const Color(0xFFc2774a) : AppColors.text3;
+    Color posColor = isGold
+        ? const Color(0xFFf59e0b)
+        : isSilver
+            ? const Color(0xFF94a3b8)
+            : isBronze
+                ? const Color(0xFFc2774a)
+                : AppColors.text3;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
       child: Row(children: [
-        Container(width: 40, height: 40, decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.05), shape: BoxShape.circle),
-          child: Center(child: Text(flag, style: const TextStyle(fontSize: 20)))),
+        Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05), shape: BoxShape.circle),
+            child: Center(
+                child: Text(flag, style: const TextStyle(fontSize: 20)))),
         const SizedBox(width: 14),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(country, style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
-          Text(track, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text2),
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(country,
+              style: GoogleFonts.outfit(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.text)),
+          Text(track,
+              style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text2),
               overflow: TextOverflow.ellipsis),
         ])),
-        Text(pos, style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w800, color: posColor)),
+        Text(pos,
+            style: GoogleFonts.outfit(
+                fontSize: 18, fontWeight: FontWeight.w800, color: posColor)),
       ]),
     );
   }
@@ -698,22 +852,124 @@ class _TrendBar extends StatelessWidget {
   const _TrendBar(this.label, this.plays, this.pct, this.gradient);
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 20),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Expanded(child: Text(label, style: GoogleFonts.outfit(
-            fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text), overflow: TextOverflow.ellipsis)),
-        Text(plays, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-      ]),
-      const SizedBox(height: 6),
-      Stack(children: [
-        Container(height: 4, decoration: BoxDecoration(
-            color: AppColors.surface3, borderRadius: BorderRadius.circular(100))),
-        FractionallySizedBox(widthFactor: pct, child: Container(height: 4,
-          decoration: BoxDecoration(gradient: gradient, borderRadius: BorderRadius.circular(100)))),
-      ]),
-    ]),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Expanded(
+                child: Text(label,
+                    style: GoogleFonts.outfit(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text),
+                    overflow: TextOverflow.ellipsis)),
+            Text(plays,
+                style:
+                    GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+          ]),
+          const SizedBox(height: 6),
+          Stack(children: [
+            Container(
+                height: 4,
+                decoration: BoxDecoration(
+                    color: AppColors.surface3,
+                    borderRadius: BorderRadius.circular(100))),
+            FractionallySizedBox(
+                widthFactor: pct,
+                child: Container(
+                    height: 4,
+                    decoration: BoxDecoration(
+                        gradient: gradient,
+                        borderRadius: BorderRadius.circular(100)))),
+          ]),
+        ]),
+      );
+}
+
+List<Map<String, dynamic>> _deriveCityArtists(List<dynamic> tracks) {
+  final seen = <String>{};
+  final artists = <Map<String, dynamic>>[];
+  for (final raw in tracks.whereType<Map>()) {
+    final track = Map<String, dynamic>.from(raw);
+    final id = (track['artist_id'] ?? track['artistId'] ?? '').toString();
+    final name = (track['artist'] ?? track['artistName'] ?? '').toString();
+    final key = id.isNotEmpty ? id : name.toLowerCase();
+    if (key.isEmpty || seen.contains(key)) continue;
+    seen.add(key);
+    artists.add({
+      'id': id,
+      'name': name,
+      'image': track['artist_picture'] ??
+          track['cover_url'] ??
+          track['artworkUrl100'],
+    });
+  }
+  return artists.take(10).toList();
+}
+
+List<Map<String, dynamic>> _deriveCityAlbums(List<dynamic> tracks) {
+  final seen = <String>{};
+  final albums = <Map<String, dynamic>>[];
+  for (final raw in tracks.whereType<Map>()) {
+    final track = Map<String, dynamic>.from(raw);
+    final id = (track['album_id'] ?? '').toString();
+    final name = (track['album'] ?? track['collectionName'] ?? '').toString();
+    final key = id.isNotEmpty ? id : name.toLowerCase();
+    if (key.isEmpty || seen.contains(key)) continue;
+    seen.add(key);
+    albums.add({
+      'id': id,
+      'title': name,
+      'artist': track['artist'] ?? track['artistName'] ?? '',
+      'cover': track['cover_url'] ?? track['artworkUrl100'],
+    });
+  }
+  return albums.take(10).toList();
+}
+
+List<Map<String, dynamic>> _deriveCityPlaylists(
+  String city,
+  List<dynamic> tracks,
+) {
+  final chunks = [
+    {
+      'name': '$city Top Hits',
+      'emoji': '🏙️',
+      'tracks': tracks.take(20).toList()
+    },
+    {
+      'name': '$city Fresh Picks',
+      'emoji': '🌊',
+      'tracks': tracks.skip(3).take(20).toList()
+    },
+    {
+      'name': '$city Night Drive',
+      'emoji': '🌙',
+      'tracks': tracks.skip(6).take(20).toList()
+    },
+  ];
+  return chunks.where((item) => (item['tracks'] as List).isNotEmpty).toList();
+}
+
+Widget _buildCityShelf(String title, List<Widget> children) {
+  if (children.isEmpty) return const SizedBox.shrink();
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
+      child: Text(title,
+          style: GoogleFonts.outfit(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: AppColors.text)),
+    ),
+    SizedBox(
+      height: 142,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(left: 20),
+        children: children,
+      ),
+    ),
+  ]);
 }
 
 // ══════════════════════════════════════════
@@ -803,7 +1059,8 @@ class _CityChartsScreenState extends State<CityChartsScreen>
                           GestureDetector(
                             onTap: () => Navigator.of(context).pop(),
                             child: Container(
-                              width: 40, height: 40,
+                              width: 40,
+                              height: 40,
                               decoration: BoxDecoration(
                                   color: AppColors.glass,
                                   borderRadius: BorderRadius.circular(12),
@@ -865,8 +1122,7 @@ class _CityChartsScreenState extends State<CityChartsScreen>
                                   animation: _blinkCtrl,
                                   builder: (_, __) => Row(children: [
                                     Opacity(
-                                      opacity:
-                                          0.3 + 0.7 * _blinkCtrl.value,
+                                      opacity: 0.3 + 0.7 * _blinkCtrl.value,
                                       child: Container(
                                           width: 7,
                                           height: 7,
@@ -879,28 +1135,25 @@ class _CityChartsScreenState extends State<CityChartsScreen>
                                         style: GoogleFonts.outfit(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w600,
-                                            color:
-                                                const Color(0xFF22c55e))),
+                                            color: const Color(0xFF22c55e))),
                                   ]),
                                 ),
                                 const SizedBox(height: 8),
                                 ShaderMask(
-                                  shaderCallback: (b) =>
-                                      const LinearGradient(colors: [
-                                    AppColors.blueLight,
-                                    AppColors.cyan
-                                  ]).createShader(b),
+                                  shaderCallback: (b) => const LinearGradient(
+                                      colors: [
+                                        AppColors.blueLight,
+                                        AppColors.cyan
+                                      ]).createShader(b),
                                   child: Text('$listeners',
                                       style: GoogleFonts.outfit(
                                           fontSize: 28,
                                           fontWeight: FontWeight.w900,
                                           color: Colors.white)),
                                 ),
-                                Text(
-                                    'people streaming right now in your city',
+                                Text('people streaming right now in your city',
                                     style: GoogleFonts.outfit(
-                                        fontSize: 13,
-                                        color: AppColors.text2)),
+                                        fontSize: 13, color: AppColors.text2)),
                               ]),
                         ]),
                       ),
@@ -909,7 +1162,6 @@ class _CityChartsScreenState extends State<CityChartsScreen>
                 ),
               ),
             ),
-
             if (_loading)
               const SliverFillRemaining(
                 child: Center(
@@ -936,20 +1188,52 @@ class _CityChartsScreenState extends State<CityChartsScreen>
                 ),
               )
             else
+              SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildCityShelf(
+                      'Top artists in $city',
+                      _deriveCityArtists(_tracks)
+                          .map((artist) => _CityArtistCard(artist: artist))
+                          .toList(),
+                    ),
+                    _buildCityShelf(
+                      'Albums people replay',
+                      _deriveCityAlbums(_tracks)
+                          .map((album) => _CityAlbumCard(album: album))
+                          .toList(),
+                    ),
+                    _buildCityShelf(
+                      'City playlists',
+                      _deriveCityPlaylists(city, _tracks)
+                          .map((playlist) => _CityPlaylistCard(
+                                playlist: playlist,
+                              ))
+                          .toList(),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 22, 20, 8),
+                      child: Text('Tracks',
+                          style: GoogleFonts.outfit(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.text)),
+                    ),
+                  ],
+                ),
+              ),
+            if (!_loading && _tracks.isNotEmpty)
               SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, i) {
-                    final track =
-                        Map<String, dynamic>.from(_tracks[i] as Map)
-                          ..['queue'] = _tracks;
-                    final title =
-                        track['title']?.toString() ?? 'Unknown';
+                    final track = Map<String, dynamic>.from(_tracks[i] as Map)
+                      ..['queue'] = _tracks;
+                    final title = track['title']?.toString() ?? 'Unknown';
                     final artist = track['artist']?.toString() ?? '';
                     final coverUrl = track['cover_url']?.toString();
                     final dur = _fmt(track['duration_ms']);
-                    final rankColor = i < 3
-                        ? rankColors[i]
-                        : AppColors.text3;
+                    final rankColor = i < 3 ? rankColors[i] : AppColors.text3;
 
                     return GestureDetector(
                       onTap: () => Navigator.push(
@@ -972,7 +1256,8 @@ class _CityChartsScreenState extends State<CityChartsScreen>
                           ),
                           const SizedBox(width: 14),
                           Container(
-                            width: 46, height: 46,
+                            width: 46,
+                            height: 46,
                             decoration: BoxDecoration(
                               gradient: AppColors.gradMixed,
                               borderRadius: BorderRadius.circular(11),
@@ -1019,7 +1304,6 @@ class _CityChartsScreenState extends State<CityChartsScreen>
                   childCount: _tracks.length.clamp(0, 20),
                 ),
               ),
-
             const SliverToBoxAdapter(child: SizedBox(height: 80)),
           ],
         ),
@@ -1028,6 +1312,170 @@ class _CityChartsScreenState extends State<CityChartsScreen>
   }
 }
 
+class _CityArtistCard extends StatelessWidget {
+  final Map<String, dynamic> artist;
+  const _CityArtistCard({required this.artist});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = artist['name']?.toString() ?? 'Artist';
+    final id = artist['id']?.toString() ?? '';
+    final image = artist['image']?.toString();
+    return GestureDetector(
+      onTap: id.isEmpty
+          ? null
+          : () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ArtistScreen(artistId: id, artistName: name),
+                ),
+              ),
+      child: Container(
+        width: 104,
+        margin: const EdgeInsets.only(right: 14),
+        child: Column(children: [
+          Container(
+            width: 86,
+            height: 86,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: AppColors.gradMixed,
+            ),
+            child: image != null && image.isNotEmpty
+                ? ClipOval(
+                    child: CachedNetworkImage(
+                      imageUrl: image,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) =>
+                          const Center(child: Icon(Icons.person_rounded)),
+                    ),
+                  )
+                : const Center(child: Icon(Icons.person_rounded)),
+          ),
+          const SizedBox(height: 8),
+          Text(name,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.outfit(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.text)),
+        ]),
+      ),
+    );
+  }
+}
+
+class _CityAlbumCard extends StatelessWidget {
+  final Map<String, dynamic> album;
+  const _CityAlbumCard({required this.album});
+
+  @override
+  Widget build(BuildContext context) {
+    final title = album['title']?.toString() ?? 'Album';
+    final artist = album['artist']?.toString() ?? '';
+    final cover = album['cover']?.toString();
+    final rawId = album['id'];
+    final id = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
+    return GestureDetector(
+      onTap: id == null
+          ? null
+          : () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => AlbumScreen(albumId: id)),
+              ),
+      child: Container(
+        width: 118,
+        margin: const EdgeInsets.only(right: 14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            width: 104,
+            height: 86,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: AppColors.gradBlue,
+            ),
+            child: cover != null && cover.isNotEmpty
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: CachedNetworkImage(
+                      imageUrl: cover,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) =>
+                          const Center(child: Icon(Icons.album_rounded)),
+                    ),
+                  )
+                : const Center(child: Icon(Icons.album_rounded)),
+          ),
+          const SizedBox(height: 8),
+          Text(title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.outfit(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.text)),
+          Text(artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
+        ]),
+      ),
+    );
+  }
+}
+
+class _CityPlaylistCard extends StatelessWidget {
+  final Map<String, dynamic> playlist;
+  const _CityPlaylistCard({required this.playlist});
+
+  @override
+  Widget build(BuildContext context) {
+    final tracks = (playlist['tracks'] as List?) ?? [];
+    final name = playlist['name']?.toString() ?? 'City playlist';
+    final emoji = playlist['emoji']?.toString() ?? '🎧';
+    return GestureDetector(
+      onTap: tracks.isEmpty
+          ? null
+          : () {
+              final queue = tracks
+                  .whereType<Map>()
+                  .map((track) => Map<String, dynamic>.from(track))
+                  .toList();
+              if (queue.isEmpty) return;
+              final first = Map<String, dynamic>.from(queue.first)
+                ..['queue'] = queue;
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => PlayerScreen(track: first)),
+              );
+            },
+      child: Container(
+        width: 138,
+        margin: const EdgeInsets.only(right: 14),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: AppColors.gradPurple,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(emoji, style: const TextStyle(fontSize: 28)),
+          const Spacer(),
+          Text(name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.outfit(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white)),
+          Text('${tracks.length} tracks',
+              style: GoogleFonts.outfit(fontSize: 11, color: Colors.white70)),
+        ]),
+      ),
+    );
+  }
+}
 
 // ══════════════════════════════════════════
 // RADIO
@@ -1046,13 +1494,21 @@ class RadioScreen extends StatelessWidget {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  Text('Radio', style: GoogleFonts.outfit(
-                      fontSize: 26, fontWeight: FontWeight.w800,
-                      color: AppColors.text, letterSpacing: -0.02 * 26)),
-                  Text('Create Station', style: GoogleFonts.outfit(
-                      fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.purpleLight)),
-                ]),
+                child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Radio',
+                          style: GoogleFonts.outfit(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.text,
+                              letterSpacing: -0.02 * 26)),
+                      Text('Create Station',
+                          style: GoogleFonts.outfit(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.purpleLight)),
+                    ]),
               ),
               // Live now card
               Padding(
@@ -1063,17 +1519,32 @@ class RadioScreen extends StatelessWidget {
                     Container(
                       height: 160,
                       decoration: const BoxDecoration(
-                        gradient: LinearGradient(colors: [Color(0xFF1a0533), Color(0xFF7c3aed), Color(0xFF0d1a3d)])),
+                          gradient: LinearGradient(colors: [
+                        Color(0xFF1a0533),
+                        Color(0xFF7c3aed),
+                        Color(0xFF0d1a3d)
+                      ])),
                       child: Stack(children: [
                         Container(color: Colors.black.withOpacity(0.1)),
-                        const Center(child: Text('📻', style: TextStyle(fontSize: 64))),
-                        Positioned(bottom: 0, left: 0, right: 0,
-                          child: SizedBox(height: 40,
-                            child: Row(mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: List.generate(7, (i) => const AnimatedMusicBars(
-                                color1: AppColors.purpleLight, color2: AppColors.pink,
-                                barCount: 1, barWidth: 4, maxHeight: 28)))),
+                        const Center(
+                            child: Text('📻', style: TextStyle(fontSize: 64))),
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          child: SizedBox(
+                              height: 40,
+                              child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: List.generate(
+                                      7,
+                                      (i) => const AnimatedMusicBars(
+                                          color1: AppColors.purpleLight,
+                                          color2: AppColors.pink,
+                                          barCount: 1,
+                                          barWidth: 4,
+                                          maxHeight: 28)))),
                         ),
                       ]),
                     ),
@@ -1081,38 +1552,67 @@ class RadioScreen extends StatelessWidget {
                       color: AppColors.surface,
                       padding: const EdgeInsets.all(16),
                       child: Row(children: [
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Row(children: [
-                            Container(width: 7, height: 7,
-                              decoration: const BoxDecoration(color: AppColors.pink, shape: BoxShape.circle)),
-                            const SizedBox(width: 5),
-                            Text('ON AIR', style: GoogleFonts.outfit(
-                                fontSize: 10, fontWeight: FontWeight.w700,
-                                color: AppColors.pink, letterSpacing: 0.12)),
-                          ]),
-                          const SizedBox(height: 4),
-                          Text('MoodWave Indie Radio', style: GoogleFonts.outfit(
-                              fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text, letterSpacing: -0.01 * 18)),
-                          Text('Sweater Weather — The Neighbourhood',
-                              style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2)),
-                          Text('🎧 1,284 listeners now',
-                              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
-                        ])),
+                        Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              Row(children: [
+                                Container(
+                                    width: 7,
+                                    height: 7,
+                                    decoration: const BoxDecoration(
+                                        color: AppColors.pink,
+                                        shape: BoxShape.circle)),
+                                const SizedBox(width: 5),
+                                Text('ON AIR',
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.pink,
+                                        letterSpacing: 0.12)),
+                              ]),
+                              const SizedBox(height: 4),
+                              Text('MoodWave Indie Radio',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.text,
+                                      letterSpacing: -0.01 * 18)),
+                              Text('Sweater Weather — The Neighbourhood',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 13, color: AppColors.text2)),
+                              Text('🎧 1,284 listeners now',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 11, color: AppColors.text3)),
+                            ])),
                         Row(children: [
-                          Container(width: 40, height: 40,
-                            decoration: BoxDecoration(
-                              color: AppColors.pink.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: AppColors.pink.withOpacity(0.2)),
-                            ),
-                            child: const Icon(Icons.favorite_rounded, color: AppColors.pink, size: 18)),
+                          Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: AppColors.pink.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                    color: AppColors.pink.withOpacity(0.2)),
+                              ),
+                              child: const Icon(Icons.favorite_rounded,
+                                  color: AppColors.pink, size: 18)),
                           const SizedBox(width: 8),
-                          Container(width: 48, height: 48,
-                            decoration: BoxDecoration(
-                              gradient: AppColors.gradPurple, shape: BoxShape.circle,
-                              boxShadow: [BoxShadow(color: AppColors.purpleDark.withOpacity(0.4), blurRadius: 14)],
-                            ),
-                            child: const Icon(Icons.pause_rounded, color: Colors.white, size: 22)),
+                          Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                gradient: AppColors.gradPurple,
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                      color:
+                                          AppColors.purpleDark.withOpacity(0.4),
+                                      blurRadius: 14)
+                                ],
+                              ),
+                              child: const Icon(Icons.pause_rounded,
+                                  color: Colors.white, size: 22)),
                         ]),
                       ]),
                     ),
@@ -1121,14 +1621,34 @@ class RadioScreen extends StatelessWidget {
               ),
               const SectionHeader(title: 'Featured Stations', action: 'All →'),
               const SizedBox(height: 12),
-              _RadioCard('🎸', 'Indie Night Radio', 'Indie · Alt Rock', '847',
-                  const LinearGradient(colors: [Color(0xFF1a0533), Color(0xFF7c3aed)])),
-              _RadioCard('❄️', 'Winter Chill Radio', 'Ambient · Lo-fi · Snow vibes', '2,134',
-                  const LinearGradient(colors: [Color(0xFF164e63), Color(0xFF06b6d4)])),
-              _RadioCard('✨', 'K-Pop Hits Radio', 'K-Pop · Korean Pop · BTS, NewJeans', '5,412',
-                  const LinearGradient(colors: [Color(0xFF9d174d), Color(0xFFec4899)])),
-              _RadioCard('🎤', 'Hip-Hop Central', 'Hip-Hop · Trap · R&B', '3,891',
-                  const LinearGradient(colors: [Color(0xFF1c1917), Color(0xFF57534e)])),
+              _RadioCard(
+                  '🎸',
+                  'Indie Night Radio',
+                  'Indie · Alt Rock',
+                  '847',
+                  const LinearGradient(
+                      colors: [Color(0xFF1a0533), Color(0xFF7c3aed)])),
+              _RadioCard(
+                  '❄️',
+                  'Winter Chill Radio',
+                  'Ambient · Lo-fi · Snow vibes',
+                  '2,134',
+                  const LinearGradient(
+                      colors: [Color(0xFF164e63), Color(0xFF06b6d4)])),
+              _RadioCard(
+                  '✨',
+                  'K-Pop Hits Radio',
+                  'K-Pop · Korean Pop · BTS, NewJeans',
+                  '5,412',
+                  const LinearGradient(
+                      colors: [Color(0xFF9d174d), Color(0xFFec4899)])),
+              _RadioCard(
+                  '🎤',
+                  'Hip-Hop Central',
+                  'Hip-Hop · Trap · R&B',
+                  '3,891',
+                  const LinearGradient(
+                      colors: [Color(0xFF1c1917), Color(0xFF57534e)])),
               const SizedBox(height: 16),
             ],
           ),
@@ -1141,7 +1661,8 @@ class RadioScreen extends StatelessWidget {
 class _RadioCard extends StatelessWidget {
   final String emoji, name, genre, listeners;
   final LinearGradient gradient;
-  const _RadioCard(this.emoji, this.name, this.genre, this.listeners, this.gradient);
+  const _RadioCard(
+      this.emoji, this.name, this.genre, this.listeners, this.gradient);
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -1154,41 +1675,64 @@ class _RadioCard extends StatelessWidget {
           child: Stack(children: [
             Container(color: Colors.black.withOpacity(0.2)),
             Center(child: Text(emoji, style: const TextStyle(fontSize: 36))),
-            Positioned(bottom: 12, left: 16, right: 60, child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(name, style: GoogleFonts.outfit(
-                    fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
-                Text(genre, style: GoogleFonts.outfit(
-                    fontSize: 12, color: Colors.white.withOpacity(0.6))),
-              ])),
-            Positioned(top: 12, right: 12,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.4),
-                  borderRadius: BorderRadius.circular(100),
-                ),
-                child: Row(children: [
-                  Container(width: 5, height: 5,
-                    decoration: const BoxDecoration(color: Color(0xFF22c55e), shape: BoxShape.circle)),
-                  const SizedBox(width: 4),
-                  Text(listeners, style: GoogleFonts.outfit(
-                      fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white.withOpacity(0.8))),
-                ]),
-              )),
-            Positioned(bottom: 12, right: 12,
-              child: Container(width: 36, height: 36,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
-                  shape: BoxShape.circle),
-                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 20))),
+            Positioned(
+                bottom: 12,
+                left: 16,
+                right: 60,
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name,
+                          style: GoogleFonts.outfit(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white)),
+                      Text(genre,
+                          style: GoogleFonts.outfit(
+                              fontSize: 12,
+                              color: Colors.white.withOpacity(0.6))),
+                    ])),
+            Positioned(
+                top: 12,
+                right: 12,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(100),
+                  ),
+                  child: Row(children: [
+                    Container(
+                        width: 5,
+                        height: 5,
+                        decoration: const BoxDecoration(
+                            color: Color(0xFF22c55e), shape: BoxShape.circle)),
+                    const SizedBox(width: 4),
+                    Text(listeners,
+                        style: GoogleFonts.outfit(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white.withOpacity(0.8))),
+                  ]),
+                )),
+            Positioned(
+                bottom: 12,
+                right: 12,
+                child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.15),
+                        shape: BoxShape.circle),
+                    child: const Icon(Icons.play_arrow_rounded,
+                        color: Colors.white, size: 20))),
           ]),
         ),
       ),
     );
   }
 }
-
 
 // ══════════════════════════════════════════
 // RECENT HISTORY
@@ -1398,12 +1942,12 @@ class _HistoryTrackRow extends StatelessWidget {
             onTap: () => showTrackMenu(
               context,
               track,
-              onPlayNow: () => Navigator.push(context,
+              onPlayNow: () => Navigator.push(
+                  context,
                   MaterialPageRoute(
                       builder: (_) => PlayerScreen(track: track))),
-              onGoToArtist: artist.isNotEmpty
-                  ? () => _openArtist(context)
-                  : null,
+              onGoToArtist:
+                  artist.isNotEmpty ? () => _openArtist(context) : null,
             ),
             child: const Padding(
               padding: EdgeInsets.all(6),
@@ -1452,7 +1996,10 @@ class _BrowseRoomsScreenState extends State<BrowseRoomsScreen> {
     try {
       final data = await ApiService().getActiveRooms();
       if (!mounted) return;
-      setState(() { _rooms = data; _loading = false; });
+      setState(() {
+        _rooms = data;
+        _loading = false;
+      });
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -1473,48 +2020,67 @@ class _BrowseRoomsScreenState extends State<BrowseRoomsScreen> {
                 GestureDetector(
                   onTap: () => Navigator.pop(context),
                   child: Container(
-                    width: 40, height: 40,
+                    width: 40,
+                    height: 40,
                     decoration: BoxDecoration(
                       color: AppColors.glass,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: AppColors.border),
                     ),
-                    child: const Icon(Icons.arrow_back_rounded, size: 18, color: Colors.white),
+                    child: const Icon(Icons.arrow_back_rounded,
+                        size: 18, color: Colors.white),
                   ),
                 ),
                 const SizedBox(width: 12),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Listening Rooms', style: GoogleFonts.outfit(
-                      fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.text)),
-                  Text('Join a live session', style: GoogleFonts.outfit(
-                      fontSize: 12, color: AppColors.text3)),
-                ])),
+                Expanded(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Text('Listening Rooms',
+                          style: GoogleFonts.outfit(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.text)),
+                      Text('Join a live session',
+                          style: GoogleFonts.outfit(
+                              fontSize: 12, color: AppColors.text3)),
+                    ])),
                 GestureDetector(
                   onTap: _load,
                   child: Container(
-                    width: 36, height: 36,
+                    width: 36,
+                    height: 36,
                     decoration: BoxDecoration(
                         color: AppColors.glass,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: AppColors.border)),
-                    child: const Icon(Icons.refresh_rounded, size: 18, color: AppColors.text2),
+                    child: const Icon(Icons.refresh_rounded,
+                        size: 18, color: AppColors.text2),
                   ),
                 ),
               ]),
             ),
             Expanded(
               child: _loading
-                  ? const Center(child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.purpleLight))
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.purpleLight))
                   : _rooms.isEmpty
-                      ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      ? Center(
+                          child:
+                              Column(mainAxisSize: MainAxisSize.min, children: [
                           const Text('🎧', style: TextStyle(fontSize: 52)),
                           const SizedBox(height: 14),
-                          Text('No active rooms', style: GoogleFonts.outfit(
-                              fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.text)),
+                          Text('No active rooms',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.text)),
                           const SizedBox(height: 6),
-                          Text('Check back later or create one from the Home tab',
-                              style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3),
+                          Text(
+                              'Check back later or create one from the Home tab',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 13, color: AppColors.text3),
                               textAlign: TextAlign.center),
                         ]))
                       : RefreshIndicator(
@@ -1525,16 +2091,28 @@ class _BrowseRoomsScreenState extends State<BrowseRoomsScreen> {
                             padding: const EdgeInsets.symmetric(horizontal: 20),
                             itemCount: _rooms.length,
                             itemBuilder: (_, i) {
-                              final room = Map<String, dynamic>.from(_rooms[i] as Map);
-                              final name = (room['name'] ?? 'Live Room').toString();
-                              final host = (room['host'] as Map?)?.cast<String, dynamic>() ?? {};
-                              final hostName = (host['first_name'] ?? host['username'] ?? 'Host').toString();
+                              final room =
+                                  Map<String, dynamic>.from(_rooms[i] as Map);
+                              final name =
+                                  (room['name'] ?? 'Live Room').toString();
+                              final host = (room['host'] as Map?)
+                                      ?.cast<String, dynamic>() ??
+                                  {};
+                              final hostName = (host['first_name'] ??
+                                      host['username'] ??
+                                      'Host')
+                                  .toString();
                               final count = room['participant_count'] ?? 0;
-                              final track = (room['current_track'] as Map?)?.cast<String, dynamic>();
-                              final trackTitle = track?['track_title']?.toString() ?? '';
+                              final track = (room['current_track'] as Map?)
+                                  ?.cast<String, dynamic>();
+                              final trackTitle =
+                                  track?['track_title']?.toString() ?? '';
                               return GestureDetector(
-                                onTap: () => Navigator.push(context, MaterialPageRoute(
-                                    builder: (_) => ListeningPartyScreen(room: room))),
+                                onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) =>
+                                            ListeningPartyScreen(room: room))),
                                 child: Container(
                                   margin: const EdgeInsets.only(bottom: 10),
                                   padding: const EdgeInsets.all(16),
@@ -1545,26 +2123,48 @@ class _BrowseRoomsScreenState extends State<BrowseRoomsScreen> {
                                   ),
                                   child: Row(children: [
                                     Container(
-                                      width: 46, height: 46,
+                                      width: 46,
+                                      height: 46,
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFef4444).withOpacity(0.15),
+                                        color: const Color(0xFFef4444)
+                                            .withOpacity(0.15),
                                         borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: const Color(0xFFef4444).withOpacity(0.25)),
+                                        border: Border.all(
+                                            color: const Color(0xFFef4444)
+                                                .withOpacity(0.25)),
                                       ),
-                                      child: const Center(child: Text('🎉', style: TextStyle(fontSize: 22))),
+                                      child: const Center(
+                                          child: Text('🎉',
+                                              style: TextStyle(fontSize: 22))),
                                     ),
                                     const SizedBox(width: 14),
-                                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                      Text(name, style: GoogleFonts.outfit(
-                                          fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text),
-                                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                                      Text('Host: $hostName · $count listening',
-                                          style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-                                      if (trackTitle.isNotEmpty)
-                                        Text('Now: $trackTitle',
-                                            style: GoogleFonts.outfit(fontSize: 11, color: AppColors.purpleLight),
-                                            maxLines: 1, overflow: TextOverflow.ellipsis),
-                                    ])),
+                                    Expanded(
+                                        child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                          Text(name,
+                                              style: GoogleFonts.outfit(
+                                                  fontSize: 15,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: AppColors.text),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis),
+                                          Text(
+                                              'Host: $hostName · $count listening',
+                                              style: GoogleFonts.outfit(
+                                                  fontSize: 12,
+                                                  color: AppColors.text3)),
+                                          if (trackTitle.isNotEmpty)
+                                            Text('Now: $trackTitle',
+                                                style: GoogleFonts.outfit(
+                                                    fontSize: 11,
+                                                    color:
+                                                        AppColors.purpleLight),
+                                                maxLines: 1,
+                                                overflow:
+                                                    TextOverflow.ellipsis),
+                                        ])),
                                     const Icon(Icons.chevron_right_rounded,
                                         color: AppColors.text3, size: 20),
                                   ]),

@@ -223,16 +223,19 @@ async def _save_profile_image(
     user_id: int,
     kind: str,
 ) -> str:
-    content_type = (upload.content_type or "").lower()
-    if not content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail=f"{kind.title()} must be an image")
-
     ext = os.path.splitext(upload.filename or "")[1].lower()
     if not ext:
+        content_type = (upload.content_type or "").lower()
         guessed_ext = content_type.split("/")[-1]
         ext = ".jpg" if guessed_ext == "jpeg" else f".{guessed_ext}"
     if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
         raise HTTPException(status_code=400, detail=f"Unsupported {kind} format")
+
+    content_type = (upload.content_type or "").lower()
+    if content_type and not (
+        content_type.startswith("image/") or content_type == "application/octet-stream"
+    ):
+        raise HTTPException(status_code=400, detail=f"{kind.title()} must be an image")
 
     data = await upload.read()
     if not data:
@@ -342,6 +345,7 @@ def _serialize_user(
         "followers_count": followers_count,
         "following_count": following_count,
         "created_at": user.created_at,
+        "updated_at": user.updated_at,
     })
 
 
@@ -729,6 +733,10 @@ async def get_me(
     following_count = await db.scalar(
         select(func.count(UserFollow.id)).where(UserFollow.follower_id == current_user.id)
     ) or 0
+    artist_following_count = await db.scalar(
+        select(func.count(ArtistFollow.id)).where(ArtistFollow.user_id == current_user.id)
+    ) or 0
+    following_count += artist_following_count
     return _serialize_user(current_user, genres, moods, followers_count, following_count)
 
 
@@ -792,6 +800,10 @@ async def update_me(
     following_count = await db.scalar(
         select(func.count(UserFollow.id)).where(UserFollow.follower_id == current_user.id)
     ) or 0
+    artist_following_count = await db.scalar(
+        select(func.count(ArtistFollow.id)).where(ArtistFollow.user_id == current_user.id)
+    ) or 0
+    following_count += artist_following_count
     return _serialize_user(current_user, genres, moods, followers_count, following_count)
 
 

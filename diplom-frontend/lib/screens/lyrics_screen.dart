@@ -18,6 +18,8 @@ class SyncedLine {
 class LyricsScreen extends StatefulWidget {
   final String artist;
   final String title;
+  final String album;
+  final Duration duration;
   final List<String> lyricsLines;
   final Duration currentPosition;
   final List<int> syncedLineTimesMs;
@@ -28,6 +30,8 @@ class LyricsScreen extends StatefulWidget {
     super.key,
     required this.artist,
     required this.title,
+    this.album = '',
+    this.duration = Duration.zero,
     required this.lyricsLines,
     required this.currentPosition,
     this.syncedLineTimesMs = const [],
@@ -48,20 +52,17 @@ class _LyricsScreenState extends State<LyricsScreen> {
   List<SyncedLine> _syncedLines = [];
   bool _loading = true;
   int _activeIndex = -1;
-  int _basePositionMs = 0;
-  DateTime _openedAt = DateTime.now();
+  int _currentPositionMs = 0;
 
   @override
   void initState() {
     super.initState();
-    _basePositionMs = widget.currentPosition.inMilliseconds;
-    _openedAt = DateTime.now();
+    _currentPositionMs = widget.currentPosition.inMilliseconds;
     _seedInitialLyrics();
-    // Keep lyrics in sync with actual playback position
     if (widget.positionStream != null) {
       _positionSub = widget.positionStream!.listen((pos) {
-        _basePositionMs = pos.inMilliseconds;
-        _openedAt = DateTime.now();
+        _currentPositionMs = pos.inMilliseconds;
+        _updateActiveIndex();
       });
     }
   }
@@ -70,8 +71,8 @@ class _LyricsScreenState extends State<LyricsScreen> {
   void didUpdateWidget(covariant LyricsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currentPosition != widget.currentPosition) {
-      _basePositionMs = widget.currentPosition.inMilliseconds;
-      _openedAt = DateTime.now();
+      _currentPositionMs = widget.currentPosition.inMilliseconds;
+      _updateActiveIndex();
     }
   }
 
@@ -108,17 +109,26 @@ class _LyricsScreenState extends State<LyricsScreen> {
     try {
       final title = Uri.encodeComponent(widget.title);
       final artist = Uri.encodeComponent(widget.artist);
+      final album = widget.album.isNotEmpty
+          ? '&album_name=${Uri.encodeComponent(widget.album)}'
+          : '';
+      final duration = widget.duration.inSeconds > 0
+          ? '&duration=${widget.duration.inSeconds}'
+          : '';
       final response = await http
           .get(
             Uri.parse(
-              'https://lrclib.net/api/search?track_name=$title&artist_name=$artist',
+              'https://lrclib.net/api/search?track_name=$title&artist_name=$artist$album$duration',
             ),
           )
           .timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as List<dynamic>;
-        for (final item in data) {
-          final map = item as Map<String, dynamic>;
+        final candidates = data.whereType<Map>().cast<Map>().toList()
+          ..sort((a, b) => _lyricsScore(b).compareTo(_lyricsScore(a)));
+        for (final item in candidates) {
+          final map = Map<String, dynamic>.from(item);
+          if (!_looksLikeRequestedSong(map)) continue;
           final syncedLyrics = map['syncedLyrics'] as String?;
           if (syncedLyrics != null && syncedLyrics.isNotEmpty) {
             final lines = _parseSyncedLyrics(syncedLyrics);
@@ -166,8 +176,76 @@ class _LyricsScreenState extends State<LyricsScreen> {
     setState(() => _loading = false);
   }
 
+  int _lyricsScore(Map item) {
+    final itemTitle = (item['trackName'] ?? item['name'] ?? '').toString();
+    final itemArtist = (item['artistName'] ?? item['artist'] ?? '').toString();
+    final itemAlbum = (item['albumName'] ?? '').toString();
+    final titleTokens = _tokens(widget.title);
+    final artistTokens = _tokens(widget.artist);
+    final itemTitleTokens = _tokens(itemTitle);
+    final itemArtistTokens = _tokens(itemArtist);
+    final synced =
+        (item['syncedLyrics'] as String?)?.isNotEmpty == true ? 1000 : 0;
+    final plain =
+        (item['plainLyrics'] as String?)?.isNotEmpty == true ? 100 : 0;
+    final titleMatches = titleTokens.intersection(itemTitleTokens).length;
+    final artistMatches = artistTokens.intersection(itemArtistTokens).length;
+    final durationSeconds = widget.duration.inSeconds;
+    final itemDuration = (item['duration'] as num?)?.toInt() ?? durationSeconds;
+    final durationPenalty =
+        durationSeconds > 0 ? (durationSeconds - itemDuration).abs() * 3 : 0;
+    final albumBonus = widget.album.isNotEmpty &&
+            _normalize(itemAlbum) == _normalize(widget.album)
+        ? 80
+        : 0;
+    return synced +
+        plain +
+        titleMatches * 120 +
+        artistMatches * 140 +
+        albumBonus -
+        durationPenalty;
+  }
+
+  bool _looksLikeRequestedSong(Map item) {
+    final itemTitle = (item['trackName'] ?? item['name'] ?? '').toString();
+    final itemArtist = (item['artistName'] ?? item['artist'] ?? '').toString();
+    final titleTokens = _tokens(widget.title);
+    final artistTokens = _tokens(widget.artist);
+    if (titleTokens.isNotEmpty &&
+        titleTokens.intersection(_tokens(itemTitle)).isEmpty) {
+      return false;
+    }
+    if (artistTokens.isNotEmpty &&
+        itemArtist.isNotEmpty &&
+        artistTokens.intersection(_tokens(itemArtist)).isEmpty) {
+      return false;
+    }
+    final durationSeconds = widget.duration.inSeconds;
+    final itemDuration = (item['duration'] as num?)?.toInt() ?? 0;
+    if (durationSeconds > 0 &&
+        itemDuration > 0 &&
+        (durationSeconds - itemDuration).abs() > 8) {
+      return false;
+    }
+    return true;
+  }
+
+  String _normalize(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll('&', ' and ')
+        .replaceAll(RegExp(r'\((official|audio|lyrics?|video|live).*?\)'), ' ')
+        .replaceAll(RegExp(r'\[(official|audio|lyrics?|video|live).*?\]'), ' ')
+        .replaceAll(RegExp(r'[^a-z0-9а-яё]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  Set<String> _tokens(String value) =>
+      _normalize(value).split(' ').where((token) => token.isNotEmpty).toSet();
+
   List<SyncedLine> _parseSyncedLyrics(String raw) {
-    final regex = RegExp(r'^\[(\d{2}):(\d{2})\.(\d{2})\]\s*(.*)$');
+    final regex = RegExp(r'^\[(\d+):(\d+)[.:](\d+)\]\s*(.*)$');
     final lines = <SyncedLine>[];
 
     for (final entry in raw.split('\n')) {
@@ -204,13 +282,9 @@ class _LyricsScreenState extends State<LyricsScreen> {
   void _updateActiveIndex() {
     if (_syncedLines.isEmpty) return;
 
-    final elapsed = DateTime.now().difference(_openedAt).inMilliseconds;
-    final positionMs = _basePositionMs + elapsed;
-
-    // Start at -1: nothing active until the first lyric time is reached
     int nextIndex = -1;
     for (int i = 0; i < _syncedLines.length; i++) {
-      if (_syncedLines[i].timeMs <= positionMs) {
+      if (_syncedLines[i].timeMs <= _currentPositionMs) {
         nextIndex = i;
       } else {
         break;
@@ -236,10 +310,13 @@ class _LyricsScreenState extends State<LyricsScreen> {
     // But actual render with Padding widget adds widget overhead, so use 58px measured
     const itemHeight = 58.0;
     // Use the actual viewport height (scroll area) for centering
-    final viewH = pos.viewportDimension > 0 ? pos.viewportDimension : screenHeight;
+    final viewH =
+        pos.viewportDimension > 0 ? pos.viewportDimension : screenHeight;
     // Center the active line vertically in the viewport
-    final targetOffset =
-        topPadding + (_activeIndex * itemHeight) - (viewH / 2) + (itemHeight / 2);
+    final targetOffset = topPadding +
+        (_activeIndex * itemHeight) -
+        (viewH / 2) +
+        (itemHeight / 2);
     pos.animateTo(
       targetOffset.clamp(0.0, pos.maxScrollExtent),
       duration: const Duration(milliseconds: 350),
@@ -252,8 +329,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
     final timeMs = _syncedLines[index].timeMs;
     widget.onSeek?.call(Duration(milliseconds: timeMs));
     setState(() {
-      _basePositionMs = timeMs;
-      _openedAt = DateTime.now();
+      _currentPositionMs = timeMs;
       _activeIndex = index;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToActiveLine());

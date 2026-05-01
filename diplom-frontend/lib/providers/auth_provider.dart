@@ -10,10 +10,12 @@ class AuthProvider extends ChangeNotifier {
   AuthStatus _status = AuthStatus.unknown;
   Map<String, dynamic>? _user;
   String? _error;
+  int _profileRevision = 0;
 
   AuthStatus get status => _status;
   Map<String, dynamic>? get user => _user;
   String? get error => _error;
+  int get profileRevision => _profileRevision;
   String? _devCode;
   String? get devCode => _devCode;
 
@@ -65,7 +67,8 @@ class AuthProvider extends ChangeNotifier {
       );
       _user = data['user'];
       _devCode = data['dev_code'] as String?;
-      _status = AuthStatus.unauthenticated; // stays unauth until onboarding done
+      _status =
+          AuthStatus.unauthenticated; // stays unauth until onboarding done
       notifyListeners();
       return true;
     } on Exception catch (e) {
@@ -109,6 +112,11 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void bumpProfileRevision() {
+    _profileRevision++;
+    notifyListeners();
+  }
+
   Future<void> reload() async {
     try {
       final fresh = await _api.getMe();
@@ -133,11 +141,16 @@ class AuthProvider extends ChangeNotifier {
           }
         }
       }
-      if (e.response?.statusCode == 400) return (data is Map ? data['detail']?.toString() : null) ?? 'Invalid data. Check your inputs.';
+      if (e.response?.statusCode == 400) {
+        return (data is Map ? data['detail']?.toString() : null) ??
+            'Invalid data. Check your inputs.';
+      }
       if (e.response?.statusCode == 401) return 'Wrong email or password.';
       if (e.response?.statusCode == 409) return 'Email already registered.';
       if (e.response?.statusCode == 422) return 'Please check your input.';
-      if (e.response?.statusCode == 429) return 'Too many attempts. Please wait a minute.';
+      if (e.response?.statusCode == 429) {
+        return 'Too many attempts. Please wait a minute.';
+      }
       return 'Server error. Try again.';
     }
     return e.toString();

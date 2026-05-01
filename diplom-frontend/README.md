@@ -1,81 +1,70 @@
-# MoodWave — Flutter App
+# MoodWave Frontend
 
-Полный фронтенд проект на Flutter, конвертированный из HTML дизайна.
+Flutter-приложение MoodWave для web/mobile. Основной backend ожидается на `http://127.0.0.1:8000`, web-версия обычно запускается на `http://localhost:5001`.
 
-## Структура проекта
+## Основные экраны
 
-```
-lib/
-├── main.dart                        # Entry point
-├── theme/
-│   └── app_colors.dart             # Все цвета, градиенты
-├── widgets/
-│   ├── common_widgets.dart         # Общие виджеты
-│   └── bottom_nav_bar.dart         # Нижняя навигация
-└── screens/
-    ├── splash_screen.dart          # Screen 01 — Сплэш
-    ├── onboarding_screen.dart      # Screen 02-04 — Онбординг (3 страницы)
-    ├── login_screen.dart           # Screen 05 — Логин
-    ├── player_screen.dart          # Screen 07 — Плеер
-    ├── chat_screen.dart            # Screen 10 — Чат
-    ├── playlist_screen.dart        # Screen 13 — Плейлист
-    ├── weather_screen.dart         # Screen 14 — Погода
-    └── main/
-        ├── main_screen.dart        # Главный экран с нижним меню
-        ├── home_tab.dart           # Screen 06 — Главная
-        ├── search_tab.dart         # Screen 08 — Поиск
-        ├── match_tab.dart          # Screen 09 — Match
-        ├── friends_tab.dart        # Screen 12 — Друзья
-        └── profile_tab.dart        # Screen 11 — Профиль
-```
+- `Home`: Live Weather, Recently Played, You Might Like, AI Mixes, Mood, Radio, This Is, Top in your city.
+- `Search`: поиск музыки, артистов и альбомов.
+- `Social`: матчи, друзья, listening rooms.
+- `Library`: liked songs, плейлисты, альбомы, подписки на артистов.
+- `Profile`: профиль, аватар, баннер, followers/following.
+- `Player`: полный плеер, mini-player, queue, lyrics, playlist actions.
 
-## Установка и запуск
+## Запуск
 
-### 1. Установить зависимости
-```bash
+```powershell
+cd C:\Users\Asus\diplom\diplom-frontend
 flutter pub get
+flutter run -d chrome --web-port 5001
 ```
 
-### 2. Запустить приложение
-```bash
-flutter run
+Открыть:
+
+```text
+http://localhost:5001/
 ```
 
-### 3. Сборка APK
-```bash
-flutter build apk --release
+## Production web build
+
+```powershell
+cd C:\Users\Asus\diplom\diplom-frontend
+flutter build web --pwa-strategy=none
+python -m http.server 5001 -d build\web --bind 127.0.0.1
 ```
 
-## Зависимости
+Если браузер показывает старую сборку, нажми `Ctrl + F5`.
 
-- **flutter** — SDK
-- **google_fonts** ^6.1.0 — Шрифт Outfit
+## Проверки
 
-## Навигация
-
-Поток:
-```
-SplashScreen
-  → OnboardingScreen (3 страницы с PageView)
-    → LoginScreen
-      → MainScreen (IndexedStack + BottomNavBar)
-          ├── HomeTab (+ переход на PlayerScreen)
-          ├── SearchTab
-          ├── MatchTab (+ переход на ChatScreen)
-          ├── FriendsTab
-          └── ProfileTab
-
-Дополнительные экраны:
-  → PlayerScreen (из HomeTab / WeatherScreen)
-  → ChatScreen (из MatchTab)
-  → PlaylistScreen (отдельный экран)
-  → WeatherScreen (отдельный экран)
+```powershell
+flutter analyze
+flutter build web --pwa-strategy=none
 ```
 
-## Дизайн
+## Важные папки
 
-- 🎨 **Dark theme** — фон #08080f
-- ✨ **Glassmorphism** — BackdropFilter + прозрачные бордеры
-- 🌈 **Neon gradients** — фиолетовый, розовый, синий
-- 📱 **Шрифт** — Outfit (Google Fonts)
-- 💫 **Анимации** — floating cover, music bars, pulse orbs
+```text
+lib/
+├── main.dart
+├── providers/           # auth/player state
+├── screens/             # экраны приложения
+├── screens/main/        # Home/Search/Social/Library/Profile tabs
+├── services/            # API, token storage, player helpers
+├── theme/               # цвета и градиенты
+├── utils/               # media url helpers
+└── widgets/             # общие компоненты
+```
+
+## Backend endpoints, которые особенно важны для UI
+
+- `/health`
+- `/auth/me`
+- `/tracks/me/recent`
+- `/tracks/me/history`
+- `/users/me/following/details`
+- `/users/{user_id}/following/artists`
+- `/artists/{deezer_id}/profile`
+- `/radio/stations`
+- `/weather/current`
+- `/lyrics/search`

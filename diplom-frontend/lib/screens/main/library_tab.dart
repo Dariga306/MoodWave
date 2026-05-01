@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/media_url.dart';
 import '../album_screen.dart';
 import '../artist_screen.dart';
 import '../create_playlist_screen.dart';
@@ -36,6 +37,7 @@ class _LibraryTabState extends State<LibraryTab> {
   bool _albumsLoading = false;
   bool _artistsLoaded = false;
   bool _artistsLoading = false;
+  int _lastProfileRevision = 0;
 
   @override
   void initState() {
@@ -43,8 +45,9 @@ class _LibraryTabState extends State<LibraryTab> {
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool force = false}) async {
     setState(() {
+      _loading = true;
       _albumsLoaded = false;
       _artistsLoaded = false;
     });
@@ -59,8 +62,12 @@ class _LibraryTabState extends State<LibraryTab> {
       if (!mounted) return;
       setState(() => _loading = false);
     }
-    if (_filter == 2) _loadAlbums();
-    if (_filter == 3) _loadArtists();
+    if (_filter == 0 || _filter == 2 || force) {
+      await _loadAlbums(force: true);
+    }
+    if (_filter == 0 || _filter == 3 || force) {
+      await _loadArtists(force: true);
+    }
   }
 
   Future<void> _loadAlbums({bool force = false}) async {
@@ -115,6 +122,60 @@ class _LibraryTabState extends State<LibraryTab> {
         });
       }
     }
+  }
+
+  Future<void> _openSavedAlbum(
+    BuildContext context,
+    Map<String, dynamic> album,
+  ) async {
+    final rawId = album['id']?.toString();
+    if (rawId == null || rawId.isEmpty) return;
+
+    if (rawId.startsWith('this_is:')) {
+      final artistId = rawId.substring('this_is:'.length);
+      final artistName = (album['artist'] ?? 'Artist').toString();
+      final artistImageUrl = album['cover_xl']?.toString();
+
+      try {
+        final profile = await ApiService().getArtistProfile(artistId);
+        if (!context.mounted) return;
+        final tracks = ((profile['top_tracks'] as List?) ?? [])
+            .whereType<Map>()
+            .map((t) => Map<String, dynamic>.from(t))
+            .toList();
+
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ThisIsScreen(
+              artistName: artistName,
+              artistImageUrl: artistImageUrl,
+              artistId: artistId,
+              tracks: tracks,
+            ),
+          ),
+        );
+      } catch (_) {
+        if (!context.mounted) return;
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ArtistScreen(
+              artistId: artistId,
+              artistName: artistName,
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    final id = int.tryParse(rawId);
+    if (id == null) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => AlbumScreen(albumId: id)),
+    );
   }
 
   void _onFilterChanged(int i) {
@@ -172,6 +233,107 @@ class _LibraryTabState extends State<LibraryTab> {
     }
     return list;
   }
+
+  List<Widget> _buildAllLibrarySlivers() {
+    final slivers = <Widget>[];
+    final playlists = _filteredPlaylists;
+
+    if (playlists.isNotEmpty) {
+      slivers.add(_librarySectionHeader('Playlists'));
+      slivers.add(
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (_, i) => _PlaylistItem(
+              playlist: playlists[i] as Map<String, dynamic>,
+              onRefresh: _load,
+            ),
+            childCount: playlists.length,
+          ),
+        ),
+      );
+    }
+
+    if (_albums.isNotEmpty) {
+      slivers.add(_librarySectionHeader('Albums'));
+      slivers.add(
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (_, i) => _AlbumLibraryItem(
+              album: _albums[i],
+              onTap: () => _openSavedAlbum(context, _albums[i]),
+            ),
+            childCount: _albums.length,
+          ),
+        ),
+      );
+    }
+
+    if (_artists.isNotEmpty) {
+      slivers.add(_librarySectionHeader('Artists'));
+      slivers.add(
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (_, i) => _ArtistLibraryItem(artist: _artists[i]),
+            childCount: _artists.length,
+          ),
+        ),
+      );
+    }
+
+    if (slivers.isEmpty) {
+      slivers.add(
+        SliverFillRemaining(
+          child: Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text('🎵', style: TextStyle(fontSize: 56)),
+              const SizedBox(height: 14),
+              Text('Your library is empty',
+                  style: GoogleFonts.outfit(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.text)),
+              const SizedBox(height: 6),
+              Text('Create your first playlist',
+                  style:
+                      GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+              const SizedBox(height: 20),
+              GestureDetector(
+                onTap: _openCreatePlaylist,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  decoration: BoxDecoration(
+                      gradient: AppColors.primaryBtn,
+                      borderRadius: BorderRadius.circular(14)),
+                  child: Text('Create Playlist',
+                      style: GoogleFonts.outfit(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white)),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
+
+    return slivers;
+  }
+
+  Widget _librarySectionHeader(String title) => SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+          child: Text(
+            title,
+            style: GoogleFonts.outfit(
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+              color: AppColors.text,
+            ),
+          ),
+        ),
+      );
 
   void _showSortSheet() {
     const options = [
@@ -251,11 +413,44 @@ class _LibraryTabState extends State<LibraryTab> {
     if (created == true) _load();
   }
 
+  void _handleProfileRevision(int revision) {
+    if (revision == _lastProfileRevision) return;
+    _lastProfileRevision = revision;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _load(force: true);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final profileRevision =
+        context.select<AuthProvider, int>((auth) => auth.profileRevision);
+    _handleProfileRevision(profileRevision);
     final user = context.watch<AuthProvider>().user;
     final displayName = user?['display_name'] ?? user?['username'] ?? 'User';
-    final avatarUrl = user?['avatar_url'] as String?;
+    final avatarUrl = buildMediaUrl(
+      user?['avatar_url'] as String?,
+      version: user?['updated_at'],
+    );
+    final avatarPreset = user?['avatar_preset'] as int? ?? 0;
+    const avatarGradients = [
+      [Color(0xFF7c3aed), Color(0xFFec4899)],
+      [Color(0xFF06b6d4), Color(0xFF3b82f6)],
+      [Color(0xFF22c55e), Color(0xFF14b8a6)],
+      [Color(0xFFf97316), Color(0xFFec4899)],
+      [Color(0xFF6366f1), Color(0xFFa855f7)],
+      [Color(0xFFf59e0b), Color(0xFF22c55e)],
+      [Color(0xFFef4444), Color(0xFFf97316)],
+      [Color(0xFF0ea5e9), Color(0xFF8b5cf6)],
+      [Color(0xFF84cc16), Color(0xFF06b6d4)],
+      [Color(0xFFec4899), Color(0xFF8b5cf6)],
+      [Color(0xFF64748b), Color(0xFF0f172a)],
+      [Color(0xFFfde047), Color(0xFFf97316)],
+    ];
+    final avatarColors =
+        avatarGradients[avatarPreset.clamp(0, avatarGradients.length - 1)];
     final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U';
 
     return Scaffold(
@@ -284,13 +479,17 @@ class _LibraryTabState extends State<LibraryTab> {
                           width: 36,
                           height: 36,
                           decoration: BoxDecoration(
-                            gradient: AppColors.gradMixed,
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: avatarColors,
+                            ),
                             shape: BoxShape.circle,
                             border: Border.all(
                                 color: AppColors.purple.withOpacity(0.4),
                                 width: 1.5),
                           ),
-                          child: avatarUrl != null && avatarUrl.isNotEmpty
+                          child: avatarUrl.isNotEmpty
                               ? ClipOval(
                                   child: Image.network(avatarUrl,
                                       fit: BoxFit.cover,
@@ -494,6 +693,8 @@ class _LibraryTabState extends State<LibraryTab> {
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: AppColors.purpleLight)),
               )
+            else if (_filter == 0)
+              ..._buildAllLibrarySlivers()
 
             // ── Albums filter ─────────────────────────────────────────
             else if (_filter == 2 && _albumsLoading)
@@ -532,23 +733,8 @@ class _LibraryTabState extends State<LibraryTab> {
                               (album['title'] ?? 'Unknown Album').toString();
                           final artist = (album['artist'] ?? '').toString();
                           final cover = album['cover_xl']?.toString();
-                          final albumId = album['id'];
                           return GestureDetector(
-                            onTap: () {
-                              if (albumId != null) {
-                                final id = albumId is int
-                                    ? albumId
-                                    : int.tryParse(albumId.toString());
-                                if (id != null) {
-                                  Navigator.push(
-                                      ctx,
-                                      MaterialPageRoute(
-                                        builder: (_) =>
-                                            AlbumScreen(albumId: id),
-                                      ));
-                                }
-                              }
-                            },
+                            onTap: () => _openSavedAlbum(ctx, album),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 20, vertical: 7),
@@ -852,6 +1038,185 @@ class _SubFilter extends StatelessWidget {
                   color: active ? AppColors.purpleLight : AppColors.text3)),
         ),
       );
+}
+
+class _AlbumLibraryItem extends StatelessWidget {
+  final Map<String, dynamic> album;
+  final VoidCallback onTap;
+
+  const _AlbumLibraryItem({required this.album, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = (album['title'] ?? 'Unknown Album').toString();
+    final artist = (album['artist'] ?? '').toString();
+    final cover = album['cover_xl']?.toString();
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
+        child: Row(children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              gradient: AppColors.gradMixed,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: cover != null && cover.isNotEmpty
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: CachedNetworkImage(
+                      imageUrl: cover,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) => const Center(
+                        child: Text('💿', style: TextStyle(fontSize: 22)),
+                      ),
+                    ),
+                  )
+                : const Center(
+                    child: Text('💿', style: TextStyle(fontSize: 22)),
+                  ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: GoogleFonts.outfit(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.text,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  artist.isEmpty ? 'Album' : artist,
+                  style:
+                      GoogleFonts.outfit(fontSize: 12, color: AppColors.text3),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right_rounded,
+              color: AppColors.text3, size: 20),
+        ]),
+      ),
+    );
+  }
+}
+
+class _ArtistLibraryItem extends StatelessWidget {
+  final Map<String, dynamic> artist;
+
+  const _ArtistLibraryItem({required this.artist});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = (artist['name'] ?? 'Unknown Artist').toString();
+    final pic = artist['picture_medium']?.toString() ??
+        artist['picture_xl']?.toString() ??
+        artist['picture']?.toString() ??
+        artist['image_url']?.toString();
+    final fans = artist['nb_fan'];
+    final artistId = artist['id'];
+    final fansNum =
+        fans is int ? fans : int.tryParse(fans?.toString() ?? '') ?? 0;
+    final fansStr = fansNum >= 1000000
+        ? '${(fansNum / 1000000).toStringAsFixed(1)}M followers'
+        : fansNum >= 1000
+            ? '${(fansNum / 1000).toStringAsFixed(0)}K followers'
+            : fansNum > 0
+                ? '$fansNum followers'
+                : 'Artist';
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+
+    return GestureDetector(
+      onTap: () {
+        if (artistId == null) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ArtistScreen(
+              artistId: artistId.toString(),
+              artistName: name,
+            ),
+          ),
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
+        child: Row(children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: const BoxDecoration(
+              gradient: AppColors.gradPink,
+              shape: BoxShape.circle,
+            ),
+            child: pic != null && pic.isNotEmpty
+                ? ClipOval(
+                    child: CachedNetworkImage(
+                      imageUrl: pic,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) => Center(
+                        child: Text(
+                          initial,
+                          style: GoogleFonts.outfit(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : Center(
+                    child: Text(
+                      initial,
+                      style: GoogleFonts.outfit(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: GoogleFonts.outfit(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.text,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  fansStr,
+                  style:
+                      GoogleFonts.outfit(fontSize: 12, color: AppColors.text3),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right_rounded,
+              color: AppColors.text3, size: 20),
+        ]),
+      ),
+    );
+  }
 }
 
 // ── Badge widget ────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -743,7 +744,9 @@ async def get_youtube_id(
     from app.services.youtube_service import search_video_id
 
     redis = request.app.state.redis
-    cache_key = f"yt_id:{spotify_id}"
+    signature = f"{spotify_id}|{title.strip().lower()}|{artist.strip().lower()}"
+    cache_suffix = hashlib.md5(signature.encode("utf-8")).hexdigest()
+    cache_key = f"yt_id:{cache_suffix}"
 
     try:
         cached = await redis.get(cache_key)

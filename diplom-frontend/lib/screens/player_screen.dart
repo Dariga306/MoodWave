@@ -2,13 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
-import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
-import 'package:youtube_player_iframe/youtube_player_iframe.dart' as yt;
 
 import '../providers/player_provider.dart';
 import '../services/api_service.dart';
@@ -56,6 +53,24 @@ List<_LrcLine> _parseLrc(String lrc) {
   return lines;
 }
 
+String _normalizeLookupText(String value) {
+  return value
+      .toLowerCase()
+      .replaceAll('&', ' and ')
+      .replaceAll(RegExp(r'\((official|audio|lyrics?|video|live).*?\)'), ' ')
+      .replaceAll(RegExp(r'\[(official|audio|lyrics?|video|live).*?\]'), ' ')
+      .replaceAll(RegExp(r'[^a-z0-9а-яё]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+Set<String> _lookupTokens(String value) {
+  return _normalizeLookupText(value)
+      .split(' ')
+      .where((token) => token.isNotEmpty)
+      .toSet();
+}
+
 class PlayerScreen extends StatefulWidget {
   final Map<String, dynamic>? track;
 
@@ -68,44 +83,28 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen>
     with TickerProviderStateMixin {
   late final AnimationController _floatController;
+  late final PlayerProvider _playback;
   late Map<String, dynamic> _track;
 
-  final _player = AudioPlayer();
-
-  yt.YoutubePlayerController? _ytController;
-  StreamSubscription? _ytStateSubscription;
-  StreamSubscription<Duration>? _ytPositionSubscription;
-  StreamSubscription<Duration>? _audioPositionSubscription;
-  StreamSubscription<Duration?>? _audioDurationSubscription;
-  StreamSubscription<PlayerState>? _audioStateSubscription;
-
-  List<Map<String, dynamic>> _queue = [];
-  int _queueIndex = 0;
-
   bool _loadingTrack = true;
-  bool _ytReady = false;
-  bool _audioReady = false;
-  bool _ytPlaying = false;
-  bool _audioPlaying = false;
+  bool _trackEnded = false;
   bool _isLiked = false;
   bool _shuffle = false;
-  int _repeatMode = 0; // 0=off 1=repeat-all 2=repeat-one
-  bool _trackEnded = false;
+  int _repeatMode = 0;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
+  bool _isScrubbing = false;
+  double? _scrubValue;
 
   bool _lyricsLoading = false;
   bool _lyricsSynced = false;
   List<_LrcLine> _lrcLines = [];
   int _currentLyricIdx = -1;
+  String _lyricsTrackKey = '';
 
-  // Sleep timer
   Timer? _sleepTimer;
   int? _sleepMinutesLeft;
-
-  // Progress heartbeat
-  Timer? _progressTimer;
 
   String get _title =>
       (_track['title'] ?? _track['trackName'] ?? 'Unknown').toString();
@@ -119,8 +118,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           _track['trackId'] ??
           '')
       .toString();
-  bool get _usingYoutube => _ytReady && _ytController != null;
-  bool get _isPlaying => _usingYoutube ? _ytPlaying : _audioPlaying;
+  bool get _isPlaying => _playback.isPlaying;
   String get _playbackLookupId {
     if (_trackId.isNotEmpty) {
       return _trackId;
@@ -136,15 +134,18 @@ class _PlayerScreenState extends State<PlayerScreen>
   List<String> get _lyricsLines => _lrcLines.map((line) => line.text).toList();
   List<int> get _lyricsTimesMs =>
       _lrcLines.map((line) => line.time.inMilliseconds).toList();
+  String get _album =>
+      (_track['album'] ?? _track['collectionName'] ?? '').toString();
+  Duration get _seekableDuration =>
+      _playback.duration > Duration.zero ? _playback.duration : _duration;
 
   String? get _currentLyricLine {
     if (_lrcLines.isEmpty) return null;
     if (_lyricsSynced) {
-      // Only show a line once the artist has actually started singing
       if (_currentLyricIdx >= 0 && _currentLyricIdx < _lrcLines.length) {
         return _lrcLines[_currentLyricIdx].text;
       }
-      return null; // Before the first lyric timestamp — show nothing
+      return null;
     }
     return _lrcLines.first.text;
   }
@@ -152,67 +153,124 @@ class _PlayerScreenState extends State<PlayerScreen>
   @override
   void initState() {
     super.initState();
-    _track = Map<String, dynamic>.from(widget.track ?? const {});
-    _queue = _extractQueue(_track);
-    _syncQueueIndex();
+    _playback = context.read<PlayerProvider>();
+    _track = Map<String, dynamic>.from(
+      _playback.track ?? widget.track ?? const {},
+    );
     _floatController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 4),
     )..repeat(reverse: true);
-    // Register toggle callback with PlayerProvider
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        context.read<PlayerProvider>().registerToggle(_togglePlayPause);
-        context.read<PlayerProvider>().setTrack(_track, isPlaying: false);
-      }
-    });
-    _loadTrack(_track, refreshQueue: false);
-    unawaited(_ensureQueue());
-  }
+    _playback.addListener(_handlePlaybackChanged);
+    _handlePlaybackChanged();
 
-  void _startProgressHeartbeat() {
-    _progressTimer?.cancel();
-    _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (_isPlaying && _trackId.isNotEmpty) {
-        final progressMs = _position.inMilliseconds;
-        final completed = _duration.inMilliseconds > 0 &&
-            progressMs >= _duration.inMilliseconds - 5000;
-        ApiService().updateTrackProgress(_trackId, progressMs, completed);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final requestedTrack = widget.track;
+      if (requestedTrack != null) {
+        final currentTrack = _playback.track;
+        if (currentTrack == null || !_sameTrack(currentTrack, requestedTrack)) {
+          final prepared = _prepareRequestedTrack(requestedTrack);
+          final preserveQueue = _trackExistsInQueue(
+            requestedTrack,
+            _playback.queue,
+          );
+          unawaited(
+            _playback.openTrack(
+              prepared,
+              refreshQueue: !preserveQueue,
+            ),
+          );
+          return;
+        }
       }
+      _maybeRefreshLyrics(force: true);
     });
   }
 
   @override
   void dispose() {
     _sleepTimer?.cancel();
-    _progressTimer?.cancel();
     _floatController.dispose();
-    _ytStateSubscription?.cancel();
-    _ytPositionSubscription?.cancel();
-    _audioPositionSubscription?.cancel();
-    _audioDurationSubscription?.cancel();
-    _audioStateSubscription?.cancel();
-    _ytController?.close();
-    _player.dispose();
-    // Keep track info in provider but clear the toggle callback
-    try {
-      context.read<PlayerProvider>()
-        ..setPlaying(false)
-        ..unregisterToggle();
-    } catch (_) {}
+    _playback.removeListener(_handlePlaybackChanged);
     super.dispose();
   }
 
-  List<Map<String, dynamic>> _extractQueue(Map<String, dynamic> seedTrack) {
-    final rawQueue = seedTrack['queue'] ?? seedTrack['tracks'];
-    if (rawQueue is List) {
-      final items = rawQueue
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .toList();
-      if (items.isNotEmpty) return items;
+  Map<String, dynamic> _prepareRequestedTrack(Map<String, dynamic> track) {
+    final prepared = Map<String, dynamic>.from(track);
+    final existingQueue = _playback.queue;
+    final hasOwnQueue = prepared['queue'] is List || prepared['tracks'] is List;
+    if (!hasOwnQueue && _trackExistsInQueue(prepared, existingQueue)) {
+      prepared['queue'] =
+          existingQueue.map((item) => Map<String, dynamic>.from(item)).toList();
     }
-    return [Map<String, dynamic>.from(seedTrack)];
+    return prepared;
+  }
+
+  bool _trackExistsInQueue(
+    Map<String, dynamic> track,
+    List<Map<String, dynamic>> queue,
+  ) {
+    return queue.any((item) => _sameTrack(item, track));
+  }
+
+  String _trackStateKey(Map<String, dynamic>? track) {
+    if (track == null) return '';
+    final id = (track['spotify_id'] ??
+            track['deezer_id'] ??
+            track['track_id'] ??
+            track['trackId'] ??
+            '')
+        .toString();
+    if (id.isNotEmpty) return id;
+    return '${(track['artist'] ?? track['artistName'] ?? '')}::'
+        '${(track['title'] ?? track['trackName'] ?? '')}';
+  }
+
+  void _handlePlaybackChanged() {
+    if (!mounted) return;
+
+    final providerTrack = _playback.track;
+    if (providerTrack == null) {
+      setState(() {
+        _loadingTrack = false;
+        _trackEnded = false;
+        _position = Duration.zero;
+        _duration = Duration.zero;
+      });
+      return;
+    }
+
+    final nextTrack = Map<String, dynamic>.from(providerTrack);
+    final nextKey = _trackStateKey(nextTrack);
+    final oldKey = _trackStateKey(_track);
+
+    setState(() {
+      _track = nextTrack;
+      _loadingTrack = _playback.loadingTrack;
+      _trackEnded = _playback.trackEnded;
+      _position = _playback.position;
+      _duration = _playback.duration;
+      _shuffle = _playback.shuffleOn;
+      _repeatMode = _playback.repeatMode;
+      _updateLyricIdx(_position);
+    });
+
+    if (nextKey != oldKey) {
+      _maybeRefreshLyrics(force: true);
+    }
+  }
+
+  void _maybeRefreshLyrics({bool force = false}) {
+    final key = _trackStateKey(_track);
+    if (!force && key == _lyricsTrackKey) return;
+    _lyricsTrackKey = key;
+    setState(() {
+      _lrcLines = [];
+      _lyricsSynced = false;
+      _currentLyricIdx = -1;
+    });
+    unawaited(_fetchLyrics());
   }
 
   bool _sameTrack(Map<String, dynamic> a, Map<String, dynamic> b) {
@@ -235,355 +293,149 @@ class _PlayerScreenState extends State<PlayerScreen>
             (b['artist'] ?? b['artistName']).toString();
   }
 
-  Map<String, dynamic> _fillTrackData(
-    Map<String, dynamic> current,
-    Map<String, dynamic> resolved,
-  ) {
-    final merged = Map<String, dynamic>.from(current);
-    resolved.forEach((key, value) {
-      if (value == null) return;
-      if (value is String && value.trim().isEmpty) return;
-      final existing = merged[key];
-      final isMissing =
-          existing == null || (existing is String && existing.trim().isEmpty);
-      if (isMissing) {
-        merged[key] = value;
-      }
-    });
-    return merged;
-  }
-
-  Future<Map<String, dynamic>> _enrichTrack(
-    Map<String, dynamic> track,
-  ) async {
-    final title = (track['title'] ?? track['trackName'] ?? '').toString();
-    final artist = (track['artist'] ?? track['artistName'] ?? '').toString();
-    final trackId = (track['spotify_id'] ??
-            track['deezer_id'] ??
-            track['track_id'] ??
-            track['trackId'] ??
-            '')
-        .toString();
-    final hasPreview =
-        (track['preview_url'] ?? track['previewUrl'])?.toString().isNotEmpty ==
-            true;
-    final hasCover =
-        (track['cover_url'] ?? track['artworkUrl100'])?.toString().isNotEmpty ==
-            true;
-    final hasArtistId = track['artist_id'] != null;
-
-    if (title.isEmpty ||
-        (trackId.isNotEmpty && hasPreview && hasCover && hasArtistId)) {
-      return Map<String, dynamic>.from(track);
-    }
-
-    try {
-      final resolved = await ApiService().resolveTrack(
-        title: title,
-        artist: artist,
-        trackId: trackId.isEmpty ? null : trackId,
-      );
-      if (resolved == null) {
-        return Map<String, dynamic>.from(track);
-      }
-      return _fillTrackData(track, resolved);
-    } catch (_) {
-      return Map<String, dynamic>.from(track);
-    }
-  }
-
-  void _syncQueueIndex() {
-    final index = _queue.indexWhere((item) => _sameTrack(item, _track));
-    _queueIndex = index >= 0 ? index : 0;
-  }
-
-  Future<void> _ensureQueue() async {
-    if (_queue.length > 1 || _artist.isEmpty && _title.isEmpty) return;
-
-    try {
-      final results = await ApiService()
-          .searchTracksWithFallback('$_artist $_title', limit: 10);
-      final merged = <Map<String, dynamic>>[Map<String, dynamic>.from(_track)];
-      for (final item in results) {
-        final track = Map<String, dynamic>.from(item);
-        if (!merged.any((existing) => _sameTrack(existing, track))) {
-          merged.add(track);
-        }
-      }
-      if (!mounted || merged.length <= 1) return;
-      setState(() {
-        _queue = merged;
-        _syncQueueIndex();
-      });
-    } catch (_) {}
-  }
-
-  Future<void> _resetPlayback() async {
-    await _ytStateSubscription?.cancel();
-    await _ytPositionSubscription?.cancel();
-    await _audioPositionSubscription?.cancel();
-    await _audioDurationSubscription?.cancel();
-    await _audioStateSubscription?.cancel();
-    _ytStateSubscription = null;
-    _ytPositionSubscription = null;
-    _audioPositionSubscription = null;
-    _audioDurationSubscription = null;
-    _audioStateSubscription = null;
-    _ytController?.close();
-    _ytController = null;
-    await _player.stop();
-  }
-
-  Future<void> _loadTrack(
-    Map<String, dynamic> nextTrack, {
-    bool refreshQueue = true,
-  }) async {
-    await _resetPlayback();
-    if (!mounted) return;
-
-    final enrichedTrack = await _enrichTrack(nextTrack);
-    if (!mounted) return;
-
-    setState(() {
-      _track = Map<String, dynamic>.from(enrichedTrack);
-      _ytReady = false;
-      _audioReady = false;
-      _ytPlaying = false;
-      _audioPlaying = false;
-      _trackEnded = false;
-      _position = Duration.zero;
-      _duration = Duration.zero;
-      _lyricsLoading = false;
-      _lyricsSynced = false;
-      _lrcLines = [];
-      _currentLyricIdx = -1;
-      _loadingTrack = true;
-    });
-    if (mounted) {
-      context.read<PlayerProvider>().setTrack(_track, isPlaying: false);
-    }
-
-    _syncQueueIndex();
-    _startProgressHeartbeat();
-    await Future.wait([
-      _initPlayer(),
-      _fetchLyrics(),
-    ]);
-
-    if (mounted) {
-      setState(() => _loadingTrack = false);
-    }
-
-    if (refreshQueue) {
-      unawaited(_ensureQueue());
-    }
-  }
-
-  Future<void> _initPlayer() async {
-    if (_title.isEmpty) return;
-
-    try {
-      final videoId = await ApiService().getYouTubeId(
-        trackId: _playbackLookupId,
-        title: _title,
-        artist: _artist,
-      );
-      if (videoId != null && videoId.isNotEmpty) {
-        // Set duration hint from track metadata immediately so seek bar is usable
-        final trackDurationMs = _track['duration_ms'] as int?;
-        if (trackDurationMs != null && trackDurationMs > 0 && mounted) {
-          setState(() => _duration = Duration(milliseconds: trackDurationMs));
-        }
-
-        final controller = yt.YoutubePlayerController.fromVideoId(
-          videoId: videoId,
-          autoPlay: true,
-          params: const yt.YoutubePlayerParams(
-            showControls: false,
-            showFullscreenButton: false,
-            mute: false,
-          ),
-        );
-
-        _ytStateSubscription = controller.listen((value) {
-          if (!mounted) return;
-          final playing = value.playerState == yt.PlayerState.playing;
-          setState(() {
-            _ytPlaying = playing;
-            if (value.metaData.duration > Duration.zero) {
-              _duration = value.metaData.duration;
-            }
-          });
-          context.read<PlayerProvider>().setPlaying(playing);
-          if (value.playerState == yt.PlayerState.ended) {
-            _onTrackEnded();
-          }
-        });
-
-        _ytPositionSubscription = controller
-            .getCurrentPositionStream(
-          period: const Duration(milliseconds: 500),
-        )
-            .listen((position) {
-          if (!mounted) return;
-          setState(() => _position = position);
-          _updateLyricIdx(position);
-        });
-
-        if (mounted) {
-          setState(() {
-            _ytController = controller;
-            _ytReady = true;
-          });
-        }
-
-        ApiService()
-            .playTrack(
-              _playbackLookupId,
-              title: _title,
-              artist: _artist,
-              genre: _track['genre']?.toString(),
-              coverUrl: _coverUrl,
-            )
-            .catchError((_) {});
-        return;
-      }
-    } catch (_) {}
-
-    await _initPreview();
-  }
-
-  Future<void> _initPreview() async {
-    String? url = (_track['preview_url'] ?? _track['previewUrl']) as String?;
-
-    if (url == null || url.isEmpty) {
-      try {
-        final resolved = await ApiService().resolveTrack(
-          title: _title,
-          artist: _artist,
-          trackId: _trackId.isEmpty ? null : _trackId,
-        );
-        if (resolved != null) {
-          final merged = _fillTrackData(_track, resolved);
-          url = (merged['preview_url'] ?? merged['previewUrl']) as String?;
-          if (mounted) {
-            setState(() => _track = merged);
-          }
-        }
-      } catch (_) {}
-    }
-
-    if (url == null || url.isEmpty) {
-      return;
-    }
-
-    try {
-      await _player.setUrl(url);
-      // Prefer full track duration from metadata over the 30s preview duration
-      final trackDurationMs = _track['duration_ms'] as int?;
-      _duration = (trackDurationMs != null && trackDurationMs > 0)
-          ? Duration(milliseconds: trackDurationMs)
-          : (_player.duration ?? Duration.zero);
-      _audioReady = true;
-
-      _audioPositionSubscription = _player.positionStream.listen((position) {
-        if (!mounted) return;
-        setState(() => _position = position);
-        _updateLyricIdx(position);
-      });
-      _audioDurationSubscription = _player.durationStream.listen((duration) {
-        if (!mounted || duration == null) return;
-        // Only override if track metadata did not provide a duration
-        final metaMs = _track['duration_ms'] as int?;
-        if (metaMs == null || metaMs <= 0) {
-          setState(() => _duration = duration);
-        }
-      });
-      _audioStateSubscription = _player.playerStateStream.listen((state) {
-        if (!mounted) return;
-        setState(() => _audioPlaying = state.playing);
-        if (state.processingState == ProcessingState.completed) {
-          _onTrackEnded();
-        }
-      });
-
-      await _player.play();
-      ApiService()
-          .playTrack(
-            _playbackLookupId,
-            title: _title,
-            artist: _artist,
-            genre: _track['genre']?.toString(),
-            coverUrl: _coverUrl,
-          )
-          .catchError((_) {});
-      if (mounted) {
-        setState(() => _audioReady = true);
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() => _audioReady = false);
-      }
-    }
-  }
-
   Future<void> _fetchLyrics() async {
     if (_title.isEmpty) return;
-    if (mounted) setState(() => _lyricsLoading = true);
+    if (mounted) {
+      setState(() => _lyricsLoading = true);
+    }
+
+    final encodedTitle = Uri.encodeComponent(_title);
+    final encodedArtist = Uri.encodeComponent(_artist);
+    final encodedAlbum = _album.isNotEmpty ? Uri.encodeComponent(_album) : null;
+    final durationSeconds = _duration.inSeconds > 0
+        ? _duration.inSeconds
+        : (((_track['duration_ms'] as int?) ?? 0) ~/ 1000);
 
     try {
-      final title = Uri.encodeComponent(_title);
-      final artist = Uri.encodeComponent(_artist);
       final response = await http
           .get(
             Uri.parse(
-              'https://lrclib.net/api/get?track_name=$title&artist_name=$artist',
+              'https://lrclib.net/api/search?track_name=$encodedTitle&artist_name=$encodedArtist'
+              '${encodedAlbum != null ? '&album_name=$encodedAlbum' : ''}'
+              '${durationSeconds > 0 ? '&duration=$durationSeconds' : ''}',
             ),
           )
           .timeout(const Duration(seconds: 8));
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final synced = data['syncedLyrics'] as String?;
-        final plain = data['plainLyrics'] as String?;
+        final raw = jsonDecode(response.body);
+        if (raw is List) {
+          final candidates = raw.whereType<Map>().cast<Map>().toList();
+          candidates.sort((a, b) {
+            int score(Map item) {
+              final itemTitle = (item['trackName'] ??
+                      item['name'] ??
+                      item['track_name'] ??
+                      '')
+                  .toString();
+              final itemArtist = (item['artistName'] ??
+                      item['artist'] ??
+                      item['artist_name'] ??
+                      '')
+                  .toString();
+              final synced =
+                  (item['syncedLyrics'] as String?)?.isNotEmpty == true
+                      ? 1000
+                      : 0;
+              final plain = (item['plainLyrics'] as String?)?.isNotEmpty == true
+                  ? 250
+                  : 0;
+              final titleTokens = _lookupTokens(_title);
+              final artistTokens = _lookupTokens(_artist);
+              final itemTitleTokens = _lookupTokens(itemTitle);
+              final itemArtistTokens = _lookupTokens(itemArtist);
+              final titleMatches =
+                  titleTokens.intersection(itemTitleTokens).length;
+              final artistMatches =
+                  artistTokens.intersection(itemArtistTokens).length;
+              final titleBonus = titleTokens.isNotEmpty
+                  ? titleMatches * 90 +
+                      (titleMatches == titleTokens.length ? 220 : 0)
+                  : 0;
+              final artistBonus = artistTokens.isNotEmpty
+                  ? artistMatches * 120 +
+                      (artistMatches == artistTokens.length ? 260 : 0)
+                  : 0;
+              final itemDuration =
+                  (item['duration'] as num?)?.toInt() ?? durationSeconds;
+              final durationPenalty = durationSeconds > 0
+                  ? (durationSeconds - itemDuration).abs()
+                  : 0;
+              final albumBonus = encodedAlbum != null &&
+                      (item['albumName']?.toString().toLowerCase() ==
+                          _album.toLowerCase())
+                  ? 50
+                  : 0;
+              return synced +
+                  plain +
+                  titleBonus +
+                  artistBonus +
+                  albumBonus -
+                  durationPenalty;
+            }
 
-        if (synced != null && synced.isNotEmpty) {
-          final lines = _parseLrc(synced);
-          if (lines.isNotEmpty) {
-            if (!mounted) return;
-            setState(() {
-              _lrcLines = lines;
-              _lyricsSynced = true;
-              _lyricsLoading = false;
-            });
-            _updateLyricIdx(_position);
-            return;
-          }
-        }
-
-        if (plain != null && plain.isNotEmpty) {
-          final lines = plain
-              .split('\n')
-              .map((line) => line.trim())
-              .where((line) => line.isNotEmpty)
-              .map((line) => _LrcLine(time: Duration.zero, text: line))
-              .toList();
-          if (!mounted) return;
-          setState(() {
-            _lrcLines = lines;
-            _lyricsSynced = false;
-            _lyricsLoading = false;
+            return score(b).compareTo(score(a));
           });
-          return;
+
+          for (final candidate in candidates) {
+            final lyricsMap = Map<String, dynamic>.from(candidate);
+            final candidateTitle = (lyricsMap['trackName'] ??
+                    lyricsMap['name'] ??
+                    lyricsMap['track_name'] ??
+                    '')
+                .toString();
+            final candidateArtist = (lyricsMap['artistName'] ??
+                    lyricsMap['artist'] ??
+                    lyricsMap['artist_name'] ??
+                    '')
+                .toString();
+            final titleOverlap = _lookupTokens(_title)
+                .intersection(_lookupTokens(candidateTitle))
+                .length;
+            final artistOverlap = _lookupTokens(_artist)
+                .intersection(_lookupTokens(candidateArtist))
+                .length;
+            final candidateDuration =
+                (lyricsMap['duration'] as num?)?.toInt() ?? 0;
+            if ((_title.isNotEmpty && titleOverlap == 0) ||
+                (_artist.isNotEmpty &&
+                    candidateArtist.isNotEmpty &&
+                    artistOverlap == 0)) {
+              continue;
+            }
+            if (durationSeconds > 0 &&
+                candidateDuration > 0 &&
+                (durationSeconds - candidateDuration).abs() > 8) {
+              continue;
+            }
+            if (await _applyLyricsPayload(lyricsMap)) {
+              return;
+            }
+          }
         }
       }
     } catch (_) {}
 
     if (_artist.isNotEmpty) {
       try {
-        final title = Uri.encodeComponent(_title);
-        final artist = Uri.encodeComponent(_artist);
         final response = await http
-            .get(Uri.parse('https://api.lyrics.ovh/v1/$artist/$title'))
+            .get(
+              Uri.parse(
+                'https://lrclib.net/api/get?track_name=$encodedTitle&artist_name=$encodedArtist',
+              ),
+            )
+            .timeout(const Duration(seconds: 8));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          if (await _applyLyricsPayload(data)) {
+            return;
+          }
+        }
+      } catch (_) {}
+
+      try {
+        final response = await http
+            .get(Uri.parse(
+                'https://api.lyrics.ovh/v1/$encodedArtist/$encodedTitle'))
             .timeout(const Duration(seconds: 8));
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -605,7 +457,46 @@ class _PlayerScreenState extends State<PlayerScreen>
       } catch (_) {}
     }
 
-    if (mounted) setState(() => _lyricsLoading = false);
+    if (mounted) {
+      setState(() => _lyricsLoading = false);
+    }
+  }
+
+  Future<bool> _applyLyricsPayload(Map<String, dynamic> data) async {
+    final synced = data['syncedLyrics'] as String?;
+    final plain = data['plainLyrics'] as String?;
+
+    if (synced != null && synced.isNotEmpty) {
+      final lines = _parseLrc(synced);
+      if (lines.isNotEmpty) {
+        if (!mounted) return true;
+        setState(() {
+          _lrcLines = lines;
+          _lyricsSynced = true;
+          _lyricsLoading = false;
+        });
+        _updateLyricIdx(_position);
+        return true;
+      }
+    }
+
+    if (plain != null && plain.isNotEmpty) {
+      final lines = plain
+          .split('\n')
+          .map((line) => line.trim())
+          .where((line) => line.isNotEmpty)
+          .map((line) => _LrcLine(time: Duration.zero, text: line))
+          .toList();
+      if (!mounted) return true;
+      setState(() {
+        _lrcLines = lines;
+        _lyricsSynced = false;
+        _lyricsLoading = false;
+      });
+      return true;
+    }
+
+    return false;
   }
 
   void _updateLyricIdx(Duration position) {
@@ -620,28 +511,25 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
     }
 
-    if (nextIndex != _currentLyricIdx && mounted) {
-      setState(() => _currentLyricIdx = nextIndex);
-    }
+    _currentLyricIdx = nextIndex;
   }
 
-  void _togglePlayPause() {
-    setState(() => _trackEnded = false);
-    if (_usingYoutube && _ytController != null) {
-      final nowPlaying = _ytPlaying;
-      nowPlaying ? _ytController!.pauseVideo() : _ytController!.playVideo();
-      if (mounted) {
-        context.read<PlayerProvider>().setPlaying(!nowPlaying);
-      }
+  Future<void> _togglePlayPause() async {
+    if (_trackEnded) {
+      await _playback.restartCurrentTrack();
       return;
     }
-    if (_audioReady) {
-      final nowPlaying = _audioPlaying;
-      nowPlaying ? _player.pause() : _player.play();
-      if (mounted) {
-        context.read<PlayerProvider>().setPlaying(!nowPlaying);
-      }
-    }
+    await _playback.togglePlayPause();
+  }
+
+  Future<void> _seekTo(Duration position) async {
+    await _playback.seekTo(position);
+    if (!mounted) return;
+    final synced = _playback.position;
+    setState(() {
+      _position = synced;
+      _updateLyricIdx(synced);
+    });
   }
 
   Future<void> _toggleLike() async {
@@ -669,131 +557,29 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
-  Future<void> _loadRelativeTrack(int delta) async {
-    await _ensureQueue();
-    if (_queue.isEmpty) return;
-
-    final nextIndex = (_queueIndex + delta).clamp(0, _queue.length - 1);
-    if (nextIndex == _queueIndex) return;
-
-    setState(() => _queueIndex = nextIndex);
-    await _loadTrack(_queue[nextIndex], refreshQueue: false);
-  }
-
-  void _onTrackEnded() {
-    if (mounted) setState(() => _trackEnded = true);
-    if (_repeatMode == 2) {
-      // repeat one — restart
-      if (_usingYoutube && _ytController != null) {
-        _ytController!.seekTo(seconds: 0, allowSeekAhead: true);
-        _ytController!.playVideo();
-      } else if (_audioReady) {
-        _player.seek(Duration.zero);
-        _player.play();
-      }
-      return;
-    }
-    _skipNext();
-  }
-
   Future<void> _skipNext() async {
-    await _ensureQueue();
-    if (_queue.isEmpty) return;
-
-    if (_shuffle) {
-      final indices = List.generate(_queue.length, (i) => i)
-        ..remove(_queueIndex);
-      if (indices.isEmpty) {
-        if (_repeatMode == 1) {
-          await _loadTrack(_queue[_queueIndex], refreshQueue: false);
-        }
-        return;
-      }
-      indices.shuffle();
-      final next = indices.first;
-      setState(() => _queueIndex = next);
-      await _loadTrack(_queue[next], refreshQueue: false);
-      return;
-    }
-
-    final next = _queueIndex + 1;
-    if (next >= _queue.length) {
-      if (_repeatMode == 1) {
-        setState(() => _queueIndex = 0);
-        await _loadTrack(_queue[0], refreshQueue: false);
-        return;
-      }
-      // Queue exhausted — try to extend with more tracks from same artist
-      if (_artist.isNotEmpty) {
-        try {
-          final more = await ApiService().searchTracksWithFallback(_artist, limit: 20);
-          if (more.isNotEmpty) {
-            final filtered = more
-                .whereType<Map>()
-                .map((e) => Map<String, dynamic>.from(e))
-                .where((t) => !_queue.any((q) => _sameTrack(q, t)))
-                .toList();
-            if (filtered.isNotEmpty && mounted) {
-              setState(() => _queue.addAll(filtered));
-              final nextIdx = _queueIndex + 1;
-              setState(() => _queueIndex = nextIdx);
-              await _loadTrack(_queue[nextIdx], refreshQueue: false);
-              return;
-            }
-          }
-        } catch (_) {}
-      }
-      return;
-    }
-    setState(() => _queueIndex = next);
-    await _loadTrack(_queue[next], refreshQueue: false);
+    await _playback.nextTrack();
   }
 
   Future<void> _skipPrevious() async {
-    if (_position.inSeconds > 3) {
-      // restart current track if >3s played
-      if (_usingYoutube && _ytController != null) {
-        _ytController!.seekTo(seconds: 0, allowSeekAhead: true);
-      } else if (_audioReady) {
-        _player.seek(Duration.zero);
-      }
-      setState(() => _position = Duration.zero);
-      return;
-    }
-    await _loadRelativeTrack(-1);
+    await _playback.prevTrack();
   }
 
   void _openLyricsScreen() {
-    final posStream = _usingYoutube && _ytController != null
-        ? _ytController!.getCurrentPositionStream(
-            period: const Duration(milliseconds: 300))
-        : _audioReady
-            ? _player.positionStream
-            : null;
-
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => LyricsScreen(
           artist: _artist,
           title: _title,
+          album: _album,
+          duration: _seekableDuration,
           lyricsLines: _lyricsLines,
           currentPosition: _position,
           syncedLineTimesMs: _lyricsTimesMs,
-          positionStream: posStream,
+          positionStream: _playback.positionStream,
           onSeek: (Duration pos) {
-            if (_ytReady && _ytController != null) {
-              _ytController!.seekTo(
-                seconds: pos.inMilliseconds / 1000.0,
-                allowSeekAhead: true,
-              );
-            } else if (_audioReady) {
-              _player.seek(pos);
-            }
-            if (mounted) {
-              setState(() => _position = pos);
-              _updateLyricIdx(pos);
-            }
+            unawaited(_seekTo(pos));
           },
         ),
       ),
@@ -839,16 +625,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                 child: _orb(300, AppColors.blue.withOpacity(0.15)),
               ),
             ),
-            // YouTube iframe positioned off-screen so it's in the DOM
-            // (required for JS bridge) but never visible to the user.
-            if (kIsWeb && _ytController != null)
-              Positioned(
-                left: -500,
-                top: -500,
-                width: 320,
-                height: 180,
-                child: yt.YoutubePlayer(controller: _ytController!),
-              ),
             SafeArea(
               child: SingleChildScrollView(
                 child: Padding(
@@ -884,13 +660,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ),
                       const SizedBox(height: 10),
                       _titleRow(),
-                      // Native platforms: hide YouTube player as 1×1
-                      if (!kIsWeb && _ytController != null)
-                        SizedBox(
-                          height: 1,
-                          width: 1,
-                          child: yt.YoutubePlayer(controller: _ytController!),
-                        ),
                       const SizedBox(height: 12),
                       _progressBar(),
                       const SizedBox(height: 28),
@@ -922,7 +691,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           GestureDetector(
-            onTap: () => Navigator.of(context).pop(),
+            onTap: () => Navigator.of(context).maybePop(),
             child: Container(
               width: 40,
               height: 40,
@@ -1031,8 +800,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                       final isLast = entry.key == names.length - 1;
                       return GestureDetector(
                         onTap: () {
-                          // Use numeric artist_id from track if available (single artist),
-                          // otherwise fall back to slug which artist_screen resolves via search
                           final numericId = names.length == 1
                               ? (_track['artist_id']?.toString() ?? '')
                               : '';
@@ -1075,6 +842,21 @@ class _PlayerScreenState extends State<PlayerScreen>
       );
 
   Widget _progressBar() {
+    final effectiveDuration =
+        _seekableDuration > Duration.zero ? _seekableDuration : _duration;
+    final sliderValue = _isScrubbing
+        ? (_scrubValue ?? 0.0)
+        : (effectiveDuration.inMilliseconds > 0
+            ? (_position.inMilliseconds / effectiveDuration.inMilliseconds)
+                .clamp(0.0, 1.0)
+            : 0.0);
+    final displayPosition = _isScrubbing && effectiveDuration.inMilliseconds > 0
+        ? Duration(
+            milliseconds:
+                (sliderValue * effectiveDuration.inMilliseconds).round(),
+          )
+        : _position;
+
     return Column(
       children: [
         SliderTheme(
@@ -1088,22 +870,27 @@ class _PlayerScreenState extends State<PlayerScreen>
             overlayColor: AppColors.purple.withOpacity(0.2),
           ),
           child: Slider(
-            value: _duration.inMilliseconds > 0
-                ? (_position.inMilliseconds / _duration.inMilliseconds)
-                    .clamp(0.0, 1.0)
-                : 0.0,
-            onChanged: _duration.inMilliseconds > 0
+            value: sliderValue,
+            onChangeStart: effectiveDuration.inMilliseconds > 0
                 ? (value) {
-                    final ms = (value * _duration.inMilliseconds).round();
-                    if (_ytReady && _ytController != null) {
-                      _ytController!.seekTo(
-                        seconds: ms / 1000,
-                        allowSeekAhead: true,
-                      );
-                    } else if (_audioReady) {
-                      _player.seek(Duration(milliseconds: ms));
-                    }
-                    setState(() => _position = Duration(milliseconds: ms));
+                    setState(() {
+                      _isScrubbing = true;
+                      _scrubValue = value;
+                    });
+                  }
+                : null,
+            onChanged: effectiveDuration.inMilliseconds > 0
+                ? (value) => setState(() => _scrubValue = value)
+                : null,
+            onChangeEnd: effectiveDuration.inMilliseconds > 0
+                ? (value) async {
+                    final ms =
+                        (value * effectiveDuration.inMilliseconds).round();
+                    setState(() {
+                      _isScrubbing = false;
+                      _scrubValue = null;
+                    });
+                    await _seekTo(Duration(milliseconds: ms));
                   }
                 : null,
           ),
@@ -1113,11 +900,11 @@ class _PlayerScreenState extends State<PlayerScreen>
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              _fmt(_position),
+              _fmt(displayPosition),
               style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3),
             ),
             Text(
-              _fmt(_duration),
+              _fmt(effectiveDuration),
               style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3),
             ),
           ],
@@ -1126,12 +913,44 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
+  Widget _playPauseGlyph() {
+    if (_trackEnded) {
+      return const Icon(
+        Icons.replay_rounded,
+        color: Colors.white,
+        size: 34,
+      );
+    }
+    if (!_isPlaying) {
+      return const Icon(
+        Icons.play_arrow_rounded,
+        color: Colors.white,
+        size: 34,
+      );
+    }
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(
+        2,
+        (_) => Container(
+          width: 6,
+          height: 24,
+          margin: const EdgeInsets.symmetric(horizontal: 3),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _controls() => Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           IconButton(
-            onPressed: () => setState(() => _shuffle = !_shuffle),
+            onPressed: _playback.toggleShuffle,
             icon: Icon(
               Icons.shuffle_rounded,
               size: 22,
@@ -1147,22 +966,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             ),
           ),
           GestureDetector(
-            onTap: _loadingTrack
-                ? null
-                : () {
-                    if (_trackEnded) {
-                      setState(() => _trackEnded = false);
-                      if (_usingYoutube) {
-                        _ytController?.seekTo(seconds: 0, allowSeekAhead: true);
-                        _ytController?.playVideo();
-                      } else {
-                        _player.seek(Duration.zero);
-                        _player.play();
-                      }
-                    } else {
-                      _togglePlayPause();
-                    }
-                  },
+            onTap: _loadingTrack ? null : _togglePlayPause,
             child: Container(
               width: 72,
               height: 72,
@@ -1192,15 +996,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ),
                       ),
                     )
-                  : Icon(
-                      _trackEnded
-                          ? Icons.replay_rounded
-                          : _isPlaying
-                              ? Icons.pause_rounded
-                              : Icons.play_arrow_rounded,
-                      color: Colors.white,
-                      size: 34,
-                    ),
+                  : _playPauseGlyph(),
             ),
           ),
           IconButton(
@@ -1212,8 +1008,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             ),
           ),
           IconButton(
-            onPressed: () =>
-                setState(() => _repeatMode = (_repeatMode + 1) % 3),
+            onPressed: () => _playback.cycleRepeatMode(),
             icon: Icon(
               _repeatMode == 2
                   ? Icons.repeat_one_rounded
@@ -1230,25 +1025,29 @@ class _PlayerScreenState extends State<PlayerScreen>
       context: context,
       backgroundColor: const Color(0xFF1a1a2e),
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (_) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 12),
             Container(
-              width: 36, height: 4,
+              width: 36,
+              height: 4,
               decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(100)),
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(100),
+              ),
             ),
             const SizedBox(height: 16),
             Text(
               'Sleep Timer',
               style: GoogleFonts.outfit(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white),
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
             ),
             if (_sleepMinutesLeft != null)
               Padding(
@@ -1256,16 +1055,23 @@ class _PlayerScreenState extends State<PlayerScreen>
                 child: Text(
                   'Off in ${_sleepMinutesLeft}m',
                   style: GoogleFonts.outfit(
-                      fontSize: 13, color: AppColors.purpleLight),
+                    fontSize: 13,
+                    color: AppColors.purpleLight,
+                  ),
                 ),
               ),
             const SizedBox(height: 12),
             for (final min in [5, 10, 15, 30, 45, 60])
               ListTile(
-                leading: const Icon(Icons.timer_outlined,
-                    color: Colors.white70, size: 20),
-                title: Text('$min minutes',
-                    style: GoogleFonts.outfit(fontSize: 15, color: Colors.white)),
+                leading: const Icon(
+                  Icons.timer_outlined,
+                  color: Colors.white70,
+                  size: 20,
+                ),
+                title: Text(
+                  '$min minutes',
+                  style: GoogleFonts.outfit(fontSize: 15, color: Colors.white),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   _setSleepTimer(min);
@@ -1273,10 +1079,18 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             if (_sleepTimer != null)
               ListTile(
-                leading: const Icon(Icons.timer_off_outlined,
-                    color: AppColors.pink, size: 20),
-                title: Text('Cancel timer',
-                    style: GoogleFonts.outfit(fontSize: 15, color: AppColors.pink)),
+                leading: const Icon(
+                  Icons.timer_off_outlined,
+                  color: AppColors.pink,
+                  size: 20,
+                ),
+                title: Text(
+                  'Cancel timer',
+                  style: GoogleFonts.outfit(
+                    fontSize: 15,
+                    color: AppColors.pink,
+                  ),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   _cancelSleepTimer();
@@ -1292,20 +1106,17 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _setSleepTimer(int minutes) {
     _sleepTimer?.cancel();
     setState(() => _sleepMinutesLeft = minutes);
-    int remaining = minutes;
-    _sleepTimer = Timer.periodic(const Duration(minutes: 1), (t) {
+    var remaining = minutes;
+    _sleepTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
       remaining--;
-      if (mounted) setState(() => _sleepMinutesLeft = remaining);
+      if (mounted) {
+        setState(() => _sleepMinutesLeft = remaining);
+      }
       if (remaining <= 0) {
-        t.cancel();
-        if (_usingYoutube) {
-          _ytController?.pauseVideo();
-        } else if (_audioReady) {
-          _player.pause();
-        }
+        timer.cancel();
+        unawaited(_playback.pause());
         if (mounted) {
           setState(() => _sleepMinutesLeft = null);
-          context.read<PlayerProvider>().setPlaying(false);
         }
       }
     });
@@ -1314,7 +1125,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _cancelSleepTimer() {
     _sleepTimer?.cancel();
     _sleepTimer = null;
-    if (mounted) setState(() => _sleepMinutesLeft = null);
+    if (mounted) {
+      setState(() => _sleepMinutesLeft = null);
+    }
   }
 
   Widget _extraActions() => Container(
@@ -1326,7 +1139,8 @@ class _PlayerScreenState extends State<PlayerScreen>
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             GestureDetector(
-              onTap: _lyricsLines.isEmpty ? null : _openLyricsScreen,
+              behavior: HitTestBehavior.opaque,
+              onTap: _title.isEmpty ? null : _openLyricsScreen,
               child: _ExtraBtn(
                 icon: Icons.lyrics_outlined,
                 label: 'Lyrics',
@@ -1334,6 +1148,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
             GestureDetector(
+              behavior: HitTestBehavior.opaque,
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -1341,12 +1156,13 @@ class _PlayerScreenState extends State<PlayerScreen>
                     currentTitle: _title,
                     currentArtist: _artist,
                     currentCover: _coverUrl,
-                    queue: _queue,
-                    currentIndex: _queueIndex,
+                    queue: _playback.queue,
+                    currentIndex: _playback.queueIndex,
                     shuffle: _shuffle,
                     repeatMode: _repeatMode,
-                    onToggleShuffle: () => setState(() => _shuffle = !_shuffle),
-                    onChangeRepeat: (v) => setState(() => _repeatMode = v),
+                    onToggleShuffle: _playback.toggleShuffle,
+                    onChangeRepeat: _playback.setRepeatMode,
+                    onQueueReordered: _playback.replaceUpcomingQueue,
                   ),
                 ),
               ),
@@ -1356,6 +1172,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
             GestureDetector(
+              behavior: HitTestBehavior.opaque,
               onTap: () => showShareTrack(context, track: _track),
               child: const _ExtraBtn(
                 icon: Icons.share_outlined,
@@ -1363,6 +1180,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
             GestureDetector(
+              behavior: HitTestBehavior.opaque,
               onTap: () => showAddToPlaylist(context, track: _track),
               child: const _ExtraBtn(
                 icon: Icons.playlist_play_rounded,
@@ -1370,6 +1188,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
             GestureDetector(
+              behavior: HitTestBehavior.opaque,
               onTap: _showSleepTimerDialog,
               child: _ExtraBtn(
                 icon: Icons.bedtime_outlined,
@@ -1397,23 +1216,30 @@ class _ExtraBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Icon(
-          icon,
-          size: 22,
-          color: active ? AppColors.purpleLight : AppColors.text3,
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: GoogleFonts.outfit(
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
+    return SizedBox(
+      width: 58,
+      height: 48,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            icon,
+            size: 22,
             color: active ? AppColors.purpleLight : AppColors.text3,
           ),
-        ),
-      ],
+          const SizedBox(height: 4),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.outfit(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: active ? AppColors.purpleLight : AppColors.text3,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

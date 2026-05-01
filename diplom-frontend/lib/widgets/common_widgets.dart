@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:share_plus/share_plus.dart';
 import '../screens/artist_screen.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
@@ -571,12 +572,8 @@ void showTrackMenu(
               label: 'Share',
               onTap: () {
                 Navigator.pop(ctx);
-                Clipboard.setData(ClipboardData(text: '$title — $artist'));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text('Copied to clipboard'),
-                      duration: Duration(seconds: 2)),
-                );
+                final text = '$title — $artist';
+                Share.share(text, subject: 'Check out this track');
               },
             ),
             if (onDontPlay != null)

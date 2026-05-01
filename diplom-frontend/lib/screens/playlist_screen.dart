@@ -109,11 +109,14 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     }
     final first = Map<String, dynamic>.from(queue.first)..['queue'] = queue;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Shuffle on', style: GoogleFonts.outfit(fontSize: 13)),
-          backgroundColor: AppColors.surface, behavior: SnackBarBehavior.floating,
+      SnackBar(
+          content: Text('Shuffle on', style: GoogleFonts.outfit(fontSize: 13)),
+          backgroundColor: AppColors.surface,
+          behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 1)),
     );
-    Navigator.push(context, MaterialPageRoute(builder: (_) => PlayerScreen(track: first)));
+    Navigator.push(
+        context, MaterialPageRoute(builder: (_) => PlayerScreen(track: first)));
   }
 
   Future<void> _renamePlaylist() async {
@@ -127,7 +130,9 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Rename Playlist',
             style: GoogleFonts.outfit(
-                fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text)),
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -141,13 +146,15 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3)),
+            child: Text('Cancel',
+                style: GoogleFonts.outfit(color: AppColors.text3)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
@@ -160,7 +167,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     );
     if (confirmed != true || ctrl.text.trim().isEmpty) return;
     try {
-      await ApiService().updatePlaylist(widget.playlistId!, title: ctrl.text.trim());
+      await ApiService()
+          .updatePlaylist(widget.playlistId!, title: ctrl.text.trim());
       if (mounted) {
         showSuccessSnackBar(context, 'Renamed to "${ctrl.text.trim()}"');
         _load();
@@ -180,19 +188,23 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Delete Playlist?',
             style: GoogleFonts.outfit(
-                fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.text)),
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text)),
         content: Text('This will permanently delete "$title".',
             style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3)),
+            child: Text('Cancel',
+                style: GoogleFonts.outfit(color: AppColors.text3)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: Text('Delete',
                 style: GoogleFonts.outfit(
-                    color: const Color(0xFFef4444), fontWeight: FontWeight.w700)),
+                    color: const Color(0xFFef4444),
+                    fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -209,7 +221,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   void _showPlaylistMenu() {
     final title = _playlist?['title']?.toString() ?? 'Playlist';
 
-    Widget item(IconData icon, String label, VoidCallback onTap, {Color? color}) {
+    Widget item(IconData icon, String label, VoidCallback onTap,
+        {Color? color}) {
       final c = color ?? Colors.white;
       return ListTile(
         leading: Icon(icon, color: color ?? Colors.white70, size: 22),
@@ -229,17 +242,22 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
           children: [
             const SizedBox(height: 8),
             Container(
-              width: 36, height: 4,
+              width: 36,
+              height: 4,
               decoration: BoxDecoration(
-                  color: Colors.white24, borderRadius: BorderRadius.circular(100)),
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(100)),
             ),
             const SizedBox(height: 14),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Text(title,
                   style: GoogleFonts.outfit(
-                      fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white),
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
             ),
             const SizedBox(height: 10),
             const Divider(color: Colors.white10, height: 1),
@@ -260,13 +278,17 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
             item(Icons.edit_rounded, 'Edit playlist', () {
               Navigator.pop(ctx);
               if (_playlist == null) return;
-              Navigator.push(context, MaterialPageRoute(
-                builder: (_) => CreatePlaylistScreen(existingPlaylist: _playlist),
-              )).then((_) => _load());
+              Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        CreatePlaylistScreen(existingPlaylist: _playlist),
+                  )).then((_) => _load());
             }),
             item(Icons.share_outlined, 'Share', () {
               Navigator.pop(ctx);
-              Clipboard.setData(ClipboardData(text: 'Check out my playlist: $title on MoodWave'));
+              Clipboard.setData(ClipboardData(
+                  text: 'Check out my playlist: $title on MoodWave'));
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                 content: Text('Copied to clipboard'),
                 duration: Duration(seconds: 2),
@@ -294,7 +316,9 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Edit Description',
             style: GoogleFonts.outfit(
-                fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text)),
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -310,13 +334,15 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3)),
+            child: Text('Cancel',
+                style: GoogleFonts.outfit(color: AppColors.text3)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
@@ -329,7 +355,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     );
     if (confirmed != true) return;
     try {
-      await ApiService().updatePlaylist(widget.playlistId!, description: ctrl.text.trim());
+      await ApiService()
+          .updatePlaylist(widget.playlistId!, description: ctrl.text.trim());
       if (mounted) {
         showSuccessSnackBar(context, 'Description updated');
         _load();
@@ -357,7 +384,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   @override
   Widget build(BuildContext context) {
     final tracks = (_playlist?['tracks'] as List?) ?? [];
-    final title = _playlist?['title']?.toString() ?? widget.playlistTitle ?? 'Playlist';
+    final title =
+        _playlist?['title']?.toString() ?? widget.playlistTitle ?? 'Playlist';
     final coverUrl = _playlist?['cover_url']?.toString();
     final isCollab = _playlist?['is_collaborative'] == true;
     final trackCount = _playlist?['track_count'] ?? tracks.length;
@@ -367,7 +395,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       backgroundColor: AppColors.bg,
       body: _loading
           ? const Center(
-              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight))
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: AppColors.purpleLight))
           : CustomScrollView(
               slivers: [
                 SliverToBoxAdapter(
@@ -393,11 +422,13 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                 GestureDetector(
                                   onTap: () => Navigator.of(context).pop(),
                                   child: Container(
-                                    width: 40, height: 40,
+                                    width: 40,
+                                    height: 40,
                                     decoration: BoxDecoration(
                                       color: AppColors.glass,
                                       borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: AppColors.border),
+                                      border:
+                                          Border.all(color: AppColors.border),
                                     ),
                                     child: const Icon(Icons.arrow_back_rounded,
                                         size: 18, color: Colors.white),
@@ -417,10 +448,15 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 Container(
-                                  width: 130, height: 130,
+                                  width: 130,
+                                  height: 130,
                                   decoration: BoxDecoration(
                                     gradient: const LinearGradient(
-                                      colors: [Color(0xFF1a0533), Color(0xFF7c3aed), Color(0xFF0d1a3d)],
+                                      colors: [
+                                        Color(0xFF1a0533),
+                                        Color(0xFF7c3aed),
+                                        Color(0xFF0d1a3d)
+                                      ],
                                     ),
                                     borderRadius: BorderRadius.circular(20),
                                     boxShadow: [
@@ -432,20 +468,28 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                   ),
                                   child: coverUrl != null
                                       ? ClipRRect(
-                                          borderRadius: BorderRadius.circular(20),
+                                          borderRadius:
+                                              BorderRadius.circular(20),
                                           child: CachedNetworkImage(
                                             imageUrl: coverUrl,
                                             fit: BoxFit.cover,
-                                            placeholder: (_, __) => const SizedBox(),
+                                            placeholder: (_, __) =>
+                                                const SizedBox(),
                                             errorWidget: (_, __, ___) =>
-                                                const Center(child: Text('🎵', style: TextStyle(fontSize: 52))),
+                                                const Center(
+                                                    child: Text('🎵',
+                                                        style: TextStyle(
+                                                            fontSize: 52))),
                                           ))
-                                      : const Center(child: Text('🎵', style: TextStyle(fontSize: 52))),
+                                      : const Center(
+                                          child: Text('🎵',
+                                              style: TextStyle(fontSize: 52))),
                                 ),
                                 const SizedBox(width: 16),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Row(children: [
                                         Text('Playlist',
@@ -460,20 +504,27 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                             padding: const EdgeInsets.symmetric(
                                                 horizontal: 8, vertical: 3),
                                             decoration: BoxDecoration(
-                                              color: AppColors.purple.withOpacity(0.15),
-                                              borderRadius: BorderRadius.circular(100),
+                                              color: AppColors.purple
+                                                  .withOpacity(0.15),
+                                              borderRadius:
+                                                  BorderRadius.circular(100),
                                               border: Border.all(
-                                                  color: AppColors.purple.withOpacity(0.25)),
+                                                  color: AppColors.purple
+                                                      .withOpacity(0.25)),
                                             ),
                                             child: Row(children: [
-                                              const Icon(Icons.people_alt_rounded,
-                                                  size: 10, color: AppColors.purpleLight),
+                                              const Icon(
+                                                  Icons.people_alt_rounded,
+                                                  size: 10,
+                                                  color: AppColors.purpleLight),
                                               const SizedBox(width: 4),
                                               Text('Collab',
                                                   style: GoogleFonts.outfit(
                                                       fontSize: 10,
-                                                      fontWeight: FontWeight.w700,
-                                                      color: AppColors.purpleLight)),
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: AppColors
+                                                          .purpleLight)),
                                             ]),
                                           ),
                                         ],
@@ -492,7 +543,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                           if (totalDur.isNotEmpty) totalDur,
                                         ].join(' · '),
                                         style: GoogleFonts.outfit(
-                                            fontSize: 13, color: AppColors.text2),
+                                            fontSize: 13,
+                                            color: AppColors.text2),
                                       ),
                                     ],
                                   ),
@@ -510,10 +562,12 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                   },
                                   child: AnimatedContainer(
                                     duration: const Duration(milliseconds: 200),
-                                    width: 52, height: 52,
+                                    width: 52,
+                                    height: 52,
                                     decoration: BoxDecoration(
                                       color: provider.shuffleOn
-                                          ? AppColors.purpleLight.withOpacity(0.2)
+                                          ? AppColors.purpleLight
+                                              .withOpacity(0.2)
                                           : AppColors.glass,
                                       shape: BoxShape.circle,
                                       border: Border.all(
@@ -534,23 +588,31 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: GestureDetector(
-                                  onTap: tracks.isEmpty ? null : () => _playAll(tracks),
+                                  onTap: tracks.isEmpty
+                                      ? null
+                                      : () => _playAll(tracks),
                                   child: Container(
                                     padding: const EdgeInsets.all(16),
                                     decoration: BoxDecoration(
-                                      gradient: tracks.isEmpty ? null : AppColors.gradPurple,
-                                      color: tracks.isEmpty ? AppColors.glass : null,
+                                      gradient: tracks.isEmpty
+                                          ? null
+                                          : AppColors.gradPurple,
+                                      color: tracks.isEmpty
+                                          ? AppColors.glass
+                                          : null,
                                       borderRadius: BorderRadius.circular(16),
                                       boxShadow: tracks.isEmpty
                                           ? []
                                           : [
                                               BoxShadow(
-                                                  color: AppColors.purpleDark.withOpacity(0.35),
+                                                  color: AppColors.purpleDark
+                                                      .withOpacity(0.35),
                                                   blurRadius: 20)
                                             ],
                                     ),
                                     child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
                                         Icon(Icons.play_arrow_rounded,
                                             color: tracks.isEmpty
@@ -574,7 +636,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                               GestureDetector(
                                 onTap: _showPlaylistMenu,
                                 child: Container(
-                                  width: 52, height: 52,
+                                  width: 52,
+                                  height: 52,
                                   decoration: BoxDecoration(
                                     color: AppColors.glass,
                                     shape: BoxShape.circle,
@@ -591,7 +654,6 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                     ),
                   ),
                 ),
-
                 if (tracks.isEmpty)
                   SliverFillRemaining(
                     child: Center(
@@ -614,8 +676,9 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                   SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (context, i) {
-                        final track = Map<String, dynamic>.from(tracks[i] as Map)
-                          ..['queue'] = tracks;
+                        final track =
+                            Map<String, dynamic>.from(tracks[i] as Map)
+                              ..['queue'] = tracks;
                         final trackTitle =
                             track['title']?.toString() ?? 'Unknown';
                         final artist = track['artist']?.toString() ?? '';
@@ -645,7 +708,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                               ),
                               const SizedBox(width: 14),
                               Container(
-                                width: 46, height: 46,
+                                width: 46,
+                                height: 46,
                                 decoration: BoxDecoration(
                                   gradient: AppColors.gradMixed,
                                   borderRadius: BorderRadius.circular(11),
@@ -656,14 +720,18 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                         child: CachedNetworkImage(
                                           imageUrl: coverUrl,
                                           fit: BoxFit.cover,
-                                          placeholder: (_, __) => const SizedBox(),
-                                          errorWidget: (_, __, ___) => const Center(
-                                              child: Text('🎵',
-                                                  style: TextStyle(fontSize: 20))),
+                                          placeholder: (_, __) =>
+                                              const SizedBox(),
+                                          errorWidget: (_, __, ___) =>
+                                              const Center(
+                                                  child: Text(
+                                                      '🎵',
+                                                      style: TextStyle(
+                                                          fontSize: 20))),
                                         ))
                                     : const Center(
-                                        child:
-                                            Text('🎵', style: TextStyle(fontSize: 20))),
+                                        child: Text('🎵',
+                                            style: TextStyle(fontSize: 20))),
                               ),
                               const SizedBox(width: 14),
                               Expanded(
@@ -680,7 +748,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                     if (artist.isNotEmpty)
                                       Text(artist,
                                           style: GoogleFonts.outfit(
-                                              fontSize: 12, color: AppColors.text2)),
+                                              fontSize: 12,
+                                              color: AppColors.text2)),
                                   ],
                                 ),
                               ),
@@ -696,7 +765,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                   onPlayNow: () => Navigator.push(
                                     context,
                                     MaterialPageRoute(
-                                        builder: (_) => PlayerScreen(track: track)),
+                                        builder: (_) =>
+                                            PlayerScreen(track: track)),
                                   ),
                                 ),
                                 child: const Padding(
@@ -712,7 +782,6 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                       childCount: tracks.length,
                     ),
                   ),
-
                 const SliverToBoxAdapter(child: SizedBox(height: 80)),
               ],
             ),
@@ -734,6 +803,7 @@ class _AddTracksSheetState extends State<_AddTracksSheet> {
   List<Map<String, dynamic>> _results = [];
   bool _searching = false;
   final Set<String> _addedIds = {};
+  final Set<String> _loadingIds = {};
 
   Future<void> _search(String q) async {
     if (q.trim().isEmpty) {
@@ -745,7 +815,10 @@ class _AddTracksSheetState extends State<_AddTracksSheet> {
       final raw = await ApiService().searchTracks(q.trim());
       if (!mounted) return;
       setState(() {
-        _results = raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        _results = raw
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
         _searching = false;
       });
     } catch (_) {
@@ -754,17 +827,35 @@ class _AddTracksSheetState extends State<_AddTracksSheet> {
   }
 
   Future<void> _add(Map<String, dynamic> track) async {
-    final id = track['spotify_id']?.toString() ?? track['deezer_id']?.toString() ?? '';
-    if (id.isEmpty || _addedIds.contains(id)) return;
+    final id = track['spotify_id']?.toString() ??
+        track['deezer_id']?.toString() ??
+        track['track_id']?.toString() ??
+        track['id']?.toString() ??
+        '';
+    if (id.isEmpty || _addedIds.contains(id) || _loadingIds.contains(id)) {
+      return;
+    }
+    setState(() => _loadingIds.add(id));
     try {
       await ApiService().addTrackToPlaylist(widget.playlistId, track);
       if (!mounted) return;
       setState(() => _addedIds.add(id));
+
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Track added successfully'),
+          duration: Duration(seconds: 1)));
+
       widget.onAdded();
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not add track')));
+        final errorMsg = e.toString();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                'Could not add track: ${errorMsg.contains('Exception') ? 'Error' : errorMsg}')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _loadingIds.remove(id));
       }
     }
   }
@@ -772,17 +863,24 @@ class _AddTracksSheetState extends State<_AddTracksSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.65,
         child: Column(children: [
           const SizedBox(height: 8),
-          Container(width: 36, height: 4,
-              decoration: BoxDecoration(color: AppColors.border,
+          Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: AppColors.border,
                   borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 14),
-          Text('Add Tracks', style: GoogleFonts.outfit(
-              fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.text)),
+          Text('Add Tracks',
+              style: GoogleFonts.outfit(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.text)),
           const SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -796,7 +894,8 @@ class _AddTracksSheetState extends State<_AddTracksSheet> {
                 hintStyle: GoogleFonts.outfit(color: AppColors.text3),
                 filled: true,
                 fillColor: AppColors.surface3,
-                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.text3),
+                prefixIcon:
+                    const Icon(Icons.search_rounded, color: AppColors.text3),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -809,7 +908,8 @@ class _AddTracksSheetState extends State<_AddTracksSheet> {
           if (_searching)
             const Padding(
               padding: EdgeInsets.all(16),
-              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight),
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: AppColors.purpleLight),
             )
           else
             Expanded(
@@ -817,43 +917,69 @@ class _AddTracksSheetState extends State<_AddTracksSheet> {
                 itemCount: _results.length,
                 itemBuilder: (_, i) {
                   final t = _results[i];
-                  final id = t['spotify_id']?.toString() ?? t['deezer_id']?.toString() ?? '';
+                  final id = t['spotify_id']?.toString() ??
+                      t['deezer_id']?.toString() ??
+                      t['track_id']?.toString() ??
+                      t['id']?.toString() ??
+                      '';
                   final added = _addedIds.contains(id);
+                  final loading = _loadingIds.contains(id);
                   final cover = t['cover_url']?.toString();
                   return ListTile(
                     leading: Container(
-                      width: 44, height: 44,
+                      width: 44,
+                      height: 44,
                       decoration: BoxDecoration(
                         gradient: AppColors.gradMixed,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: cover != null
-                          ? ClipRRect(borderRadius: BorderRadius.circular(8),
-                              child: Image.network(cover, fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => const SizedBox()))
-                          : const Icon(Icons.music_note_rounded, color: Colors.white70, size: 20),
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.network(cover,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) =>
+                                      const SizedBox()))
+                          : const Icon(Icons.music_note_rounded,
+                              color: Colors.white70, size: 20),
                     ),
                     title: Text(t['title']?.toString() ?? 'Unknown',
-                        style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600,
+                        style: GoogleFonts.outfit(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
                             color: AppColors.text),
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
                     subtitle: Text(t['artist']?.toString() ?? '',
-                        style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3),
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                        style: GoogleFonts.outfit(
+                            fontSize: 12, color: AppColors.text3),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
                     trailing: GestureDetector(
-                      onTap: added ? null : () => _add(t),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: (added || loading) ? null : () => _add(t),
                       child: Container(
-                        width: 32, height: 32,
+                        width: 36,
+                        height: 36,
                         decoration: BoxDecoration(
-                          gradient: added ? null : AppColors.gradPurple,
-                          color: added ? AppColors.surface3 : null,
+                          gradient:
+                              (added || loading) ? null : AppColors.gradPurple,
+                          color: (added || loading) ? AppColors.surface3 : null,
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(
-                          added ? Icons.check_rounded : Icons.add_rounded,
-                          color: Colors.white,
-                          size: 18,
-                        ),
+                        child: loading
+                            ? const Padding(
+                                padding: EdgeInsets.all(9),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Icon(
+                                added ? Icons.check_rounded : Icons.add_rounded,
+                                color: Colors.white,
+                                size: 18,
+                              ),
                       ),
                     ),
                   );
