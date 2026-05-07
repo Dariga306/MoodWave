@@ -487,6 +487,15 @@ async def get_user_followers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    target_user = await db.get(User, user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if (
+        current_user.id != user_id
+        and not getattr(target_user, "show_followers", True)
+    ):
+        raise HTTPException(status_code=403, detail="Followers are hidden")
+
     rows = (
         await db.execute(
             select(User)
@@ -511,6 +520,15 @@ async def get_user_following(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    target_user = await db.get(User, user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if (
+        current_user.id != user_id
+        and not getattr(target_user, "show_followers", True)
+    ):
+        raise HTTPException(status_code=403, detail="Following is hidden")
+
     rows = (
         await db.execute(
             select(User)
@@ -596,15 +614,15 @@ async def _followed_artist_profiles(db: AsyncSession, user_id: int) -> list[dict
     if not rows:
         return []
 
-    artists = await asyncio.gather(
-        *[deezer_service.get_artist(artist_id) for artist_id in rows],
-        return_exceptions=True,
-    )
     payload: list[dict] = []
-    for artist_id, artist in zip(rows, artists):
-        if isinstance(artist, dict) and artist:
-            payload.append(artist)
-        else:
+    for artist_id in rows:
+        try:
+            artist = await deezer_service.get_artist(artist_id)
+            if isinstance(artist, dict) and artist:
+                payload.append(artist)
+            else:
+                payload.append({"id": artist_id, "name": f"Artist {artist_id}"})
+        except Exception:
             payload.append({"id": artist_id, "name": f"Artist {artist_id}"})
     return payload
 

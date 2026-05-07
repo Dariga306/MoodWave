@@ -12,6 +12,7 @@ from app.dependencies import get_current_user, get_db
 from app.models.music import Playlist, PlaylistTrack, PlaylistVisibility, TrackCache
 from app.models.user import User
 from app.services import firebase as firebase_svc
+from app.services.security import are_friends
 
 router = APIRouter()
 
@@ -83,6 +84,7 @@ def _score_playlist_match(query: str, title: str, description: Optional[str]) ->
 def _playlist_payload(playlist: Playlist, track_count: int = 0) -> dict:
     return {
         "id": playlist.id,
+        "owner_id": playlist.owner_id,
         "title": playlist.title,
         "description": playlist.description,
         "cover_url": playlist.cover_url,
@@ -229,6 +231,11 @@ async def get_playlist(
 
     if not _has_playlist_access(playlist, current_user.id):
         if playlist.visibility == PlaylistVisibility.private:
+            raise HTTPException(status_code=403, detail="Access denied")
+        if (
+            playlist.visibility == PlaylistVisibility.friends
+            and not await are_friends(db, playlist.owner_id, current_user.id)
+        ):
             raise HTTPException(status_code=403, detail="Access denied")
 
     await db.refresh(playlist, ["tracks"])

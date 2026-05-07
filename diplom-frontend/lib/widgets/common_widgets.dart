@@ -70,18 +70,23 @@ class SectionHeader extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(title,
-              style: GoogleFonts.outfit(
-                  fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.text)),
-          if (action != null)
+          Expanded(
+            child: Text(title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.outfit(
+                    fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.text)),
+          ),
+          if (action != null) ...[
+            const SizedBox(width: 8),
             GestureDetector(
               onTap: onAction,
               child: Text(action!,
                   style: GoogleFonts.outfit(
                       fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.purpleLight)),
             ),
+          ],
         ],
       ),
     );

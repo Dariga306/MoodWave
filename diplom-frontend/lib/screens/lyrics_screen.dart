@@ -45,6 +45,7 @@ class LyricsScreen extends StatefulWidget {
 
 class _LyricsScreenState extends State<LyricsScreen> {
   final ScrollController _scrollController = ScrollController();
+  final _activeKey = GlobalKey();
 
   Timer? _timer;
   StreamSubscription<Duration>? _positionSub;
@@ -54,15 +55,40 @@ class _LyricsScreenState extends State<LyricsScreen> {
   int _activeIndex = -1;
   int _currentPositionMs = 0;
 
+  // For smooth interpolation between position updates
+  int _lastReceivedPositionMs = 0;
+  DateTime _lastPositionReceivedAt = DateTime.now();
+  // Ignore stale stream events right after a seek
+  DateTime? _seekedAt;
+
+  // Extrapolates current position using wall-clock time since last update.
+  // Capped at 500 ms so a paused player doesn't drift.
+  int get _interpolatedPositionMs {
+    if (_syncedLines.isEmpty) return _currentPositionMs;
+    final elapsed =
+        DateTime.now().difference(_lastPositionReceivedAt).inMilliseconds;
+    return _lastReceivedPositionMs + elapsed.clamp(0, 500);
+  }
+
   @override
   void initState() {
     super.initState();
     _currentPositionMs = widget.currentPosition.inMilliseconds;
+    _lastReceivedPositionMs = _currentPositionMs;
+    _lastPositionReceivedAt = DateTime.now();
     _seedInitialLyrics();
     if (widget.positionStream != null) {
       _positionSub = widget.positionStream!.listen((pos) {
-        _currentPositionMs = pos.inMilliseconds;
-        _updateActiveIndex();
+        _lastReceivedPositionMs = pos.inMilliseconds;
+        _lastPositionReceivedAt = DateTime.now();
+        // Discard stale pre-seek positions for 1 second after a seek
+        final msSinceSeek = _seekedAt == null
+            ? 9999
+            : DateTime.now().difference(_seekedAt!).inMilliseconds;
+        if (msSinceSeek > 1000) {
+          _currentPositionMs = pos.inMilliseconds;
+          _updateActiveIndex();
+        }
       });
     }
   }
@@ -274,7 +300,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
     if (_syncedLines.isEmpty) return;
 
     _updateActiveIndex();
-    _timer = Timer.periodic(const Duration(milliseconds: 300), (_) {
+    _timer = Timer.periodic(const Duration(milliseconds: 100), (_) {
       _updateActiveIndex();
     });
   }
@@ -282,9 +308,10 @@ class _LyricsScreenState extends State<LyricsScreen> {
   void _updateActiveIndex() {
     if (_syncedLines.isEmpty) return;
 
+    final posMs = _interpolatedPositionMs;
     int nextIndex = -1;
     for (int i = 0; i < _syncedLines.length; i++) {
-      if (_syncedLines[i].timeMs <= _currentPositionMs) {
+      if (_syncedLines[i].timeMs <= posMs) {
         nextIndex = i;
       } else {
         break;
@@ -301,24 +328,11 @@ class _LyricsScreenState extends State<LyricsScreen> {
   }
 
   void _scrollToActiveLine() {
-    if (!_scrollController.hasClients || _activeIndex < 0) return;
-    final pos = _scrollController.position;
-    final screenHeight = MediaQuery.of(context).size.height;
-    // Top padding is 42% of full screen height (must match ListView padding)
-    final topPadding = screenHeight * 0.42;
-    // Each item: vertical padding 5+5=10px + font 17 * height 1.7 ≈ 29px text = ~39px
-    // But actual render with Padding widget adds widget overhead, so use 58px measured
-    const itemHeight = 58.0;
-    // Use the actual viewport height (scroll area) for centering
-    final viewH =
-        pos.viewportDimension > 0 ? pos.viewportDimension : screenHeight;
-    // Center the active line vertically in the viewport
-    final targetOffset = topPadding +
-        (_activeIndex * itemHeight) -
-        (viewH / 2) +
-        (itemHeight / 2);
-    pos.animateTo(
-      targetOffset.clamp(0.0, pos.maxScrollExtent),
+    final ctx = _activeKey.currentContext;
+    if (ctx == null || !mounted) return;
+    Scrollable.ensureVisible(
+      ctx,
+      alignment: 0.5,
       duration: const Duration(milliseconds: 350),
       curve: Curves.easeOutCubic,
     );
@@ -327,6 +341,10 @@ class _LyricsScreenState extends State<LyricsScreen> {
   void _seekToLine(int index) {
     if (index < 0 || index >= _syncedLines.length) return;
     final timeMs = _syncedLines[index].timeMs;
+    // Record seek so we ignore stale stream events for 1 second
+    _seekedAt = DateTime.now();
+    _lastReceivedPositionMs = timeMs;
+    _lastPositionReceivedAt = DateTime.now();
     widget.onSeek?.call(Duration(milliseconds: timeMs));
     setState(() {
       _currentPositionMs = timeMs;
@@ -384,6 +402,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
                             _syncedLines.isNotEmpty && widget.onSeek != null;
 
                         return GestureDetector(
+                          key: isActive ? _activeKey : null,
                           onTap: canSeek ? () => _seekToLine(index) : null,
                           child: Padding(
                             padding: const EdgeInsets.symmetric(

@@ -8,28 +8,76 @@
   "auth": {
     "type": "bearer",
     "bearer": [
-      { "key": "token", "value": "{{access_token}}", "type": "string" }
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
     ]
   },
   "variable": [
-    { "key": "base_url",         "value": "http://localhost:8000" },
-    { "key": "access_token",     "value": "" },
-    { "key": "refresh_token",    "value": "" },
-    { "key": "user_id",          "value": "" },
-    { "key": "target_user_id",   "value": "2" },
-    { "key": "playlist_id",      "value": "" },
-    { "key": "spotify_track_id", "value": "" },
-    { "key": "album_id",         "value": "" },
-    { "key": "artist_id",        "value": "" },
-    { "key": "match_id",         "value": "" },
-    { "key": "room_id",          "value": "" },
-    { "key": "message_id",       "value": "" },
-    { "key": "verification_code","value": "123456" },
-    { "key": "reset_code",       "value": "123456" },
-    { "key": "reset_token",      "value": "" }
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "refresh_token",
+      "value": ""
+    },
+    {
+      "key": "user_id",
+      "value": ""
+    },
+    {
+      "key": "target_user_id",
+      "value": "2"
+    },
+    {
+      "key": "playlist_id",
+      "value": ""
+    },
+    {
+      "key": "spotify_track_id",
+      "value": ""
+    },
+    {
+      "key": "album_id",
+      "value": ""
+    },
+    {
+      "key": "artist_id",
+      "value": ""
+    },
+    {
+      "key": "match_id",
+      "value": ""
+    },
+    {
+      "key": "room_id",
+      "value": ""
+    },
+    {
+      "key": "message_id",
+      "value": ""
+    },
+    {
+      "key": "verification_code",
+      "value": "123456"
+    },
+    {
+      "key": "reset_code",
+      "value": "123456"
+    },
+    {
+      "key": "reset_token",
+      "value": ""
+    }
   ],
   "item": [
-
     {
       "name": "Auth",
       "item": [
@@ -38,11 +86,20 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/auth/register",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"test@example.com\",\n  \"username\": \"testuser\",\n  \"password\": \"password123\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"User\",\n  \"birth_date\": \"2000-01-01\",\n  \"city\": \"Astana\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -65,11 +122,20 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/auth/login",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -78,83 +144,143 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/auth/refresh",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
         {
           "name": "Get Me",
-          "request": { "method": "GET", "url": "{{base_url}}/auth/me" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/auth/me"
+          }
         },
         {
           "name": "Update Profile",
           "request": {
             "method": "PUT",
             "url": "{{base_url}}/auth/me",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"display_name\": \"My Name\",\n  \"bio\": \"I love music\",\n  \"city\": \"Astana\",\n  \"show_followers\": true,\n  \"show_recently_played\": true\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
         {
           "name": "Get My Stats",
-          "request": { "method": "GET", "url": "{{base_url}}/auth/me/stats" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/auth/me/stats"
+          }
         },
         {
           "name": "Get Privacy Settings",
-          "request": { "method": "GET", "url": "{{base_url}}/users/me/privacy-settings" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/users/me/privacy-settings"
+          }
         },
         {
           "name": "Update Privacy Settings",
           "request": {
             "method": "PUT",
             "url": "{{base_url}}/users/me/privacy-settings",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"is_public\": true,\n  \"show_activity\": true,\n  \"show_recently_played\": true,\n  \"show_followers\": true\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
         {
           "name": "Get Notification Settings",
-          "request": { "method": "GET", "url": "{{base_url}}/users/me/notification-settings" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/users/me/notification-settings"
+          }
         },
         {
           "name": "Update Notification Settings",
           "request": {
             "method": "PUT",
             "url": "{{base_url}}/users/me/notification-settings",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"new_follower\": true,\n  \"friend_request\": true,\n  \"match_found\": true,\n  \"room_invite\": true,\n  \"promotions\": false\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
         {
           "name": "Clear My Cache",
-          "request": { "method": "POST", "url": "{{base_url}}/users/me/cache-clear" }
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/users/me/cache-clear"
+          }
         },
         {
           "name": "Verify Email",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/auth/verify-email",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"code\": \"{{verification_code}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -163,11 +289,20 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/auth/request-reset",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"test@example.com\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -176,17 +311,25 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/auth/confirm-reset",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"token\": \"{{reset_token}}\",\n  \"new_password\": \"newpassword123\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         }
       ]
     },
-
     {
       "name": "Music",
       "item": [
@@ -196,11 +339,22 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/tracks/search?q=billie+eilish&limit=10",
-              "host": ["{{base_url}}"],
-              "path": ["tracks", "search"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tracks",
+                "search"
+              ],
               "query": [
-                { "key": "q", "value": "billie eilish" },
-                { "key": "limit", "value": "10" }
+                {
+                  "key": "q",
+                  "value": "billie eilish"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
               ]
             }
           }
@@ -211,11 +365,22 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/tracks/charts?genre=pop&limit=20",
-              "host": ["{{base_url}}"],
-              "path": ["tracks", "charts"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tracks",
+                "charts"
+              ],
               "query": [
-                { "key": "genre", "value": "pop" },
-                { "key": "limit", "value": "20" }
+                {
+                  "key": "genre",
+                  "value": "pop"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
               ]
             }
           }
@@ -226,11 +391,22 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/tracks/recommendations?mood=happy&limit=10",
-              "host": ["{{base_url}}"],
-              "path": ["tracks", "recommendations"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tracks",
+                "recommendations"
+              ],
               "query": [
-                { "key": "mood", "value": "happy" },
-                { "key": "limit", "value": "10" }
+                {
+                  "key": "mood",
+                  "value": "happy"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
               ]
             }
           }
@@ -241,11 +417,23 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/tracks/{{spotify_track_id}}/youtube?title=Song+Name&artist=Artist+Name",
-              "host": ["{{base_url}}"],
-              "path": ["tracks", "{{spotify_track_id}}", "youtube"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tracks",
+                "{{spotify_track_id}}",
+                "youtube"
+              ],
               "query": [
-                { "key": "title", "value": "Song Name" },
-                { "key": "artist", "value": "Artist Name" }
+                {
+                  "key": "title",
+                  "value": "Song Name"
+                },
+                {
+                  "key": "artist",
+                  "value": "Artist Name"
+                }
               ]
             }
           }
@@ -255,11 +443,20 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/tracks/{{spotify_track_id}}/play",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"completion_pct\": 85.0,\n  \"mood\": \"happy\",\n  \"title\": \"Song Name\",\n  \"artist\": \"Artist Name\",\n  \"genre\": \"pop\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -268,11 +465,20 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/tracks/{{spotify_track_id}}/like",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"action\": \"liked\",\n  \"title\": \"Song Name\",\n  \"artist\": \"Artist Name\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -281,11 +487,20 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/tracks/{{spotify_track_id}}/skip",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"time_listened_ms\": 15000\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -295,9 +510,20 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/tracks/me/history?limit=50",
-              "host": ["{{base_url}}"],
-              "path": ["tracks", "me", "history"],
-              "query": [{ "key": "limit", "value": "50" }]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tracks",
+                "me",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
             }
           }
         },
@@ -307,9 +533,20 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/tracks/me/recent?limit=10",
-              "host": ["{{base_url}}"],
-              "path": ["tracks", "me", "recent"],
-              "query": [{ "key": "limit", "value": "10" }]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tracks",
+                "me",
+                "recent"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
             }
           }
         },
@@ -319,9 +556,20 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/tracks/me/on-repeat?limit=20",
-              "host": ["{{base_url}}"],
-              "path": ["tracks", "me", "on-repeat"],
-              "query": [{ "key": "limit", "value": "20" }]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tracks",
+                "me",
+                "on-repeat"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
             }
           }
         },
@@ -331,15 +579,25 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/tracks/me/flashbacks?limit=20",
-              "host": ["{{base_url}}"],
-              "path": ["tracks", "me", "flashbacks"],
-              "query": [{ "key": "limit", "value": "20" }]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tracks",
+                "me",
+                "flashbacks"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
             }
           }
         }
       ]
     },
-
     {
       "name": "Artists",
       "item": [
@@ -349,9 +607,19 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/artists/search?q=taylor+swift",
-              "host": ["{{base_url}}"],
-              "path": ["artists", "search"],
-              "query": [{ "key": "q", "value": "taylor swift" }]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "artists",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "taylor swift"
+                }
+              ]
             }
           }
         },
@@ -361,11 +629,23 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/artists/search/list?q=taylor&limit=10",
-              "host": ["{{base_url}}"],
-              "path": ["artists", "search", "list"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "artists",
+                "search",
+                "list"
+              ],
               "query": [
-                { "key": "q", "value": "taylor" },
-                { "key": "limit", "value": "10" }
+                {
+                  "key": "q",
+                  "value": "taylor"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
               ]
             }
           }
@@ -407,7 +687,6 @@
         }
       ]
     },
-
     {
       "name": "Albums",
       "item": [
@@ -417,11 +696,22 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/albums/search?q=thriller&limit=10",
-              "host": ["{{base_url}}"],
-              "path": ["albums", "search"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "albums",
+                "search"
+              ],
               "query": [
-                { "key": "q", "value": "thriller" },
-                { "key": "limit", "value": "10" }
+                {
+                  "key": "q",
+                  "value": "thriller"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
               ]
             }
           }
@@ -442,7 +732,6 @@
         }
       ]
     },
-
     {
       "name": "Playlists",
       "item": [
@@ -458,11 +747,20 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/playlists/",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"title\": \"My Playlist\",\n  \"description\": \"My favourite tracks\",\n  \"visibility\": \"private\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -478,11 +776,20 @@
           "request": {
             "method": "PUT",
             "url": "{{base_url}}/playlists/{{playlist_id}}",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"title\": \"Updated Title\",\n  \"visibility\": \"public\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -498,11 +805,20 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/playlists/{{playlist_id}}/tracks",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"spotify_track_id\": \"{{spotify_track_id}}\",\n  \"title\": \"Track Title\",\n  \"artist\": \"Artist Name\",\n  \"album\": \"Album Name\",\n  \"cover_url\": \"\",\n  \"duration_ms\": 210000\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -519,11 +835,22 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/playlists/search?q=chill&limit=10",
-              "host": ["{{base_url}}"],
-              "path": ["playlists", "search"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "playlists",
+                "search"
+              ],
               "query": [
-                { "key": "q", "value": "chill" },
-                { "key": "limit", "value": "10" }
+                {
+                  "key": "q",
+                  "value": "chill"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
               ]
             }
           }
@@ -533,23 +860,34 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/playlists/{{playlist_id}}/collaborate",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"collab_user_id\": {{target_user_id}}\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         }
       ]
     },
-
     {
       "name": "Social",
       "item": [
         {
           "name": "Get Match Candidates",
-          "request": { "method": "GET", "url": "{{base_url}}/matches/candidates" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/matches/candidates"
+          }
         },
         {
           "name": "Accept Match",
@@ -595,106 +933,220 @@
         },
         {
           "name": "Get Friends",
-          "request": { "method": "GET", "url": "{{base_url}}/social/friends" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/social/friends"
+          }
         },
         {
           "name": "Report User",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/social/report",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"reported_id\": {{target_user_id}},\n  \"reason\": \"spam\",\n  \"details\": \"This user is spamming\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         }
       ]
     },
-
     {
       "name": "Listening Rooms",
       "item": [
         {
           "name": "List Public Rooms",
-          "request": { "method": "GET", "url": "{{base_url}}/rooms/" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/rooms/"
+          }
         },
         {
           "name": "Create Room",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/rooms/",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"title\": \"Chill Session\",\n  \"is_public\": true,\n  \"max_guests\": 10\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
         {
           "name": "Get Room",
-          "request": { "method": "GET", "url": "{{base_url}}/rooms/{{room_id}}" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/rooms/{{room_id}}"
+          }
         },
         {
           "name": "Close Room",
-          "request": { "method": "DELETE", "url": "{{base_url}}/rooms/{{room_id}}" }
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/rooms/{{room_id}}"
+          }
         },
         {
           "name": "Join Room (WebSocket)",
           "request": {
             "method": "GET",
             "url": "ws://localhost:8000/rooms/{{room_id}}/ws?token={{access_token}}",
-            "description": "WebSocket endpoint — use Postman WebSocket or wscat client."
+            "description": "WebSocket endpoint вЂ” use Postman WebSocket or wscat client."
           }
         }
       ]
     },
-
     {
       "name": "Chat",
       "item": [
         {
-          "name": "Get Chats",
-          "request": { "method": "GET", "url": "{{base_url}}/chat/chats" }
+          "name": "List Chats (enriched)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/chats",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "chats"
+              ]
+            },
+            "description": "Returns enriched chat threads: partner info, similarity_pct, last_message_preview, last_message_at"
+          }
         },
         {
           "name": "Get Chat Messages",
           "request": {
             "method": "GET",
+            "header": [],
             "url": {
-              "raw": "{{base_url}}/chat/chats/{{match_id}}/messages?limit=50",
-              "host": ["{{base_url}}"],
-              "path": ["chat", "chats", "{{match_id}}", "messages"],
-              "query": [{ "key": "limit", "value": "50" }]
+              "raw": "{{base_url}}/chats/{{match_id}}/messages?limit=50",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "chats",
+                "{{match_id}}",
+                "messages"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
             }
           }
         },
         {
-          "name": "Send Message",
+          "name": "Send Text Message",
           "request": {
             "method": "POST",
-            "url": "{{base_url}}/chat/chats/{{match_id}}/messages",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"text\": \"Hello!\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\"text\": \"Hello from Postman!\"}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chats/{{match_id}}/send-text",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "chats",
+                "{{match_id}}",
+                "send-text"
+              ]
             }
           }
         },
         {
-          "name": "Chat WebSocket",
+          "name": "Send Track in Chat",
           "request": {
-            "method": "GET",
-            "url": "ws://localhost:8000/chat/ws?token={{access_token}}",
-            "description": "WebSocket endpoint for real-time chat."
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"track_id\": \"spotify_track_id_here\", \"title\": \"Track Title\", \"artist\": \"Artist Name\", \"cover_url\": \"https://example.com/cover.jpg\", \"phrase\": \"Напомнило о тебе\", \"phrase_emoji\": \"💭\"}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chats/{{match_id}}/send-track",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "chats",
+                "{{match_id}}",
+                "send-track"
+              ]
+            },
+            "description": "Send a track with optional phrase. Valid phrases: Слушай это прямо сейчас, Напомнило о тебе, Это точно про нас, Для такой погоды, Ты обязана это услышать, Почему это так больно"
+          }
+        },
+        {
+          "name": "React to Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"message_id\": \"{{message_id}}\", \"emoji\": \"❤️\"}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chats/{{match_id}}/react",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "chats",
+                "{{match_id}}",
+                "react"
+              ]
+            },
+            "description": "Valid emojis: ❤️ 🔥 😭 🎯 ⚡ 💀 🧐"
           }
         }
       ]
     },
-
     {
       "name": "Weather & Mood",
       "item": [
@@ -704,33 +1156,53 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/weather?city=Astana",
-              "host": ["{{base_url}}"],
-              "path": ["weather"],
-              "query": [{ "key": "city", "value": "Astana" }]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "weather"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "Astana"
+                }
+              ]
             }
           }
         }
       ]
     },
-
     {
       "name": "Admin",
       "item": [
         {
           "name": "Dashboard Stats",
-          "request": { "method": "GET", "url": "{{base_url}}/admin/stats" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/admin/stats"
+          }
         },
         {
           "name": "Analytics",
-          "request": { "method": "GET", "url": "{{base_url}}/admin/analytics" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/admin/analytics"
+          }
         },
         {
           "name": "System Info",
-          "request": { "method": "GET", "url": "{{base_url}}/admin/system" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/admin/system"
+          }
         },
         {
           "name": "Clear Redis Cache",
-          "request": { "method": "POST", "url": "{{base_url}}/admin/system/clear-cache" }
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/admin/system/clear-cache"
+          }
         },
         {
           "name": "List Users",
@@ -738,20 +1210,42 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/admin/users?page=1&limit=20",
-              "host": ["{{base_url}}"],
-              "path": ["admin", "users"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "users"
+              ],
               "query": [
-                { "key": "page", "value": "1" },
-                { "key": "limit", "value": "20" },
-                { "key": "search", "value": "", "disabled": true },
-                { "key": "is_active", "value": "true", "disabled": true }
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "is_active",
+                  "value": "true",
+                  "disabled": true
+                }
               ]
             }
           }
         },
         {
           "name": "Get User Detail",
-          "request": { "method": "GET", "url": "{{base_url}}/admin/users/{{target_user_id}}" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/admin/users/{{target_user_id}}"
+          }
         },
         {
           "name": "Get User Listening History",
@@ -759,23 +1253,44 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/admin/users/{{target_user_id}}/history?limit=50",
-              "host": ["{{base_url}}"],
-              "path": ["admin", "users", "{{target_user_id}}", "history"],
-              "query": [{ "key": "limit", "value": "50" }]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{target_user_id}}",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
             }
           }
         },
         {
           "name": "Block / Unblock User",
-          "request": { "method": "PUT", "url": "{{base_url}}/admin/users/{{target_user_id}}/block" }
+          "request": {
+            "method": "PUT",
+            "url": "{{base_url}}/admin/users/{{target_user_id}}/block"
+          }
         },
         {
           "name": "Toggle Admin Role",
-          "request": { "method": "PUT", "url": "{{base_url}}/admin/users/{{target_user_id}}/admin" }
+          "request": {
+            "method": "PUT",
+            "url": "{{base_url}}/admin/users/{{target_user_id}}/admin"
+          }
         },
         {
           "name": "Delete User",
-          "request": { "method": "DELETE", "url": "{{base_url}}/admin/users/{{target_user_id}}" }
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/admin/users/{{target_user_id}}"
+          }
         },
         {
           "name": "List Tracks (Cache)",
@@ -783,15 +1298,29 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/admin/tracks?search=",
-              "host": ["{{base_url}}"],
-              "path": ["admin", "tracks"],
-              "query": [{ "key": "search", "value": "", "disabled": true }]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "tracks"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
             }
           }
         },
         {
           "name": "Delete Track from Cache",
-          "request": { "method": "DELETE", "url": "{{base_url}}/admin/tracks/{{spotify_track_id}}" }
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/admin/tracks/{{spotify_track_id}}"
+          }
         },
         {
           "name": "List Playlists",
@@ -799,19 +1328,36 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/admin/playlists?visibility=public",
-              "host": ["{{base_url}}"],
-              "path": ["admin", "playlists"],
-              "query": [{ "key": "visibility", "value": "public", "disabled": true }]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "playlists"
+              ],
+              "query": [
+                {
+                  "key": "visibility",
+                  "value": "public",
+                  "disabled": true
+                }
+              ]
             }
           }
         },
         {
           "name": "Get Playlist Tracks (Admin)",
-          "request": { "method": "GET", "url": "{{base_url}}/admin/playlists/{{playlist_id}}/tracks" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/admin/playlists/{{playlist_id}}/tracks"
+          }
         },
         {
           "name": "Delete Playlist (Admin)",
-          "request": { "method": "DELETE", "url": "{{base_url}}/admin/playlists/{{playlist_id}}" }
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/admin/playlists/{{playlist_id}}"
+          }
         },
         {
           "name": "List Matches",
@@ -819,44 +1365,74 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/admin/matches?sim_min=80",
-              "host": ["{{base_url}}"],
-              "path": ["admin", "matches"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "matches"
+              ],
               "query": [
-                { "key": "sim_min", "value": "80", "disabled": true },
-                { "key": "sim_max", "value": "100", "disabled": true }
+                {
+                  "key": "sim_min",
+                  "value": "80",
+                  "disabled": true
+                },
+                {
+                  "key": "sim_max",
+                  "value": "100",
+                  "disabled": true
+                }
               ]
             }
           }
         },
         {
           "name": "Delete Match",
-          "request": { "method": "DELETE", "url": "{{base_url}}/admin/matches/{{match_id}}" }
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/admin/matches/{{match_id}}"
+          }
         },
         {
           "name": "List Reports",
-          "request": { "method": "GET", "url": "{{base_url}}/admin/reports" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/admin/reports"
+          }
         },
         {
           "name": "Dismiss Report",
-          "request": { "method": "DELETE", "url": "{{base_url}}/admin/reports/1" }
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/admin/reports/1"
+          }
         },
         {
           "name": "List Rooms (Admin)",
-          "request": { "method": "GET", "url": "{{base_url}}/admin/rooms" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/admin/rooms"
+          }
         },
         {
           "name": "Close Room (Admin)",
-          "request": { "method": "DELETE", "url": "{{base_url}}/admin/rooms/{{room_id}}" }
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/admin/rooms/{{room_id}}"
+          }
         }
       ]
     },
-
     {
       "name": "Radio",
       "item": [
         {
           "name": "List Radio Stations",
-          "request": { "method": "GET", "url": "{{base_url}}/radio/stations" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/radio/stations"
+          }
         },
         {
           "name": "Get Radio Tracks",
@@ -871,17 +1447,25 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/radio/late_night/next",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"current_track_id\": \"deezer_12345\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         }
       ]
     },
-
     {
       "name": "Trending",
       "item": [
@@ -891,22 +1475,36 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/trending/tracks?limit=20",
-              "host": ["{{base_url}}"],
-              "path": ["trending", "tracks"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "trending",
+                "tracks"
+              ],
               "query": [
-                { "key": "limit", "value": "20" },
-                { "key": "city", "value": "astana", "disabled": true }
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "city",
+                  "value": "astana",
+                  "disabled": true
+                }
               ]
             }
           }
         },
         {
           "name": "Home Feed",
-          "request": { "method": "GET", "url": "{{base_url}}/trending/feed" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/trending/feed"
+          }
         }
       ]
     },
-
     {
       "name": "Tracks (new)",
       "item": [
@@ -915,26 +1513,36 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/tracks/{{spotify_track_id}}/progress",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"progress_ms\": 45000,\n  \"completed\": false\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         }
       ]
     },
-
     {
       "name": "Health",
       "item": [
         {
           "name": "Health Check",
-          "request": { "method": "GET", "url": "{{base_url}}/health" }
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/health"
+          }
         }
       ]
     }
-
   ]
 }

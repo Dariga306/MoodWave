@@ -53,9 +53,9 @@ class ApiService {
   ApiService._internal() {
     _dio = Dio(BaseOptions(
       baseUrl: ApiService.baseUrl,
-      connectTimeout: const Duration(seconds: 6),
-      receiveTimeout: const Duration(seconds: 10),
-      sendTimeout: const Duration(seconds: 8),
+      connectTimeout: const Duration(seconds: 35),
+      receiveTimeout: const Duration(seconds: 35),
+      sendTimeout: const Duration(seconds: 10),
       headers: {'Content-Type': 'application/json'},
     ));
 
@@ -322,6 +322,7 @@ class ApiService {
       final resp = await _dio.get(
         '/tracks/${Uri.encodeComponent(trackId)}/youtube',
         queryParameters: {'title': title, 'artist': artist},
+        options: Options(receiveTimeout: const Duration(seconds: 40)),
       );
       return resp.data['video_id'] as String?;
     } catch (_) {
@@ -1314,6 +1315,234 @@ class ApiService {
     } catch (_) {
       return null;
     }
+  }
+
+  Future<Map<String, dynamic>> getUserProfileSummary(
+    int userId, {
+    int playlistLimit = 8,
+    int tracksLimit = 8,
+  }) async {
+    final resp = await _dio.get(
+      '/users/$userId/summary',
+      queryParameters: {
+        'playlist_limit': playlistLimit,
+        'tracks_limit': tracksLimit,
+      },
+    );
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<void> saveFavoriteArtists(List<Map<String, dynamic>> artists) async {
+    final desiredIds = artists
+        .map((a) => a['id'])
+        .where((id) => id != null)
+        .map((id) => id.toString())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    final currentIds = (await getFollowedArtistIds())
+        .map((id) => id.toString())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    for (final id in currentIds.difference(desiredIds)) {
+      await unfollowArtist(id);
+    }
+    for (final id in desiredIds.difference(currentIds)) {
+      await followArtist(id);
+    }
+  }
+
+  Future<Map<String, dynamic>> savePlaylistToLibrary(
+    Map<String, dynamic> playlist,
+  ) async {
+    final title = (playlist['title'] ?? 'Saved Playlist').toString();
+    final description = (playlist['description'] ?? '').toString();
+    final coverUrl = (playlist['cover_url'] ?? '').toString();
+    final detail = await getPlaylist((playlist['id'] as num).toInt());
+    final created = await createPlaylist(
+      title,
+      visibility: 'private',
+      description: description.isNotEmpty
+          ? '$description\n\nSaved to your library'
+          : 'Saved to your library',
+      coverUrl: coverUrl.isNotEmpty ? coverUrl : null,
+    );
+    final newId = (created['id'] as num).toInt();
+    final tracks = (detail['tracks'] as List?) ?? const [];
+    for (final raw in tracks) {
+      if (raw is! Map) continue;
+      await addTrackToPlaylist(newId, Map<String, dynamic>.from(raw));
+    }
+    return created;
+  }
+
+  Future<List<dynamic>> getDirectChatMessages(int chatId,
+      {int limit = 50}) async {
+    final resp = await _dio.get(
+      '/chats/thread/$chatId/messages',
+      queryParameters: {'limit': limit},
+    );
+    return resp.data['messages'] ?? [];
+  }
+
+  Future<void> sendDirectTextMessage(int chatId, String text) async {
+    await _dio.post('/chats/thread/$chatId/send-text', data: {'text': text});
+  }
+
+  Future<void> sendTrackInChat(
+    int matchId, {
+    required String trackId,
+    required String title,
+    required String artist,
+    String? coverUrl,
+    String? previewUrl,
+    String? phrase,
+    String? phraseEmoji,
+    String? note,
+  }) async {
+    await _dio.post('/chats/$matchId/send-track', data: {
+      'track_id': trackId,
+      'title': title,
+      'artist': artist,
+      if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+      if (previewUrl != null && previewUrl.isNotEmpty) 'preview_url': previewUrl,
+      if (phrase != null && phrase.isNotEmpty) 'phrase': phrase,
+      if (phraseEmoji != null && phraseEmoji.isNotEmpty) 'phrase_emoji': phraseEmoji,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+  }
+
+  Future<void> sendTrackInDirectChat(
+    int chatId, {
+    required String trackId,
+    required String title,
+    required String artist,
+    String? coverUrl,
+    String? previewUrl,
+    String? phrase,
+    String? phraseEmoji,
+    String? note,
+  }) async {
+    await _dio.post('/chats/thread/$chatId/send-track', data: {
+      'track_id': trackId,
+      'title': title,
+      'artist': artist,
+      if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+      if (previewUrl != null && previewUrl.isNotEmpty) 'preview_url': previewUrl,
+      if (phrase != null && phrase.isNotEmpty) 'phrase': phrase,
+      if (phraseEmoji != null && phraseEmoji.isNotEmpty) 'phrase_emoji': phraseEmoji,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+  }
+
+  Future<void> sendAlbumInChat(
+    int matchId, {
+    required String albumId,
+    required String title,
+    required String artist,
+    String? coverUrl,
+    String? note,
+  }) async {
+    await _dio.post('/chats/$matchId/send-album', data: {
+      'album_id': albumId,
+      'title': title,
+      'artist': artist,
+      if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+  }
+
+  Future<void> sendAlbumInDirectChat(
+    int chatId, {
+    required String albumId,
+    required String title,
+    required String artist,
+    String? coverUrl,
+    String? note,
+  }) async {
+    await _dio.post('/chats/thread/$chatId/send-album', data: {
+      'album_id': albumId,
+      'title': title,
+      'artist': artist,
+      if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+  }
+
+  Future<void> sendPlaylistInChat(
+    int matchId, {
+    required int playlistId,
+    required String title,
+    String? coverUrl,
+    int trackCount = 0,
+    String? note,
+  }) async {
+    await _dio.post('/chats/$matchId/send-playlist', data: {
+      'playlist_id': playlistId,
+      'title': title,
+      if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+      'track_count': trackCount,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+  }
+
+  Future<void> sendPlaylistInDirectChat(
+    int chatId, {
+    required int playlistId,
+    required String title,
+    String? coverUrl,
+    int trackCount = 0,
+    String? note,
+  }) async {
+    await _dio.post('/chats/thread/$chatId/send-playlist', data: {
+      'playlist_id': playlistId,
+      'title': title,
+      if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+      'track_count': trackCount,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+  }
+
+  Future<void> sendImageInChat(
+    int matchId, {
+    required String imageDataUrl,
+    String? caption,
+  }) async {
+    await _dio.post('/chats/$matchId/send-image', data: {
+      'image_data_url': imageDataUrl,
+      if (caption != null && caption.isNotEmpty) 'caption': caption,
+    });
+  }
+
+  Future<void> sendImageInDirectChat(
+    int chatId, {
+    required String imageDataUrl,
+    String? caption,
+  }) async {
+    await _dio.post('/chats/thread/$chatId/send-image', data: {
+      'image_data_url': imageDataUrl,
+      if (caption != null && caption.isNotEmpty) 'caption': caption,
+    });
+  }
+
+  Future<void> reactToMessage(
+      int matchId, String messageId, String emoji) async {
+    await _dio.post('/chats/$matchId/react', data: {
+      'message_id': messageId,
+      'emoji': emoji,
+    });
+  }
+
+  Future<void> reactToDirectMessage(
+      int chatId, String messageId, String emoji) async {
+    await _dio.post('/chats/thread/$chatId/react', data: {
+      'message_id': messageId,
+      'emoji': emoji,
+    });
+  }
+
+  Future<Map<String, dynamic>> startDirectChat(int userId) async {
+    final resp = await _dio.post('/chats/direct/$userId/start');
+    return Map<String, dynamic>.from(resp.data as Map);
   }
 
   // ─── Progress heartbeat ───────────────────────────────────────────────────

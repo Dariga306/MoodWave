@@ -24,8 +24,7 @@ class _LibraryTabState extends State<LibraryTab> {
   int _filter = 0; // 0=All, 1=Playlists, 2=Albums, 3=Artists
   int _playlistSubFilter = 0; // 0=All, 1=My, 2=Platform
   bool _isGridMode = false;
-  int _sortOption =
-      0; // 0=Recently added, 1=A→Z, 2=Z→A, 3=By artist, 4=By track count
+  int _sortOption = 0; // 0=Recent, 1=Date added, 2=Alphabetical, 3=By author
 
   final _filters = ['All', 'Playlists', 'Albums', 'Artists'];
 
@@ -203,84 +202,119 @@ class _LibraryTabState extends State<LibraryTab> {
       }
     }
     switch (_sortOption) {
-      case 1: // A → Z
+      case 2: // Alphabetical
         list = List.from(list)
           ..sort((a, b) => (a as Map)['title']
               .toString()
               .toLowerCase()
               .compareTo((b as Map)['title'].toString().toLowerCase()));
         break;
-      case 2: // Z → A
-        list = List.from(list)
-          ..sort((a, b) => (b as Map)['title']
-              .toString()
-              .toLowerCase()
-              .compareTo((a as Map)['title'].toString().toLowerCase()));
-        break;
-      case 3: // By track count (descending)
+      case 3: // By author / visibility fallback
         list = List.from(list)
           ..sort((a, b) {
-            final ca = (a as Map)['track_count'] ?? (a)['tracks_count'] ?? 0;
-            final cb = (b as Map)['track_count'] ?? (b)['tracks_count'] ?? 0;
-            final ia = ca is int ? ca : int.tryParse(ca.toString()) ?? 0;
-            final ib = cb is int ? cb : int.tryParse(cb.toString()) ?? 0;
-            return ib.compareTo(ia);
+            final aa = ((a as Map)['description'] ??
+                    a['visibility'] ??
+                    a['title'] ??
+                    '')
+                .toString()
+                .toLowerCase();
+            final bb = ((b as Map)['description'] ??
+                    b['visibility'] ??
+                    b['title'] ??
+                    '')
+                .toString()
+                .toLowerCase();
+            return aa.compareTo(bb);
           });
         break;
-      case 0: // Recently added (newest first — default order)
+      case 1: // Date added
+        list = List.from(list)
+          ..sort((a, b) =>
+              _sortDateForMap(b as Map).compareTo(_sortDateForMap(a as Map)));
+        break;
+      case 0: // Recent (keep backend order)
       default:
         break;
     }
     return list;
   }
 
+  DateTime _sortDateForMap(Map item) {
+    for (final key in [
+      'updated_at', 'created_at', 'liked_at', 'saved_at', 'followed_at'
+    ]) {
+      final raw = item[key];
+      if (raw is String && raw.isNotEmpty) {
+        final parsed = DateTime.tryParse(raw);
+        if (parsed != null) return parsed;
+      }
+    }
+    // Items with no date (e.g. artists) surface at the top alongside recent items
+    return DateTime.now();
+  }
+
+  List<Map<String, dynamic>> get _allLibraryItems {
+    final items = <Map<String, dynamic>>[];
+
+    for (final raw in _filteredPlaylists) {
+      if (raw is! Map) continue;
+      final playlist = Map<String, dynamic>.from(raw);
+      items.add({
+        'type': 'playlist',
+        'data': playlist,
+        'title': (playlist['title'] ?? 'Untitled').toString(),
+        'author': (playlist['description'] ?? playlist['visibility'] ?? '')
+            .toString(),
+        'sort_date': _sortDateForMap(playlist),
+      });
+    }
+
+    for (final album in _albums) {
+      items.add({
+        'type': 'album',
+        'data': album,
+        'title': (album['title'] ?? 'Unknown Album').toString(),
+        'author': (album['artist'] ?? '').toString(),
+        'sort_date': _sortDateForMap(album),
+      });
+    }
+
+    for (final artist in _artists) {
+      items.add({
+        'type': 'artist',
+        'data': artist,
+        'title': (artist['name'] ?? 'Unknown Artist').toString(),
+        'author': (artist['artist'] ?? artist['name'] ?? '').toString(),
+        'sort_date': _sortDateForMap(artist),
+      });
+    }
+
+    switch (_sortOption) {
+      case 2:
+        items.sort((a, b) => (a['title'] as String)
+            .toLowerCase()
+            .compareTo((b['title'] as String).toLowerCase()));
+        break;
+      case 3:
+        items.sort((a, b) => (a['author'] as String)
+            .toLowerCase()
+            .compareTo((b['author'] as String).toLowerCase()));
+        break;
+      // case 0 (Recent) and case 1 (Date added) both sort by date to mix types
+      default:
+        items.sort((a, b) =>
+            (b['sort_date'] as DateTime).compareTo(a['sort_date'] as DateTime));
+        break;
+    }
+
+    return items;
+  }
+
   List<Widget> _buildAllLibrarySlivers() {
     final slivers = <Widget>[];
-    final playlists = _filteredPlaylists;
+    final mixed = _allLibraryItems;
 
-    if (playlists.isNotEmpty) {
-      slivers.add(_librarySectionHeader('Playlists'));
-      slivers.add(
-        SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (_, i) => _PlaylistItem(
-              playlist: playlists[i] as Map<String, dynamic>,
-              onRefresh: _load,
-            ),
-            childCount: playlists.length,
-          ),
-        ),
-      );
-    }
-
-    if (_albums.isNotEmpty) {
-      slivers.add(_librarySectionHeader('Albums'));
-      slivers.add(
-        SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (_, i) => _AlbumLibraryItem(
-              album: _albums[i],
-              onTap: () => _openSavedAlbum(context, _albums[i]),
-            ),
-            childCount: _albums.length,
-          ),
-        ),
-      );
-    }
-
-    if (_artists.isNotEmpty) {
-      slivers.add(_librarySectionHeader('Artists'));
-      slivers.add(
-        SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (_, i) => _ArtistLibraryItem(artist: _artists[i]),
-            childCount: _artists.length,
-          ),
-        ),
-      );
-    }
-
-    if (slivers.isEmpty) {
+    if (mixed.isEmpty) {
       slivers.add(
         SliverFillRemaining(
           child: Center(
@@ -316,31 +350,45 @@ class _LibraryTabState extends State<LibraryTab> {
           ),
         ),
       );
+    } else {
+      slivers.add(
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (_, i) {
+              final item = mixed[i];
+              final type = item['type']?.toString();
+              final data = Map<String, dynamic>.from(item['data'] as Map);
+              switch (type) {
+                case 'album':
+                  return _AlbumLibraryItem(
+                    album: data,
+                    onTap: () => _openSavedAlbum(context, data),
+                  );
+                case 'artist':
+                  return _ArtistLibraryItem(artist: data);
+                case 'playlist':
+                default:
+                  return _PlaylistItem(
+                    playlist: data,
+                    onRefresh: _load,
+                  );
+              }
+            },
+            childCount: mixed.length,
+          ),
+        ),
+      );
     }
 
     return slivers;
   }
 
-  Widget _librarySectionHeader(String title) => SliverToBoxAdapter(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-          child: Text(
-            title,
-            style: GoogleFonts.outfit(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              color: AppColors.text,
-            ),
-          ),
-        ),
-      );
-
   void _showSortSheet() {
     const options = [
-      'Recently added',
-      'A → Z',
-      'Z → A',
-      'By track count',
+      'Recent',
+      'Date added',
+      'Alphabetical',
+      'By author',
     ];
     showModalBottomSheet(
       context: context,
@@ -365,7 +413,7 @@ class _LibraryTabState extends State<LibraryTab> {
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                child: Text('Sort by',
+                child: Text('Sort',
                     style: GoogleFonts.outfit(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
@@ -593,7 +641,7 @@ class _LibraryTabState extends State<LibraryTab> {
                       ),
                       const SizedBox(height: 10),
                     ],
-                    // Sort & View toggle row (only for All/Playlists)
+                    // Sort row
                     if (_filter == 0 || _filter == 1)
                       Row(children: [
                         GestureDetector(
@@ -604,10 +652,10 @@ class _LibraryTabState extends State<LibraryTab> {
                             const SizedBox(width: 4),
                             Text(
                               const [
-                                'Recently added',
-                                'A → Z',
-                                'Z → A',
-                                'By track count'
+                                'Recent',
+                                'Date added',
+                                'Alphabetical',
+                                'By author'
                               ][_sortOption],
                               style: GoogleFonts.outfit(
                                   fontSize: 13,
@@ -616,18 +664,20 @@ class _LibraryTabState extends State<LibraryTab> {
                             ),
                           ]),
                         ),
-                        const Spacer(),
-                        GestureDetector(
-                          onTap: () =>
-                              setState(() => _isGridMode = !_isGridMode),
-                          child: Icon(
-                            _isGridMode
-                                ? Icons.view_list_rounded
-                                : Icons.grid_view_rounded,
-                            size: 20,
-                            color: AppColors.text2,
+                        if (_filter == 1) ...[
+                          const Spacer(),
+                          GestureDetector(
+                            onTap: () =>
+                                setState(() => _isGridMode = !_isGridMode),
+                            child: Icon(
+                              _isGridMode
+                                  ? Icons.view_list_rounded
+                                  : Icons.grid_view_rounded,
+                              size: 20,
+                              color: AppColors.text2,
+                            ),
                           ),
-                        ),
+                        ],
                       ]),
                     const SizedBox(height: 12),
                   ]),

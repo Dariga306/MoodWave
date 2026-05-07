@@ -66,34 +66,77 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           const SizedBox(height: 8),
-          Container(width: 36, height: 4,
-              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(100))),
+          Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(100))),
           const SizedBox(height: 14),
-          Text('Choose cover', style: GoogleFonts.outfit(
-              fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text)),
+          Text('Choose cover',
+              style: GoogleFonts.outfit(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.text)),
           const SizedBox(height: 10),
           const Divider(color: Colors.white10, height: 1),
           ListTile(
-            leading: Container(width: 36, height: 36,
-              decoration: BoxDecoration(color: AppColors.purple.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.photo_library_rounded, size: 18, color: AppColors.purpleLight)),
-            title: Text('From gallery', style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
-            onTap: () { Navigator.pop(ctx); _pickImage(ImageSource.gallery); },
+            leading: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                    color: AppColors.purple.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.photo_library_rounded,
+                    size: 18, color: AppColors.purpleLight)),
+            title: Text('From gallery',
+                style: GoogleFonts.outfit(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.text)),
+            onTap: () {
+              Navigator.pop(ctx);
+              _pickImage(ImageSource.gallery);
+            },
           ),
           ListTile(
-            leading: Container(width: 36, height: 36,
-              decoration: BoxDecoration(color: AppColors.blue.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.camera_alt_rounded, size: 18, color: AppColors.blue)),
-            title: Text('Camera', style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
-            onTap: () { Navigator.pop(ctx); _pickImage(ImageSource.camera); },
+            leading: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                    color: AppColors.blue.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.camera_alt_rounded,
+                    size: 18, color: AppColors.blue)),
+            title: Text('Camera',
+                style: GoogleFonts.outfit(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.text)),
+            onTap: () {
+              Navigator.pop(ctx);
+              _pickImage(ImageSource.camera);
+            },
           ),
           if (_coverBytes != null)
             ListTile(
-              leading: Container(width: 36, height: 36,
-                decoration: BoxDecoration(color: Colors.red.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.delete_rounded, size: 18, color: Colors.redAccent)),
-              title: Text('Remove cover', style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.redAccent)),
-              onTap: () { Navigator.pop(ctx); setState(() => _coverBytes = null); },
+              leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.delete_rounded,
+                      size: 18, color: Colors.redAccent)),
+              title: Text('Remove cover',
+                  style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.redAccent)),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() => _coverBytes = null);
+              },
             ),
           const SizedBox(height: 8),
         ]),
@@ -105,7 +148,9 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
     final title = _titleCtrl.text.trim();
     if (title.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Enter a playlist name', style: GoogleFonts.outfit())),
+        SnackBar(
+            content:
+                Text('Enter a playlist name', style: GoogleFonts.outfit())),
       );
       return;
     }
@@ -155,24 +200,32 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Delete playlist',
-            style: GoogleFonts.outfit(fontWeight: FontWeight.w800, color: AppColors.text)),
+            style: GoogleFonts.outfit(
+                fontWeight: FontWeight.w800, color: AppColors.text)),
         content: Text('This action cannot be undone.',
             style: GoogleFonts.outfit(color: AppColors.text2)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
-              child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel',
+                  style: GoogleFonts.outfit(color: AppColors.text3))),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-            child: Text('Delete', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w700)),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12))),
+            child: Text('Delete',
+                style: GoogleFonts.outfit(
+                    color: Colors.white, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
     );
     if (ok == true) {
       try {
-        await ApiService().deletePlaylist(widget.existingPlaylist!['id'] as int);
+        await ApiService()
+            .deletePlaylist(widget.existingPlaylist!['id'] as int);
         if (!mounted) return;
         Navigator.pop(context, true);
       } catch (_) {}
@@ -193,7 +246,10 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(_isEditing ? 'Edit Playlist' : 'New Playlist',
-            style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.text)),
+            style: GoogleFonts.outfit(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: AppColors.text)),
         centerTitle: true,
       ),
       body: SingleChildScrollView(
@@ -205,7 +261,8 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
               onTap: _showImageOptions,
               child: Stack(children: [
                 Container(
-                  width: 160, height: 160,
+                  width: 160,
+                  height: 160,
                   decoration: BoxDecoration(
                     gradient: AppColors.gradMixed,
                     borderRadius: BorderRadius.circular(16),
@@ -217,27 +274,33 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
                       : existingCover != null && existingCover.isNotEmpty
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(16),
-                              child: Image.network(existingCover, fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => _CoverPlaceholder()))
+                              child: Image.network(existingCover,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) =>
+                                      _CoverPlaceholder()))
                           : _CoverPlaceholder(),
                 ),
                 Positioned(
-                  bottom: 8, right: 8,
+                  bottom: 8,
+                  right: 8,
                   child: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
                       color: Colors.black54,
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: const Icon(Icons.edit_rounded, size: 16, color: Colors.white),
+                    child: const Icon(Icons.edit_rounded,
+                        size: 16, color: Colors.white),
                   ),
                 ),
               ]),
             ),
           ),
           const SizedBox(height: 8),
-          Center(child: Text('Tap to change cover',
-              style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3))),
+          Center(
+              child: Text('Tap to change cover',
+                  style: GoogleFonts.outfit(
+                      fontSize: 12, color: AppColors.text3))),
           const SizedBox(height: 28),
 
           // Title
@@ -249,7 +312,10 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
           // Description
           _Label('Description'),
           const SizedBox(height: 8),
-          _Field(controller: _descCtrl, hint: 'Tell us about this playlist', maxLines: 3),
+          _Field(
+              controller: _descCtrl,
+              hint: 'Tell us about this playlist',
+              maxLines: 3),
           const SizedBox(height: 20),
 
           // Visibility
@@ -269,13 +335,20 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
               onPressed: _saving ? null : _save,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.purple,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
               child: _saving
-                  ? const SizedBox(width: 20, height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
                   : Text(_isEditing ? 'Save' : 'Create',
-                      style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+                      style: GoogleFonts.outfit(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white)),
             ),
           ),
           const SizedBox(height: 12),
@@ -286,10 +359,14 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
               onPressed: () => Navigator.pop(context),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: AppColors.border),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
-              child: Text('Cancel', style: GoogleFonts.outfit(
-                  fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.text2)),
+              child: Text('Cancel',
+                  style: GoogleFonts.outfit(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.text2)),
             ),
           ),
 
@@ -305,10 +382,14 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
                 onPressed: _delete,
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: Colors.redAccent),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
                 ),
-                child: Text('Delete playlist', style: GoogleFonts.outfit(
-                    fontSize: 16, fontWeight: FontWeight.w600, color: Colors.redAccent)),
+                child: Text('Delete playlist',
+                    style: GoogleFonts.outfit(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.redAccent)),
               ),
             ),
           ],
@@ -321,50 +402,55 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
 class _CoverPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
-    mainAxisAlignment: MainAxisAlignment.center,
-    children: [
-      const Icon(Icons.add_photo_alternate_rounded, size: 40, color: Colors.white54),
-      const SizedBox(height: 8),
-      Text('Add cover', style: GoogleFonts.outfit(fontSize: 12, color: Colors.white54)),
-    ],
-  );
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.add_photo_alternate_rounded,
+              size: 40, color: Colors.white54),
+          const SizedBox(height: 8),
+          Text('Add cover',
+              style: GoogleFonts.outfit(fontSize: 12, color: Colors.white54)),
+        ],
+      );
 }
 
 class _Label extends StatelessWidget {
   final String text;
   const _Label(this.text);
   @override
-  Widget build(BuildContext context) => Text(text, style: GoogleFonts.outfit(
-      fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text2));
+  Widget build(BuildContext context) => Text(text,
+      style: GoogleFonts.outfit(
+          fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text2));
 }
 
 class _Field extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
   final int maxLines;
-  const _Field({required this.controller, required this.hint, this.maxLines = 1});
+  const _Field(
+      {required this.controller, required this.hint, this.maxLines = 1});
   @override
   Widget build(BuildContext context) => TextField(
-    controller: controller,
-    maxLines: maxLines,
-    style: GoogleFonts.outfit(fontSize: 15, color: AppColors.text),
-    decoration: InputDecoration(
-      hintText: hint,
-      hintStyle: GoogleFonts.outfit(fontSize: 15, color: AppColors.text3),
-      filled: true,
-      fillColor: AppColors.surface,
-      border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.border)),
-      enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.border)),
-      focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.purple)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    ),
-  );
+        controller: controller,
+        maxLines: maxLines,
+        style: GoogleFonts.outfit(fontSize: 15, color: AppColors.text),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: GoogleFonts.outfit(fontSize: 15, color: AppColors.text3),
+          filled: true,
+          fillColor: AppColors.surface,
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.border)),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.border)),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.purple)),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        ),
+      );
 }
 
 class _VisibilitySelector extends StatelessWidget {
@@ -375,11 +461,15 @@ class _VisibilitySelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final options = [
-      _VisOption('public', Icons.public_rounded, 'Public', 'Visible to everyone, appears in search'),
-      _VisOption('friends', Icons.people_rounded, 'Friends', 'Only visible to people you follow'),
-      _VisOption('private', Icons.lock_rounded, 'Private', 'Only visible to you'),
+      _VisOption('public', Icons.public_rounded, 'Public',
+          'Visible to everyone, appears in search'),
+      _VisOption('friends', Icons.people_rounded, 'Friends',
+          'Only visible to people you follow'),
+      _VisOption(
+          'private', Icons.lock_rounded, 'Private', 'Only visible to you'),
     ];
-    return Column(children: options.map((o) {
+    return Column(
+        children: options.map((o) {
       final selected = value == o.value;
       return GestureDetector(
         onTap: () => onChanged(o.value),
@@ -387,21 +477,34 @@ class _VisibilitySelector extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 10),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            color: selected ? AppColors.purple.withOpacity(0.12) : AppColors.surface,
+            color: selected
+                ? AppColors.purple.withOpacity(0.12)
+                : AppColors.surface,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: selected ? AppColors.purple : AppColors.border),
+            border: Border.all(
+                color: selected ? AppColors.purple : AppColors.border),
           ),
           child: Row(children: [
-            Icon(o.icon, size: 20, color: selected ? AppColors.purpleLight : AppColors.text3),
+            Icon(o.icon,
+                size: 20,
+                color: selected ? AppColors.purpleLight : AppColors.text3),
             const SizedBox(width: 14),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(o.label, style: GoogleFonts.outfit(
-                  fontSize: 14, fontWeight: FontWeight.w600,
-                  color: selected ? AppColors.text : AppColors.text2)),
-              Text(o.desc, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-            ])),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(o.label,
+                      style: GoogleFonts.outfit(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: selected ? AppColors.text : AppColors.text2)),
+                  Text(o.desc,
+                      style: GoogleFonts.outfit(
+                          fontSize: 12, color: AppColors.text3)),
+                ])),
             if (selected)
-              const Icon(Icons.check_circle_rounded, size: 20, color: AppColors.purple),
+              const Icon(Icons.check_circle_rounded,
+                  size: 20, color: AppColors.purple),
           ]),
         ),
       );

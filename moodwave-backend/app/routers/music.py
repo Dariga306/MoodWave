@@ -4,7 +4,30 @@ import asyncio
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path as _FsPath
 from typing import Optional
+
+# File-based fallback cache for YouTube video IDs (used when Redis is unavailable)
+_YT_CACHE_FILE = _FsPath(__file__).resolve().parents[2] / "tmp" / "yt_id_cache.json"
+_yt_file_cache: dict[str, str] = {}
+
+def _load_yt_cache() -> None:
+    global _yt_file_cache
+    try:
+        if _YT_CACHE_FILE.exists():
+            _yt_file_cache = json.loads(_YT_CACHE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        _yt_file_cache = {}
+
+def _save_yt_cache(key: str, video_id: str) -> None:
+    _yt_file_cache[key] = video_id
+    try:
+        _YT_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _YT_CACHE_FILE.write_text(json.dumps(_yt_file_cache), encoding="utf-8")
+    except Exception:
+        pass
+
+_load_yt_cache()
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -614,11 +637,17 @@ async def search_tracks(
         return []
 
     normalized = _normalize_query(query)
-    redis = request.app.state.redis
+    redis = getattr(request.app.state, "redis", None) if request is not None else None
     cache_key = f"search:tracks:{normalized}:limit:{limit}"
-    cached = await redis.get(cache_key)
+    cached = None
+    if redis is not None:
+        try:
+            cached = await redis.get(cache_key)
+        except Exception:
+            cached = None
     if cached:
-        await track_search_query(normalized, redis)
+        if redis is not None:
+            await track_search_query(normalized, redis)
         return json.loads(cached)
 
     try:
@@ -639,13 +668,22 @@ async def search_tracks(
             if tracks:
                 break
     except Exception:
-        fallback = await redis.get(cache_key)
+        fallback = None
+        if redis is not None:
+            try:
+                fallback = await redis.get(cache_key)
+            except Exception:
+                fallback = None
         if fallback:
             return json.loads(fallback)
         raise HTTPException(status_code=503, detail="Track search service unavailable")
 
-    await redis.setex(cache_key, TRACK_SEARCH_CACHE_TTL, json.dumps(tracks))
-    await track_search_query(normalized, redis)
+    if redis is not None:
+        try:
+            await redis.setex(cache_key, TRACK_SEARCH_CACHE_TTL, json.dumps(tracks))
+        except Exception:
+            pass
+        await track_search_query(normalized, redis)
     return tracks
 
 
@@ -731,8 +769,8 @@ async def get_recommendations(
 
 @router.get(
     "/{spotify_id}/youtube",
-    summary="Get YouTube video ID for a track",
-    description="Returns the YouTube video ID so the Flutter client can play the full track via YouTube.",
+    summary="Get full audio URL for a track via yt-dlp",
+    description="Downloads audio via yt-dlp and returns a local server URL that just_audio can stream reliably.",
 )
 async def get_youtube_id(
     spotify_id: str,
@@ -741,29 +779,37 @@ async def get_youtube_id(
     request: Request = None,
     current_user: User | None = Depends(get_current_user_optional),
 ):
+    from pathlib import Path as FsPath
     from app.services.youtube_service import search_video_id
 
     redis = request.app.state.redis
     signature = f"{spotify_id}|{title.strip().lower()}|{artist.strip().lower()}"
     cache_suffix = hashlib.md5(signature.encode("utf-8")).hexdigest()
-    cache_key = f"yt_id:{cache_suffix}"
+    vid_cache_key = f"yt_id:{cache_suffix}"
 
+    # 1. Get video ID — try Redis, then file cache, then yt-dlp search
+    video_id: str | None = None
     try:
-        cached = await redis.get(cache_key)
-        if cached:
-            return {"video_id": cached, "track_id": spotify_id}
+        video_id = await redis.get(vid_cache_key)
     except Exception:
         pass
 
-    video_id = await search_video_id(title, artist)
+    if not video_id:
+        video_id = _yt_file_cache.get(cache_suffix)
 
-    if video_id:
-        try:
-            await redis.setex(cache_key, 604800, video_id)  # cache 7 days
-        except Exception:
-            pass
+    if not video_id:
+        video_id = await search_video_id(title, artist)
+        if video_id:
+            try:
+                await redis.setex(vid_cache_key, 604800, video_id)
+            except Exception:
+                pass
+            _save_yt_cache(cache_suffix, video_id)
 
-    return {"video_id": video_id, "track_id": spotify_id}
+    if not video_id:
+        return {"video_id": None, "stream_url": None, "track_id": spotify_id}
+
+    return {"video_id": video_id, "stream_url": None, "track_id": spotify_id}
 
 
 @router.post(

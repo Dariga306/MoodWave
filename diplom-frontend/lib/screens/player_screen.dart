@@ -142,9 +142,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   String? get _currentLyricLine {
     if (_lrcLines.isEmpty) return null;
     if (_lyricsSynced) {
-      if (_currentLyricIdx >= 0 && _currentLyricIdx < _lrcLines.length) {
-        return _lrcLines[_currentLyricIdx].text;
-      }
+      final idx = _currentLyricIdx >= 0 ? _currentLyricIdx : 0;
+      if (idx < _lrcLines.length) return _lrcLines[idx].text;
       return null;
     }
     return _lrcLines.first.text;

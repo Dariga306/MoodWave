@@ -44,10 +44,9 @@ class _MatchTabState extends State<MatchTab> {
           ? _candidates[_currentIndex] as Map<String, dynamic>
           : null;
 
-  int get _remaining =>
-      _candidates.length > _currentIndex + 1
-          ? _candidates.length - _currentIndex - 1
-          : 0;
+  int get _remaining => _candidates.length > _currentIndex + 1
+      ? _candidates.length - _currentIndex - 1
+      : 0;
 
   Future<void> _like() async {
     if (_deciding || _current == null) return;
@@ -82,7 +81,8 @@ class _MatchTabState extends State<MatchTab> {
     });
   }
 
-  Future<void> _showMutualDialog(Map<String, dynamic> candidate, int matchId) async {
+  Future<void> _showMutualDialog(
+      Map<String, dynamic> candidate, int matchId) async {
     final name = candidate['display_name'] ?? candidate['username'] ?? 'User';
     await showDialog<void>(
       context: context,
@@ -90,14 +90,16 @@ class _MatchTabState extends State<MatchTab> {
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Text("It's a match! 🎵",
-            style: GoogleFonts.outfit(fontWeight: FontWeight.w800, color: AppColors.text)),
+            style: GoogleFonts.outfit(
+                fontWeight: FontWeight.w800, color: AppColors.text)),
         content: Text(
             "$name liked you back! You now have a shared music taste.",
             style: GoogleFonts.outfit(color: AppColors.text2)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Later', style: GoogleFonts.outfit(color: AppColors.text3)),
+            child: Text('Later',
+                style: GoogleFonts.outfit(color: AppColors.text3)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -109,13 +111,16 @@ class _MatchTabState extends State<MatchTab> {
                     matchId: matchId,
                     partnerName: name,
                     partnerId: candidate['user_id'] as int? ?? 0,
+                    partnerAvatarUrl:
+                        (candidate['avatar_url'] ?? '').toString(),
                   ),
                 ),
               );
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.purple,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
             child: Text('Chat now',
                 style: GoogleFonts.outfit(
@@ -147,8 +152,10 @@ class _MatchTabState extends State<MatchTab> {
                       children: [
                         Text('Music Match',
                             style: GoogleFonts.outfit(
-                                fontSize: 26, fontWeight: FontWeight.w800,
-                                color: AppColors.text, letterSpacing: -0.02 * 26)),
+                                fontSize: 26,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.text,
+                                letterSpacing: -0.02 * 26)),
                         const SizedBox(height: 2),
                         Text(
                           _loading
@@ -156,14 +163,16 @@ class _MatchTabState extends State<MatchTab> {
                               : _candidates.isEmpty
                                   ? 'No matches right now'
                                   : '$_remaining more waiting',
-                          style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2),
+                          style: GoogleFonts.outfit(
+                              fontSize: 14, color: AppColors.text2),
                         ),
                       ],
                     ),
                     GestureDetector(
                       onTap: _load,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
                         decoration: BoxDecoration(
                           color: AppColors.glass,
                           borderRadius: BorderRadius.circular(12),
@@ -171,11 +180,13 @@ class _MatchTabState extends State<MatchTab> {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.refresh_rounded, size: 16, color: AppColors.text2),
+                            const Icon(Icons.refresh_rounded,
+                                size: 16, color: AppColors.text2),
                             const SizedBox(width: 6),
                             Text('Refresh',
                                 style: GoogleFonts.outfit(
-                                    fontSize: 13, fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
                                     color: AppColors.text2)),
                           ],
                         ),
@@ -185,11 +196,12 @@ class _MatchTabState extends State<MatchTab> {
                 ),
               ),
             ),
-
             if (_loading)
               const Padding(
                 padding: EdgeInsets.all(60),
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight)),
+                child: Center(
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.purpleLight)),
               )
             else if (_current == null)
               Padding(
@@ -199,23 +211,31 @@ class _MatchTabState extends State<MatchTab> {
                     const Text('🎵', style: TextStyle(fontSize: 60)),
                     const SizedBox(height: 16),
                     Text('No matches yet',
-                        style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.text)),
+                        style: GoogleFonts.outfit(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.text)),
                     const SizedBox(height: 8),
-                    Text('Listen to more music to improve your taste vector\nand find people with similar taste.',
+                    Text(
+                        'Listen to more music to improve your taste vector\nand find people with similar taste.',
                         textAlign: TextAlign.center,
-                        style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+                        style: GoogleFonts.outfit(
+                            fontSize: 14, color: AppColors.text2)),
                     const SizedBox(height: 24),
                     GestureDetector(
                       onTap: _load,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 32, vertical: 14),
                         decoration: BoxDecoration(
                           gradient: AppColors.primaryBtn,
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: Text('Try again',
                             style: GoogleFonts.outfit(
-                                fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white)),
                       ),
                     ),
                   ]),
@@ -233,7 +253,8 @@ class _MatchTabState extends State<MatchTab> {
     final name = candidate['display_name'] ?? candidate['username'] ?? 'User';
     final city = candidate['city'] ?? '';
     final similarity = candidate['similarity_pct'] ?? 0;
-    final icebreaker = candidate['icebreaker'] ?? 'You have similar music taste!';
+    final icebreaker =
+        candidate['icebreaker'] ?? 'You have similar music taste!';
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
 
     return Column(
@@ -262,7 +283,11 @@ class _MatchTabState extends State<MatchTab> {
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: [Color(0xFF1a0533), Color(0xFF0d1a3d), Color(0xFF1a0533)],
+                      colors: [
+                        Color(0xFF1a0533),
+                        Color(0xFF0d1a3d),
+                        Color(0xFF1a0533)
+                      ],
                     ),
                     borderRadius: BorderRadius.only(
                       topLeft: Radius.circular(28),
@@ -273,17 +298,21 @@ class _MatchTabState extends State<MatchTab> {
                     children: [
                       if (city.isNotEmpty)
                         Positioned(
-                          top: 16, right: 16,
+                          top: 16,
+                          right: 16,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 5),
                             decoration: BoxDecoration(
                               color: Colors.white.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(100),
-                              border: Border.all(color: Colors.white.withOpacity(0.15)),
+                              border: Border.all(
+                                  color: Colors.white.withOpacity(0.15)),
                             ),
                             child: Row(children: [
                               Container(
-                                width: 6, height: 6,
+                                width: 6,
+                                height: 6,
                                 decoration: const BoxDecoration(
                                   color: Color(0xFF22c55e),
                                   shape: BoxShape.circle,
@@ -292,18 +321,22 @@ class _MatchTabState extends State<MatchTab> {
                               const SizedBox(width: 4),
                               Text(city,
                                   style: GoogleFonts.outfit(
-                                      fontSize: 12, fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
                                       color: Colors.white.withOpacity(0.8))),
                             ]),
                           ),
                         ),
                       Center(
                         child: Container(
-                          width: 90, height: 90,
+                          width: 90,
+                          height: 90,
                           decoration: BoxDecoration(
                             gradient: AppColors.gradMixed,
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white.withOpacity(0.15), width: 3),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.15),
+                                width: 3),
                             boxShadow: [
                               BoxShadow(
                                   color: AppColors.purpleDark.withOpacity(0.4),
@@ -313,7 +346,8 @@ class _MatchTabState extends State<MatchTab> {
                           child: Center(
                             child: Text(initial,
                                 style: GoogleFonts.outfit(
-                                    fontSize: 36, fontWeight: FontWeight.w800,
+                                    fontSize: 36,
+                                    fontWeight: FontWeight.w800,
                                     color: Colors.white)),
                           ),
                         ),
@@ -337,7 +371,8 @@ class _MatchTabState extends State<MatchTab> {
                               children: [
                                 Text(name,
                                     style: GoogleFonts.outfit(
-                                        fontSize: 20, fontWeight: FontWeight.w800,
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w800,
                                         color: AppColors.text)),
                                 if (city.isNotEmpty)
                                   Row(children: [
@@ -346,7 +381,8 @@ class _MatchTabState extends State<MatchTab> {
                                     const SizedBox(width: 4),
                                     Text(city,
                                         style: GoogleFonts.outfit(
-                                            fontSize: 13, color: AppColors.text2)),
+                                            fontSize: 13,
+                                            color: AppColors.text2)),
                                   ]),
                               ],
                             ),
@@ -356,11 +392,14 @@ class _MatchTabState extends State<MatchTab> {
                             children: [
                               ShaderMask(
                                 shaderCallback: (b) => const LinearGradient(
-                                    colors: [AppColors.purpleLight, AppColors.pink])
-                                    .createShader(b),
+                                    colors: [
+                                      AppColors.purpleLight,
+                                      AppColors.pink
+                                    ]).createShader(b),
                                 child: Text('$similarity%',
                                     style: GoogleFonts.outfit(
-                                        fontSize: 20, fontWeight: FontWeight.w800,
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w800,
                                         color: Colors.white)),
                               ),
                               Text('match',
@@ -381,7 +420,8 @@ class _MatchTabState extends State<MatchTab> {
                         ),
                         child: Text(icebreaker,
                             style: GoogleFonts.outfit(
-                                fontSize: 13, height: 1.55,
+                                fontSize: 13,
+                                height: 1.55,
                                 color: AppColors.text2)),
                       ),
                       const SizedBox(height: 16),
@@ -398,7 +438,8 @@ class _MatchTabState extends State<MatchTab> {
                                   borderRadius: BorderRadius.circular(14),
                                   boxShadow: [
                                     BoxShadow(
-                                        color: AppColors.purpleDark.withOpacity(0.35),
+                                        color: AppColors.purpleDark
+                                            .withOpacity(0.35),
                                         blurRadius: 16)
                                   ],
                                 ),
@@ -410,7 +451,8 @@ class _MatchTabState extends State<MatchTab> {
                                     const SizedBox(width: 8),
                                     Text(_deciding ? '...' : 'Like',
                                         style: GoogleFonts.outfit(
-                                            fontSize: 14, fontWeight: FontWeight.w700,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
                                             color: Colors.white)),
                                   ],
                                 ),
@@ -436,7 +478,8 @@ class _MatchTabState extends State<MatchTab> {
                                     const SizedBox(width: 8),
                                     Text('Pass',
                                         style: GoogleFonts.outfit(
-                                            fontSize: 14, fontWeight: FontWeight.w700,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
                                             color: AppColors.text)),
                                   ],
                                 ),
@@ -462,7 +505,8 @@ class _MatchTabState extends State<MatchTab> {
               _swipeHint('✕', false),
               const SizedBox(width: 20),
               Text('Tap to decide',
-                  style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+                  style:
+                      GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
               const SizedBox(width: 20),
               _swipeHint('♥', true),
             ],
@@ -472,7 +516,8 @@ class _MatchTabState extends State<MatchTab> {
         if (_remaining > 0)
           Center(
             child: Text('$_remaining more people waiting...',
-                style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+                style:
+                    GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
           ),
         const SizedBox(height: 16),
       ],
@@ -485,29 +530,35 @@ class _MatchTabState extends State<MatchTab> {
       children: [
         if (!isLike) ...[
           Container(
-            width: 32, height: 32,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
               color: color.withOpacity(0.1),
               shape: BoxShape.circle,
               border: Border.all(color: color.withOpacity(0.2)),
             ),
             child: Center(
-                child: Text(symbol, style: TextStyle(fontSize: 14, color: color))),
+                child:
+                    Text(symbol, style: TextStyle(fontSize: 14, color: color))),
           ),
           const SizedBox(width: 6),
-          Text('Pass', style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+          Text('Pass',
+              style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
         ] else ...[
-          Text('Like', style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+          Text('Like',
+              style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
           const SizedBox(width: 6),
           Container(
-            width: 32, height: 32,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
               color: color.withOpacity(0.1),
               shape: BoxShape.circle,
               border: Border.all(color: color.withOpacity(0.2)),
             ),
             child: Center(
-                child: Text(symbol, style: TextStyle(fontSize: 14, color: color))),
+                child:
+                    Text(symbol, style: TextStyle(fontSize: 14, color: color))),
           ),
         ],
       ],

@@ -31,6 +31,7 @@ class User(Base):
     show_activity: Mapped[bool] = mapped_column(Boolean, default=True)
     show_followers: Mapped[bool] = mapped_column(Boolean, default=True)
     show_recently_played: Mapped[bool] = mapped_column(Boolean, default=True)
+    hide_music_taste: Mapped[bool] = mapped_column(Boolean, default=False)
     notif_settings_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     fcm_token: Mapped[Optional[str]] = mapped_column(Text)
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False)

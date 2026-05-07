@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from collections import defaultdict
@@ -11,15 +12,22 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy import func, or_, select, true
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 from app.dependencies import get_db, get_current_user
+from app.models.chat import Chat
 from app.models.rooms import ListeningRoom, RoomParticipant, RoomParticipantStatus
-from app.models.music import ListeningHistory, TrackCache, Playlist
-from app.models.social import ArtistFollow, Friend, FriendStatus, UserFollow
+from app.models.music import (
+    ListeningHistory,
+    Playlist,
+    PlaylistTrack,
+    PlaylistVisibility,
+    TrackCache,
+)
+from app.models.social import ArtistFollow, Friend, FriendStatus, Match, UserFollow
 from app.models.user import User, UserGenre, UserMood, TasteVector
 from app.schemas.auth import (
     ChangePasswordRequest,
@@ -43,6 +51,7 @@ from app.services.auth import (
     verify_reset_token,
 )
 from app.services import cache as cache_svc
+from app.services import deezer as deezer_service
 from app.services.email_service import (
     send_verification_email, send_reset_email,
     send_account_deletion_email, send_reactivation_email,
@@ -121,6 +130,7 @@ class UpdateProfileRequest(BaseModel):
     show_activity: Optional[bool] = None
     show_followers: Optional[bool] = None
     show_recently_played: Optional[bool] = None
+    hide_music_taste: Optional[bool] = None
 
 
 class FCMTokenRequest(BaseModel):
@@ -273,6 +283,7 @@ async def _parse_profile_update_request(request: Request) -> tuple[dict[str, obj
             "show_activity",
             "show_followers",
             "show_recently_played",
+            "hide_music_taste",
         ):
             value = form.get(key)
             if value is not None:
@@ -285,7 +296,7 @@ async def _parse_profile_update_request(request: Request) -> tuple[dict[str, obj
         if isinstance(banner_candidate, UploadFile) and banner_candidate.filename:
             banner_file = banner_candidate
 
-        for bool_key in ("is_public", "show_activity", "show_followers", "show_recently_played"):
+        for bool_key in ("is_public", "show_activity", "show_followers", "show_recently_played", "hide_music_taste"):
             if bool_key in raw_data:
                 parsed = _coerce_bool(raw_data[bool_key])
                 if parsed is not None:
@@ -337,6 +348,7 @@ def _serialize_user(
         "show_activity": user.show_activity,
         "show_followers": getattr(user, "show_followers", True),
         "show_recently_played": getattr(user, "show_recently_played", True),
+        "hide_music_taste": getattr(user, "hide_music_taste", False),
         "is_verified": user.is_verified,
         "is_active": user.is_active,
         "is_admin": getattr(user, "is_admin", False),
@@ -347,6 +359,70 @@ def _serialize_user(
         "created_at": user.created_at,
         "updated_at": user.updated_at,
     })
+
+
+def _public_profile_payload(
+    user: User,
+    *,
+    genres: list[str],
+    moods: list[str],
+    followers_count: int | None,
+    following_count: int | None,
+) -> dict[str, object]:
+    return {
+        "id": user.id,
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "display_name": user.display_name,
+        "avatar_url": user.avatar_url,
+        "banner_url": getattr(user, "banner_url", None),
+        "bio": user.bio,
+        "birth_date": user.birth_date.isoformat() if user.birth_date else None,
+        "city": user.city,
+        "gender": user.gender,
+        "avatar_preset": getattr(user, "avatar_preset", 0) or 0,
+        "banner_preset": getattr(user, "banner_preset", 0) or 0,
+        "is_public": user.is_public,
+        "show_activity": user.show_activity,
+        "show_followers": getattr(user, "show_followers", True),
+        "show_recently_played": getattr(user, "show_recently_played", True),
+        "hide_music_taste": getattr(user, "hide_music_taste", False),
+        "is_verified": user.is_verified,
+        "is_active": user.is_active,
+        "genres": genres,
+        "moods": moods,
+        "followers_count": followers_count,
+        "following_count": following_count,
+        "created_at": user.created_at.isoformat(),
+        "updated_at": user.updated_at.isoformat(),
+    }
+
+
+async def _followed_artist_profiles(user_id: int, db: AsyncSession) -> list[dict]:
+    rows = (
+        await db.execute(
+            select(ArtistFollow.deezer_artist_id)
+            .where(ArtistFollow.user_id == user_id)
+            .order_by(ArtistFollow.created_at.desc())
+            .limit(5)
+        )
+    ).scalars().all()
+
+    if not rows:
+        return []
+
+    artists = await asyncio.gather(
+        *[deezer_service.get_artist(artist_id) for artist_id in rows],
+        return_exceptions=True,
+    )
+    payload: list[dict] = []
+    for artist_id, artist in zip(rows, artists):
+        if isinstance(artist, dict) and artist:
+            payload.append(artist)
+        else:
+            payload.append({"id": artist_id, "name": f"Artist {artist_id}"})
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -834,15 +910,19 @@ async def save_genres(
 ):
     unique_genres: list[str] = []
     seen: set[str] = set()
+    genre_weights: dict[str, float] = {}
     for item in body.genres:
         value = item if isinstance(item, str) else item.genre
         normalized = _normalize_genre(value)
         if normalized not in seen:
             seen.add(normalized)
             unique_genres.append(normalized)
+        genre_weights[normalized] = (
+            0.5 if isinstance(item, str) else float(item.weight or 0.5)
+        )
 
-    if len(unique_genres) < 3:
-        raise HTTPException(status_code=400, detail="Select at least 3 genres")
+    if len(unique_genres) > 3:
+        raise HTTPException(status_code=400, detail="Select up to 3 genres")
 
     invalid = [genre for genre in unique_genres if genre not in ALLOWED_GENRES]
     if invalid:
@@ -853,19 +933,33 @@ async def save_genres(
     ).scalars().all()
     existing_map = {row.genre.lower(): row for row in existing}
 
+    for row in existing:
+        if row.genre.lower() not in seen:
+            await db.delete(row)
+
     for genre in unique_genres:
         if genre in existing_map:
-            existing_map[genre].weight = 0.5
+            existing_map[genre].weight = genre_weights.get(genre, 0.5)
         else:
-            db.add(UserGenre(user_id=current_user.id, genre=genre, weight=0.5))
+            db.add(
+                UserGenre(
+                    user_id=current_user.id,
+                    genre=genre,
+                    weight=genre_weights.get(genre, 0.5),
+                )
+            )
 
     tv = await db.scalar(select(TasteVector).where(TasteVector.user_id == current_user.id))
     if not tv:
         tv = TasteVector(user_id=current_user.id, vector={})
         db.add(tv)
-    vector = dict(tv.vector or {})
+    vector = {
+        key: value
+        for key, value in dict(tv.vector or {}).items()
+        if not str(key).startswith("genre:")
+    }
     for genre in unique_genres:
-        vector[f"genre:{genre.replace(' ', '_')}"] = 0.5
+        vector[f"genre:{genre.replace(' ', '_')}"] = genre_weights.get(genre, 0.5)
     tv.vector = vector
 
     await db.commit()
@@ -942,6 +1036,43 @@ async def search_users(
             or_(User.username.ilike(f"%{q}%"), User.display_name.ilike(f"%{q}%")),
         )
     )
+    users = result.scalars().all()
+    user_ids = [user.id for user in users]
+    friendship_map: dict[int, tuple[bool, str]] = {}
+    if user_ids:
+        friendships = (
+            await db.execute(
+                select(Friend).where(
+                    or_(
+                        and_(
+                            Friend.requester_id == current_user.id,
+                            Friend.addressee_id.in_(user_ids),
+                        ),
+                        and_(
+                            Friend.addressee_id == current_user.id,
+                            Friend.requester_id.in_(user_ids),
+                        ),
+                    )
+                )
+            )
+        ).scalars().all()
+        for friendship in friendships:
+            other_id = (
+                friendship.addressee_id
+                if friendship.requester_id == current_user.id
+                else friendship.requester_id
+            )
+            status = "none"
+            if friendship.status == FriendStatus.accepted:
+                status = "accepted"
+            elif friendship.requester_id == current_user.id:
+                status = "outgoing_pending"
+            else:
+                status = "incoming_pending"
+            friendship_map[other_id] = (
+                friendship.status == FriendStatus.accepted,
+                status,
+            )
 
     ranked = sorted(
         (
@@ -951,9 +1082,12 @@ async def search_users(
                 "display_name": user.display_name,
                 "avatar_url": user.avatar_url,
                 "city": user.city,
+                "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+                "is_friend": friendship_map.get(user.id, (False, "none"))[0],
+                "friend_request_status": friendship_map.get(user.id, (False, "none"))[1],
                 "score": _score_user_match(q, user),
             }
-            for user in result.scalars().all()
+            for user in users
         ),
         key=lambda item: item["score"],
         reverse=True,
@@ -964,6 +1098,249 @@ async def search_users(
             for item in ranked[:limit]
             if item["score"] > 0
         ]
+    }
+
+
+@router.get(
+    "/users/{user_id}/summary",
+    summary="Get social profile summary",
+    description="Returns a public-facing social profile summary with relationship state, visible playlists, and recent listening when allowed.",
+)
+async def get_user_summary(
+    user_id: int,
+    playlist_limit: int = Query(default=8, ge=1, le=20),
+    tracks_limit: int = Query(default=8, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.id != current_user.id and user.id in await get_blocked_ids_for_user(db, current_user.id):
+        raise HTTPException(status_code=404, detail="User not found")
+
+    is_self = user.id == current_user.id
+    is_friend = is_self or await are_friends(db, current_user.id, user.id)
+    if not is_self and not user.is_public and not is_friend:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    genres_rows = (
+        await db.execute(select(UserGenre.genre).where(UserGenre.user_id == user.id))
+    ).scalars().all()
+    moods_rows = (
+        await db.execute(select(UserMood.mood).where(UserMood.user_id == user.id))
+    ).scalars().all()
+
+    followers_count: int | None = None
+    following_count: int | None = None
+    if is_self or getattr(user, "show_followers", True):
+        followers_count = int(
+            await db.scalar(
+                select(func.count(UserFollow.id)).where(
+                    UserFollow.following_id == user.id
+                )
+            )
+            or 0
+        )
+        following_count = int(
+            await db.scalar(
+                select(func.count(UserFollow.id)).where(
+                    UserFollow.follower_id == user.id
+                )
+            )
+            or 0
+        )
+
+    is_following = False
+    is_followed_by = False
+    if not is_self:
+        is_following = (
+            await db.scalar(
+                select(UserFollow.id).where(
+                    UserFollow.follower_id == current_user.id,
+                    UserFollow.following_id == user.id,
+                )
+            )
+            is not None
+        )
+        is_followed_by = (
+            await db.scalar(
+                select(UserFollow.id).where(
+                    UserFollow.follower_id == user.id,
+                    UserFollow.following_id == current_user.id,
+                )
+            )
+            is not None
+        )
+
+    friendship = None
+    if not is_self:
+        friendship = await db.scalar(
+            select(Friend).where(
+                or_(
+                    and_(
+                        Friend.requester_id == current_user.id,
+                        Friend.addressee_id == user.id,
+                    ),
+                    and_(
+                        Friend.requester_id == user.id,
+                        Friend.addressee_id == current_user.id,
+                    ),
+                )
+            )
+        )
+
+    friend_request_status = "none"
+    if friendship:
+        if friendship.status == FriendStatus.accepted:
+            friend_request_status = "accepted"
+        elif friendship.requester_id == current_user.id:
+            friend_request_status = "outgoing_pending"
+        else:
+            friend_request_status = "incoming_pending"
+
+    match = None
+    direct_chat = None
+    if not is_self:
+        match = await db.scalar(
+            select(Match).where(
+                or_(
+                    and_(Match.user_a_id == current_user.id, Match.user_b_id == user.id),
+                    and_(Match.user_a_id == user.id, Match.user_b_id == current_user.id),
+                )
+            )
+        )
+        direct_chat = await db.scalar(
+            select(Chat).where(
+                Chat.match_id.is_(None),
+                or_(
+                    and_(Chat.user_a_id == current_user.id, Chat.user_b_id == user.id),
+                    and_(Chat.user_a_id == user.id, Chat.user_b_id == current_user.id),
+                ),
+            )
+        )
+
+    playlist_counts = {"public": 0, "friends": 0, "private": 0}
+    playlist_count_rows = (
+        await db.execute(
+            select(Playlist.visibility, func.count(Playlist.id))
+            .where(Playlist.owner_id == user.id)
+            .group_by(Playlist.visibility)
+        )
+    ).all()
+    for visibility, count in playlist_count_rows:
+        key = visibility.value if hasattr(visibility, "value") else str(visibility)
+        playlist_counts[key] = int(count or 0)
+
+    if is_self:
+        playlist_visibility_clause = true()
+    elif is_friend:
+        playlist_visibility_clause = or_(
+            Playlist.visibility == PlaylistVisibility.public,
+            Playlist.visibility == PlaylistVisibility.friends,
+            Playlist.collab_user_id == current_user.id,
+        )
+    else:
+        playlist_visibility_clause = or_(
+            Playlist.visibility == PlaylistVisibility.public,
+            Playlist.collab_user_id == current_user.id,
+        )
+
+    playlist_rows = (
+        await db.execute(
+            select(Playlist, func.count(PlaylistTrack.id))
+            .outerjoin(PlaylistTrack, PlaylistTrack.playlist_id == Playlist.id)
+            .where(Playlist.owner_id == user.id, playlist_visibility_clause)
+            .group_by(Playlist.id)
+            .order_by(Playlist.updated_at.desc(), Playlist.created_at.desc())
+            .limit(playlist_limit)
+        )
+    ).all()
+
+    playlists = [
+        {
+            "id": playlist.id,
+            "owner_id": playlist.owner_id,
+            "title": playlist.title,
+            "description": playlist.description,
+            "cover_url": playlist.cover_url,
+            "visibility": playlist.visibility.value,
+            "is_collaborative": playlist.is_collaborative,
+            "track_count": int(track_count or 0),
+            "created_at": playlist.created_at.isoformat(),
+            "updated_at": playlist.updated_at.isoformat(),
+        }
+        for playlist, track_count in playlist_rows
+    ]
+
+    can_see_recent = is_self or getattr(user, "show_recently_played", True)
+    recent_tracks: list[dict[str, object]] = []
+    if can_see_recent:
+        recent_rows = (
+            await db.execute(
+                select(ListeningHistory, TrackCache)
+                .join(
+                    TrackCache,
+                    TrackCache.spotify_id == ListeningHistory.spotify_track_id,
+                    isouter=True,
+                )
+                .where(ListeningHistory.user_id == user.id)
+                .order_by(ListeningHistory.created_at.desc())
+                .limit(tracks_limit)
+            )
+        ).all()
+
+        recent_tracks = [
+            {
+                "spotify_id": history.spotify_track_id,
+                "title": track.title if track and track.title else "Unknown track",
+                "artist": track.artist if track and track.artist else "",
+                "cover_url": track.cover_url if track else None,
+                "preview_url": track.preview_url if track else None,
+                "played_at": history.created_at.isoformat(),
+                "action": history.action.value,
+            }
+            for history, track in recent_rows
+        ]
+
+    favorite_artists = await _followed_artist_profiles(user.id, db)
+
+    return {
+        "user": _public_profile_payload(
+            user,
+            genres=list(genres_rows),
+            moods=list(moods_rows),
+            followers_count=followers_count,
+            following_count=following_count,
+        ),
+        "relation": {
+            "is_self": is_self,
+            "is_following": is_following,
+            "is_followed_by": is_followed_by,
+            "is_friend": is_friend and not is_self,
+            "friend_request_status": friend_request_status,
+            "can_message": not is_self,
+            "match_id": match.id if match else None,
+            "similarity_pct": match.similarity_pct if match else None,
+            "chat_id": direct_chat.id if direct_chat else None,
+        },
+        "playlist_stats": {
+            **playlist_counts,
+            "visible_count": len(playlists),
+            "hidden_private_count": max(
+                0,
+                playlist_counts["private"]
+                - sum(
+                    1
+                    for item in playlists
+                    if item["visibility"] == PlaylistVisibility.private.value
+                ),
+            ),
+        },
+        "playlists": playlists,
+        "recent_tracks": recent_tracks,
+        "favorite_artists": favorite_artists,
     }
 
 

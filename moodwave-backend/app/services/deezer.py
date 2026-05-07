@@ -62,9 +62,12 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     _fuzz = None
 
+# Simple in-process cache for artist data (avoids Deezer rate-limits on parallel loads)
+_artist_cache: dict[int, dict] = {}
+
 
 async def _get_json(path: str, params: dict | None = None) -> dict:
-    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
         response = await client.get(f"{BASE_URL}{path}", params=params)
         response.raise_for_status()
         return response.json()
@@ -117,16 +120,24 @@ def _score_artist_name(candidate_name: str, query: str) -> int:
 
 
 async def get_artist(deezer_artist_id: int) -> dict | None:
-    data = await _get_json(f"/artist/{deezer_artist_id}")
+    if deezer_artist_id in _artist_cache:
+        return _artist_cache[deezer_artist_id]
+    try:
+        data = await _get_json(f"/artist/{deezer_artist_id}")
+    except Exception:
+        return None
     if not data or data.get("error"):
         return None
-    return {
+    result = {
         "id": data.get("id"),
         "name": data.get("name"),
         "picture_xl": data.get("picture_xl"),
+        "picture_medium": data.get("picture_medium"),
         "nb_fan": data.get("nb_fan", 0),
         "nb_album": data.get("nb_album", 0),
     }
+    _artist_cache[deezer_artist_id] = result
+    return result
 
 
 async def search_artist(query: str) -> dict | None:

@@ -211,4 +211,3 @@ python -m py_compile app\main.py
 - Backend: `127.0.0.1:8000`
 - Flutter Web: `localhost:5001`
 - Admin panel: `localhost:5173`
-- Основной экран Home, Library, Following, Profile, Player и Search поддерживаются текущей backend-логикой.

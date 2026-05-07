@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
+import '../providers/auth_provider.dart';
 import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
@@ -27,6 +28,8 @@ class PlaylistScreen extends StatefulWidget {
 class _PlaylistScreenState extends State<PlaylistScreen> {
   Map<String, dynamic>? _playlist;
   bool _loading = true;
+  bool _savingCopy = false;
+  bool _savedCopy = false;
 
   @override
   void initState() {
@@ -218,6 +221,22 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     }
   }
 
+  Future<void> _saveToLibrary() async {
+    if (_playlist == null || _savingCopy || _savedCopy) return;
+    setState(() => _savingCopy = true);
+    try {
+      await ApiService().savePlaylistToLibrary(_playlist!);
+      if (!mounted) return;
+      setState(() => _savedCopy = true);
+      showSuccessSnackBar(context, 'Playlist saved to your library');
+    } catch (_) {
+      if (!mounted) return;
+      showErrorSnackBar(context, 'Could not save playlist');
+    } finally {
+      if (mounted) setState(() => _savingCopy = false);
+    }
+  }
+
   void _showPlaylistMenu() {
     final title = _playlist?['title']?.toString() ?? 'Playlist';
 
@@ -383,11 +402,14 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final currentUserId = context.watch<AuthProvider>().user?['id'] as int?;
     final tracks = (_playlist?['tracks'] as List?) ?? [];
     final title =
         _playlist?['title']?.toString() ?? widget.playlistTitle ?? 'Playlist';
     final coverUrl = _playlist?['cover_url']?.toString();
     final isCollab = _playlist?['is_collaborative'] == true;
+    final ownerId = (_playlist?['owner_id'] as num?)?.toInt();
+    final isOwner = currentUserId != null && ownerId == currentUserId;
     final trackCount = _playlist?['track_count'] ?? tracks.length;
     final totalDur = _totalDuration(tracks);
 
@@ -434,12 +456,46 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                         size: 18, color: Colors.white),
                                   ),
                                 ),
-                                Text(title,
-                                    style: GoogleFonts.outfit(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppColors.text)),
-                                const SizedBox(width: 40),
+                                Expanded(
+                                  child: Text(title,
+                                      textAlign: TextAlign.center,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.text)),
+                                ),
+                                GestureDetector(
+                                  onTap: isOwner ? null : _saveToLibrary,
+                                  child: Container(
+                                    width: 40,
+                                    height: 40,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.glass,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border:
+                                          Border.all(color: AppColors.border),
+                                    ),
+                                    child: _savingCopy
+                                        ? const Padding(
+                                            padding: EdgeInsets.all(10),
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : Icon(
+                                            _savedCopy || isOwner
+                                                ? Icons.bookmark_rounded
+                                                : Icons.bookmark_border_rounded,
+                                            size: 18,
+                                            color: _savedCopy || isOwner
+                                                ? AppColors.purpleLight
+                                                : Colors.white,
+                                          ),
+                                  ),
+                                ),
                               ],
                             ),
                             const SizedBox(height: 20),

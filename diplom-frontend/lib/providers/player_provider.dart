@@ -51,7 +51,7 @@ class PlayerProvider extends ChangeNotifier {
   bool get usingYoutube => _usingYoutube;
   Stream<Duration> get positionStream => _usingYoutube && _ytController != null
       ? _ytController!.getCurrentPositionStream(
-          period: const Duration(milliseconds: 300),
+          period: const Duration(milliseconds: 200),
         )
       : _player.positionStream;
   double get progress {
@@ -384,7 +384,7 @@ class PlayerProvider extends ChangeNotifier {
         });
 
         _ytPositionSubscription = controller
-            .getCurrentPositionStream(period: const Duration(milliseconds: 500))
+            .getCurrentPositionStream(period: const Duration(milliseconds: 200))
             .listen((position) {
           _position = position;
           notifyListeners();

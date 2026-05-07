@@ -61,20 +61,24 @@ class _FriendsTabState extends State<FriendsTab> {
                     children: [
                       Text('Friends Activity',
                           style: GoogleFonts.outfit(
-                              fontSize: 26, fontWeight: FontWeight.w800,
-                              color: AppColors.text, letterSpacing: -0.02 * 26)),
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.text,
+                              letterSpacing: -0.02 * 26)),
                       const SizedBox(height: 4),
                       Text("See what's playing right now",
-                          style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+                          style: GoogleFonts.outfit(
+                              fontSize: 14, color: AppColors.text2)),
                     ],
                   ),
                 ),
               ),
-
               if (_loading)
                 const Padding(
                   padding: EdgeInsets.all(40),
-                  child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight)),
+                  child: Center(
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.purpleLight)),
                 )
               else if (_live.isEmpty && _recent.isEmpty)
                 Padding(
@@ -84,9 +88,13 @@ class _FriendsTabState extends State<FriendsTab> {
                       const Text('🎵', style: TextStyle(fontSize: 48)),
                       const SizedBox(height: 12),
                       Text('No friends activity yet',
-                          style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.text)),
+                          style: GoogleFonts.outfit(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.text)),
                       Text('Add friends to see what they listen to',
-                          style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3)),
+                          style: GoogleFonts.outfit(
+                              fontSize: 13, color: AppColors.text3)),
                     ]),
                   ),
                 )
@@ -96,7 +104,9 @@ class _FriendsTabState extends State<FriendsTab> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Column(
-                      children: _live.map((f) => _buildLiveCard(f as Map<String, dynamic>)).toList(),
+                      children: _live
+                          .map((f) => _buildLiveCard(f as Map<String, dynamic>))
+                          .toList(),
                     ),
                   ),
                 ],
@@ -104,19 +114,25 @@ class _FriendsTabState extends State<FriendsTab> {
                 // Recently listened
                 if (_recent.isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  SectionHeader(title: 'Recently Listened', action: 'All →',
-                      onAction: () => Navigator.push(context,
-                          MaterialPageRoute(builder: (_) => const RecentHistoryScreen()))),
+                  SectionHeader(
+                      title: 'Recently Listened',
+                      action: 'All →',
+                      onAction: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const RecentHistoryScreen()))),
                   const SizedBox(height: 8),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Column(
-                      children: _recent.map((f) => _buildRecentItem(f as Map<String, dynamic>)).toList(),
+                      children: _recent
+                          .map((f) =>
+                              _buildRecentItem(f as Map<String, dynamic>))
+                          .toList(),
                     ),
                   ),
                 ],
               ],
-
               const SizedBox(height: 16),
             ],
           ),
@@ -150,27 +166,37 @@ class _FriendsTabState extends State<FriendsTab> {
             Stack(
               children: [
                 Container(
-                  width: 52, height: 52,
+                  width: 52,
+                  height: 52,
                   decoration: BoxDecoration(
                     gradient: AppColors.gradMixed,
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white.withOpacity(0.1), width: 2),
+                    border: Border.all(
+                        color: Colors.white.withOpacity(0.1), width: 2),
                   ),
-                  child: Center(child: Text(initial,
-                      style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white))),
+                  child: Center(
+                      child: Text(initial,
+                          style: GoogleFonts.outfit(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white))),
                 ),
                 Positioned(
-                  bottom: -3, right: -3,
+                  bottom: -3,
+                  right: -3,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: AppColors.pink,
                       borderRadius: BorderRadius.circular(100),
                     ),
                     child: Text('LIVE',
                         style: GoogleFonts.outfit(
-                            fontSize: 8, fontWeight: FontWeight.w800,
-                            color: Colors.white, letterSpacing: 0.08)),
+                            fontSize: 8,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: 0.08)),
                   ),
                 ),
               ],
@@ -181,15 +207,24 @@ class _FriendsTabState extends State<FriendsTab> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('$username is listening',
-                      style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text)),
+                      style: GoogleFonts.outfit(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.text)),
                   Text(track,
-                      style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.purpleLight),
+                      style: GoogleFonts.outfit(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.purpleLight),
                       overflow: TextOverflow.ellipsis),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            AnimatedMusicBars(color1: AppColors.purpleLight, color2: AppColors.pink, maxHeight: 24),
+            AnimatedMusicBars(
+                color1: AppColors.purpleLight,
+                color2: AppColors.pink,
+                maxHeight: 24),
           ],
         ),
       ),
@@ -212,22 +247,33 @@ class _FriendsTabState extends State<FriendsTab> {
       child: Row(
         children: [
           Container(
-            width: 46, height: 46,
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
               gradient: AppColors.gradPurple,
               shape: BoxShape.circle,
               border: Border.all(color: AppColors.border, width: 2),
             ),
-            child: Center(child: Text(initial,
-                style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))),
+            child: Center(
+                child: Text(initial,
+                    style: GoogleFonts.outfit(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white))),
           ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(username, style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.text)),
-                Text(trackStr, style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2),
+                Text(username,
+                    style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.text)),
+                Text(trackStr,
+                    style: GoogleFonts.outfit(
+                        fontSize: 13, color: AppColors.text2),
                     overflow: TextOverflow.ellipsis),
               ],
             ),

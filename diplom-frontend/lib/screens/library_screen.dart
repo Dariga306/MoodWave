@@ -38,7 +38,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
       final raw = await ApiService().getPlaylists();
       if (!mounted) return;
       setState(() {
-        _playlists = raw.whereType<Map>()
+        _playlists = raw
+            .whereType<Map>()
             .map((e) => Map<String, dynamic>.from(e))
             .toList();
         _loading = false;
@@ -86,7 +87,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
       final raw = await ApiService().getFollowedArtistsDetails();
       if (!mounted) return;
       setState(() {
-        _artists = raw.whereType<Map>()
+        _artists = raw
+            .whereType<Map>()
             .map((e) => Map<String, dynamic>.from(e))
             .toList();
         _artistsLoaded = true;
@@ -114,10 +116,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
       builder: (_) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
           backgroundColor: AppColors.surface,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Text('New Playlist',
               style: GoogleFonts.outfit(
-                  fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text)),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.text)),
           content: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(
               controller: ctrl,
@@ -132,30 +137,39 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               ),
             ),
             const SizedBox(height: 12),
             Row(children: [
-              Text('Visibility: ', style: GoogleFonts.outfit(color: AppColors.text2, fontSize: 13)),
+              Text('Visibility: ',
+                  style:
+                      GoogleFonts.outfit(color: AppColors.text2, fontSize: 13)),
               GestureDetector(
-                onTap: () => setS(() => visibility = visibility == 'private' ? 'public' : 'private'),
+                onTap: () => setS(() => visibility =
+                    visibility == 'private' ? 'public' : 'private'),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                   decoration: BoxDecoration(
                     color: visibility == 'public'
                         ? AppColors.purple.withOpacity(0.2)
                         : AppColors.glass,
                     borderRadius: BorderRadius.circular(100),
                     border: Border.all(
-                        color: visibility == 'public' ? AppColors.purple : AppColors.border),
+                        color: visibility == 'public'
+                            ? AppColors.purple
+                            : AppColors.border),
                   ),
                   child: Text(
                     visibility == 'public' ? '🌍 Public' : '🔒 Private',
                     style: GoogleFonts.outfit(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: visibility == 'public' ? AppColors.purpleLight : AppColors.text2),
+                        color: visibility == 'public'
+                            ? AppColors.purpleLight
+                            : AppColors.text2),
                   ),
                 ),
               ),
@@ -164,13 +178,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3)),
+              child: Text('Cancel',
+                  style: GoogleFonts.outfit(color: AppColors.text3)),
             ),
             TextButton(
               onPressed: () => Navigator.pop(ctx, true),
               child: Text('Create',
                   style: GoogleFonts.outfit(
-                      color: AppColors.purpleLight, fontWeight: FontWeight.w700)),
+                      color: AppColors.purpleLight,
+                      fontWeight: FontWeight.w700)),
             ),
           ],
         ),
@@ -180,7 +196,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (confirmed != true || ctrl.text.trim().isEmpty) return;
 
     try {
-      await ApiService().createPlaylist(ctrl.text.trim(), visibility: visibility);
+      await ApiService()
+          .createPlaylist(ctrl.text.trim(), visibility: visibility);
       if (mounted) showSuccessSnackBar(context, 'Playlist created!');
       await _load();
     } catch (_) {
@@ -197,18 +214,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Delete Playlist?',
-            style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.text)),
+            style: GoogleFonts.outfit(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text)),
         content: Text('This will permanently delete "${playlist['title']}".',
             style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3)),
+            child: Text('Cancel',
+                style: GoogleFonts.outfit(color: AppColors.text3)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: Text('Delete',
-                style: GoogleFonts.outfit(color: const Color(0xFFef4444), fontWeight: FontWeight.w700)),
+                style: GoogleFonts.outfit(
+                    color: const Color(0xFFef4444),
+                    fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -228,7 +251,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
   List<Map<String, dynamic>> get _filtered {
     switch (_filter) {
       case 1:
-        return _playlists.where((p) => !(p['is_collaborative'] as bool? ?? false)).toList();
+        return _playlists
+            .where((p) => !(p['is_collaborative'] as bool? ?? false))
+            .toList();
       case 2:
         return _albums;
       case 3:
@@ -249,32 +274,44 @@ class _LibraryScreenState extends State<LibraryScreen> {
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
               child: Column(
                 children: [
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    Text('Your Library',
-                        style: GoogleFonts.outfit(
-                            fontSize: 26, fontWeight: FontWeight.w800,
-                            color: AppColors.text, letterSpacing: -0.5)),
-                    Row(children: [
-                      GestureDetector(
-                        onTap: _load,
-                        child: Container(width: 40, height: 40,
-                          decoration: BoxDecoration(color: AppColors.glass,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: AppColors.border)),
-                          child: const Icon(Icons.refresh_rounded, size: 18, color: AppColors.text2)),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: _createPlaylist,
-                        child: Container(width: 40, height: 40,
-                          decoration: BoxDecoration(
-                            gradient: AppColors.gradPurple,
-                            borderRadius: BorderRadius.circular(12),
+                  Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Your Library',
+                            style: GoogleFonts.outfit(
+                                fontSize: 26,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.text,
+                                letterSpacing: -0.5)),
+                        Row(children: [
+                          GestureDetector(
+                            onTap: _load,
+                            child: Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                    color: AppColors.glass,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border:
+                                        Border.all(color: AppColors.border)),
+                                child: const Icon(Icons.refresh_rounded,
+                                    size: 18, color: AppColors.text2)),
                           ),
-                          child: const Icon(Icons.add_rounded, color: Colors.white, size: 20)),
-                      ),
-                    ]),
-                  ]),
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: _createPlaylist,
+                            child: Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  gradient: AppColors.gradPurple,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(Icons.add_rounded,
+                                    color: Colors.white, size: 20)),
+                          ),
+                        ]),
+                      ]),
                   const SizedBox(height: 14),
                   SizedBox(
                     height: 34,
@@ -285,18 +322,25 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         onTap: () => _onFilterChanged(i),
                         child: Container(
                           margin: const EdgeInsets.only(right: 8),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 6),
                           decoration: BoxDecoration(
-                            gradient: _filter == i ? AppColors.gradPurple : null,
+                            gradient:
+                                _filter == i ? AppColors.gradPurple : null,
                             color: _filter == i ? null : AppColors.glass,
                             borderRadius: BorderRadius.circular(100),
                             border: Border.all(
-                                color: _filter == i ? AppColors.purple : AppColors.border),
+                                color: _filter == i
+                                    ? AppColors.purple
+                                    : AppColors.border),
                           ),
                           child: Text(_filters[i],
                               style: GoogleFonts.outfit(
-                                  fontSize: 13, fontWeight: FontWeight.w600,
-                                  color: _filter == i ? Colors.white : AppColors.text2)),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: _filter == i
+                                      ? Colors.white
+                                      : AppColors.text2)),
                         ),
                       ),
                     ),
@@ -306,8 +350,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
             Expanded(
               child: _loading
-                  ? const Center(child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.purpleLight))
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.purpleLight))
                   : RefreshIndicator(
                       onRefresh: _load,
                       color: AppColors.purpleLight,
@@ -320,8 +365,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           SliverToBoxAdapter(
                             child: _LibItem(
                               emoji: '❤️',
-                              gradient: const LinearGradient(
-                                  colors: [Color(0xFF6D28D9), Color(0xFFDB2777)]),
+                              gradient: const LinearGradient(colors: [
+                                Color(0xFF6D28D9),
+                                Color(0xFFDB2777)
+                              ]),
                               name: 'Liked Songs',
                               meta: 'Your favourites',
                               badge: const _Badge('Saved', AppColors.pink),
@@ -337,11 +384,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           ),
 
                           // Section label
-                          SliverToBoxAdapter(child: _SepLabel(
-                            _filter == 0 ? (_playlists.isEmpty ? 'No playlists yet' : 'My Playlists')
-                            : _filter == 1 ? (_playlists.isEmpty ? 'No playlists yet' : 'My Playlists')
-                            : _filter == 2 ? 'Albums from Liked Songs'
-                            : 'Followed Artists',
+                          SliverToBoxAdapter(
+                              child: _SepLabel(
+                            _filter == 0
+                                ? (_playlists.isEmpty
+                                    ? 'No playlists yet'
+                                    : 'My Playlists')
+                                : _filter == 1
+                                    ? (_playlists.isEmpty
+                                        ? 'No playlists yet'
+                                        : 'My Playlists')
+                                    : _filter == 2
+                                        ? 'Albums from Liked Songs'
+                                        : 'Followed Artists',
                           )),
 
                           // Empty state
@@ -349,26 +404,38 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             SliverFillRemaining(
                               hasScrollBody: false,
                               child: Center(
-                                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                                  Text(
-                                    _filter == 2 ? '💿' : _filter == 3 ? '🎤' : '🎵',
-                                    style: const TextStyle(fontSize: 40),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    _filter == 2 ? 'No saved albums yet'
-                                    : _filter == 3 ? 'No followed artists yet'
-                                    : 'No playlists yet',
-                                    style: GoogleFonts.outfit(
-                                        fontSize: 16, color: AppColors.text2)),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    _filter == 2 ? 'Like tracks to see their albums here'
-                                    : _filter == 3 ? 'Follow artists to see them here'
-                                    : 'Tap + to create one',
-                                    style: GoogleFonts.outfit(
-                                        fontSize: 13, color: AppColors.text3)),
-                                ]),
+                                child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        _filter == 2
+                                            ? '💿'
+                                            : _filter == 3
+                                                ? '🎤'
+                                                : '🎵',
+                                        style: const TextStyle(fontSize: 40),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Text(
+                                          _filter == 2
+                                              ? 'No saved albums yet'
+                                              : _filter == 3
+                                                  ? 'No followed artists yet'
+                                                  : 'No playlists yet',
+                                          style: GoogleFonts.outfit(
+                                              fontSize: 16,
+                                              color: AppColors.text2)),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                          _filter == 2
+                                              ? 'Like tracks to see their albums here'
+                                              : _filter == 3
+                                                  ? 'Follow artists to see them here'
+                                                  : 'Tap + to create one',
+                                          style: GoogleFonts.outfit(
+                                              fontSize: 13,
+                                              color: AppColors.text3)),
+                                    ]),
                               ),
                             ),
 
@@ -378,9 +445,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               delegate: SliverChildBuilderDelegate(
                                 (ctx, i) {
                                   final pl = _filtered[i];
-                                  final trackCount = pl['track_count'] as int? ?? 0;
-                                  final isCollab = pl['is_collaborative'] as bool? ?? false;
-                                  final visibility = pl['visibility'] as String? ?? 'private';
+                                  final trackCount =
+                                      pl['track_count'] as int? ?? 0;
+                                  final isCollab =
+                                      pl['is_collaborative'] as bool? ?? false;
+                                  final visibility =
+                                      pl['visibility'] as String? ?? 'private';
                                   final coverUrl = pl['cover_url'] as String?;
 
                                   return Dismissible(
@@ -389,8 +459,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                     background: Container(
                                       alignment: Alignment.centerRight,
                                       padding: const EdgeInsets.only(right: 20),
-                                      color: const Color(0xFFef4444).withOpacity(0.8),
-                                      child: const Icon(Icons.delete_outline_rounded,
+                                      color: const Color(0xFFef4444)
+                                          .withOpacity(0.8),
+                                      child: const Icon(
+                                          Icons.delete_outline_rounded,
                                           color: Colors.white),
                                     ),
                                     confirmDismiss: (_) async {
@@ -401,23 +473,29 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                       coverUrl: coverUrl,
                                       emoji: isCollab ? '🤝' : '🎵',
                                       gradient: AppColors.gradMixed,
-                                      name: pl['title'] as String? ?? 'Playlist',
+                                      name:
+                                          pl['title'] as String? ?? 'Playlist',
                                       meta: [
                                         'Playlist',
                                         '$trackCount songs',
                                         if (isCollab) 'Collab',
                                       ].join(' · '),
                                       badge: isCollab
-                                          ? const _Badge('Collab', AppColors.blue)
+                                          ? const _Badge(
+                                              'Collab', AppColors.blue)
                                           : visibility == 'public'
-                                              ? const _Badge('Public', AppColors.green)
+                                              ? const _Badge(
+                                                  'Public', AppColors.green)
                                               : null,
                                       onTap: () {
                                         final id = pl['id'] as int?;
                                         if (id != null) {
-                                          Navigator.push(ctx, MaterialPageRoute(
-                                            builder: (_) => PlaylistScreen(playlistId: id),
-                                          ));
+                                          Navigator.push(
+                                              ctx,
+                                              MaterialPageRoute(
+                                                builder: (_) => PlaylistScreen(
+                                                    playlistId: id),
+                                              ));
                                         }
                                       },
                                     ),
@@ -433,20 +511,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               delegate: SliverChildBuilderDelegate(
                                 (ctx, i) {
                                   final album = _albums[i];
-                                  final albumName = album['album'] as String? ?? 'Unknown Album';
-                                  final artist = album['artist'] as String? ?? '';
+                                  final albumName = album['album'] as String? ??
+                                      'Unknown Album';
+                                  final artist =
+                                      album['artist'] as String? ?? '';
                                   final cover = album['cover_url'] as String?;
-                                  final count = album['track_count'] as int? ?? 0;
+                                  final count =
+                                      album['track_count'] as int? ?? 0;
                                   return _LibItem(
                                     coverUrl: cover,
                                     emoji: '💿',
                                     gradient: AppColors.gradBlue,
                                     name: albumName,
-                                    meta: 'Album · $artist · $count liked ${count == 1 ? 'track' : 'tracks'}',
+                                    meta:
+                                        'Album · $artist · $count liked ${count == 1 ? 'track' : 'tracks'}',
                                     onTap: () {
-                                      Navigator.push(ctx, MaterialPageRoute(
-                                        builder: (_) => const LikedSongsScreen(),
-                                      ));
+                                      Navigator.push(
+                                          ctx,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const LikedSongsScreen(),
+                                          ));
                                     },
                                   );
                                 },
@@ -460,9 +545,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               delegate: SliverChildBuilderDelegate(
                                 (ctx, i) {
                                   final artist = _artists[i];
-                                  final name = (artist['name'] ?? 'Unknown Artist').toString();
-                                  final picture = artist['picture_medium']?.toString()
-                                      ?? artist['picture']?.toString();
+                                  final name =
+                                      (artist['name'] ?? 'Unknown Artist')
+                                          .toString();
+                                  final picture =
+                                      artist['picture_medium']?.toString() ??
+                                          artist['picture']?.toString();
                                   final fans = artist['nb_fan'] as int?;
                                   final artistId = artist['id'];
                                   return _LibItem(
@@ -475,12 +563,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                         : 'Artist',
                                     onTap: () {
                                       if (artistId != null) {
-                                        Navigator.push(ctx, MaterialPageRoute(
-                                          builder: (_) => ArtistScreen(
-                                            artistId: artistId.toString(),
-                                            artistName: name,
-                                          ),
-                                        ));
+                                        Navigator.push(
+                                            ctx,
+                                            MaterialPageRoute(
+                                              builder: (_) => ArtistScreen(
+                                                artistId: artistId.toString(),
+                                                artistName: name,
+                                              ),
+                                            ));
                                       }
                                     },
                                   );
@@ -506,12 +596,14 @@ class _SepLabel extends StatelessWidget {
   const _SepLabel(this.label);
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-    child: Text(label.toUpperCase(),
-        style: GoogleFonts.outfit(
-            fontSize: 11, fontWeight: FontWeight.w700,
-            color: AppColors.text3, letterSpacing: 0.1)),
-  );
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+        child: Text(label.toUpperCase(),
+            style: GoogleFonts.outfit(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: AppColors.text3,
+                letterSpacing: 0.1)),
+      );
 }
 
 class _Badge {
@@ -544,7 +636,8 @@ class _LibItem extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         child: Row(children: [
           Container(
-            width: 54, height: 54,
+            width: 54,
+            height: 54,
             decoration: BoxDecoration(
               gradient: gradient,
               borderRadius: BorderRadius.circular(12),
@@ -556,23 +649,31 @@ class _LibItem extends StatelessWidget {
                       imageUrl: coverUrl!,
                       fit: BoxFit.cover,
                       placeholder: (_, __) => const SizedBox(),
-                      errorWidget: (_, __, ___) =>
-                          Center(child: Text(emoji, style: const TextStyle(fontSize: 22))),
+                      errorWidget: (_, __, ___) => Center(
+                          child: Text(emoji,
+                              style: const TextStyle(fontSize: 22))),
                     ),
                   )
-                : Center(child: Text(emoji, style: const TextStyle(fontSize: 22))),
+                : Center(
+                    child: Text(emoji, style: const TextStyle(fontSize: 22))),
           ),
           const SizedBox(width: 14),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(name,
-                style: GoogleFonts.outfit(
-                    fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.text),
-                overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 3),
-            Text(meta,
-                style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text2),
-                overflow: TextOverflow.ellipsis),
-          ])),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(name,
+                    style: GoogleFonts.outfit(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text),
+                    overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 3),
+                Text(meta,
+                    style: GoogleFonts.outfit(
+                        fontSize: 12, color: AppColors.text2),
+                    overflow: TextOverflow.ellipsis),
+              ])),
           if (badge != null) ...[
             const SizedBox(width: 8),
             Container(
@@ -584,7 +685,9 @@ class _LibItem extends StatelessWidget {
               ),
               child: Text(badge!.label,
                   style: GoogleFonts.outfit(
-                      fontSize: 10, fontWeight: FontWeight.w700, color: badge!.color)),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: badge!.color)),
             ),
           ],
         ]),
