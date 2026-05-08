@@ -76,13 +76,36 @@ async def _get_json(path: str, params: dict | None = None) -> dict:
 def _map_track(item: dict, rank: int) -> dict:
     album = item.get("album") or {}
     artist = item.get("artist") or {}
+    contributors = item.get("contributors") or []
+    artists = []
+    seen_artist_ids = set()
+    for contributor in contributors:
+        artist_id = contributor.get("id")
+        artist_name = contributor.get("name", "")
+        dedupe_key = artist_id or artist_name
+        if not dedupe_key or dedupe_key in seen_artist_ids:
+            continue
+        seen_artist_ids.add(dedupe_key)
+        artists.append({
+            "id": artist_id,
+            "name": artist_name,
+        })
+    if not artists and artist.get("name"):
+        artists.append({
+            "id": artist.get("id"),
+            "name": artist.get("name", ""),
+        })
     return {
         "spotify_id": str(item.get("id", "")),
         "deezer_id": str(item.get("id", "")),
         "artist_id": artist.get("id"),
+        "artist_ids": [entry["id"] for entry in artists if entry.get("id")],
         "album_id": album.get("id"),
         "title": item.get("title", ""),
-        "artist": artist.get("name", ""),
+        "artist": ", ".join(
+            [entry.get("name", "").strip() for entry in artists if entry.get("name")]
+        ) or artist.get("name", ""),
+        "artists": artists,
         "album": album.get("title"),
         "cover_url": album.get("cover_xl")
         or album.get("cover_big")

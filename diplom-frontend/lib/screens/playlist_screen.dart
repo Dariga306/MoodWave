@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../providers/auth_provider.dart';
 import '../providers/player_provider.dart';
@@ -14,6 +16,7 @@ import '../utils/show_snackbar.dart';
 import '../widgets/common_widgets.dart';
 import 'create_playlist_screen.dart';
 import 'player_screen.dart';
+import 'user_profile_screen.dart';
 
 class PlaylistScreen extends StatefulWidget {
   final int? playlistId;
@@ -30,6 +33,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   bool _loading = true;
   bool _savingCopy = false;
   bool _savedCopy = false;
+  static const _savedPlaylistOriginsKey = 'saved_playlist_origins';
 
   @override
   void initState() {
@@ -45,14 +49,68 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     try {
       final data = await ApiService().getPlaylist(widget.playlistId!);
       if (!mounted) return;
+      final enriched = await _mergeSavedOriginMetadata(data);
+      if (!mounted) return;
       setState(() {
-        _playlist = data;
+        _playlist = enriched;
         _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
     }
+  }
+
+  Future<Map<String, dynamic>> _mergeSavedOriginMetadata(
+    Map<String, dynamic> playlist,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_savedPlaylistOriginsKey);
+    if (raw == null || raw.isEmpty) {
+      return Map<String, dynamic>.from(playlist);
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return Map<String, dynamic>.from(playlist);
+      final meta = decoded[(playlist['id'] ?? '').toString()];
+      if (meta is! Map) return Map<String, dynamic>.from(playlist);
+      final merged = Map<String, dynamic>.from(playlist);
+      for (final entry in Map<String, dynamic>.from(meta).entries) {
+        final current = merged[entry.key];
+        if (current == null || (current is String && current.isEmpty)) {
+          merged[entry.key] = entry.value;
+        }
+      }
+      return merged;
+    } catch (_) {
+      return Map<String, dynamic>.from(playlist);
+    }
+  }
+
+  Future<void> _persistSavedOriginMetadata(int newPlaylistId) async {
+    if (_playlist == null) return;
+    final ownerId = (_playlist?['owner_id'] as num?)?.toInt();
+    if (ownerId == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_savedPlaylistOriginsKey);
+    final map = <String, dynamic>{};
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          map.addAll(decoded.map(
+            (key, value) => MapEntry(key.toString(), value),
+          ));
+        }
+      } catch (_) {}
+    }
+    map[newPlaylistId.toString()] = {
+      'saved_from_owner_id': ownerId,
+      'saved_from_username': _playlist?['owner_username'],
+      'saved_from_display_name': _playlist?['owner_display_name'],
+      'saved_from_avatar_url': _playlist?['owner_avatar_url'],
+    };
+    await prefs.setString(_savedPlaylistOriginsKey, jsonEncode(map));
   }
 
   String _fmt(dynamic ms) {
@@ -225,7 +283,11 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     if (_playlist == null || _savingCopy || _savedCopy) return;
     setState(() => _savingCopy = true);
     try {
-      await ApiService().savePlaylistToLibrary(_playlist!);
+      final created = await ApiService().savePlaylistToLibrary(_playlist!);
+      final newId = (created['id'] as num?)?.toInt();
+      if (newId != null) {
+        await _persistSavedOriginMetadata(newId);
+      }
       if (!mounted) return;
       setState(() => _savedCopy = true);
       showSuccessSnackBar(context, 'Playlist saved to your library');
@@ -237,8 +299,49 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     }
   }
 
+  Future<void> _removeFromLibrary() async {
+    if (_playlist == null || _savingCopy != false) return;
+    final savedCopyId = (_playlist?['saved_copy_id'] as num?)?.toInt();
+    if (savedCopyId == null) return;
+    setState(() => _savingCopy = true);
+    try {
+      await ApiService().deletePlaylist(savedCopyId);
+      if (!mounted) return;
+      setState(() {
+        _playlist = {
+          ...?_playlist,
+          'is_saved_by_me': false,
+          'saved_copy_id': null,
+          'saved_count':
+              (((_playlist?['saved_count'] as num?)?.toInt() ?? 1) - 1)
+                  .clamp(0, 999999),
+        };
+        _savedCopy = false;
+      });
+      showSuccessSnackBar(context, 'Removed from your library');
+    } catch (_) {
+      if (!mounted) return;
+      showErrorSnackBar(context, 'Could not remove playlist');
+    } finally {
+      if (mounted) setState(() => _savingCopy = false);
+    }
+  }
+
   void _showPlaylistMenu() {
     final title = _playlist?['title']?.toString() ?? 'Playlist';
+    final currentUserId = context.read<AuthProvider>().user?['id'] as int?;
+    final ownerId = (_playlist?['owner_id'] as num?)?.toInt();
+    final sourceOwnerId =
+        ((_playlist?['saved_from_owner_id'] ?? _playlist?['owner_id']) as num?)
+            ?.toInt();
+    final isSavedCopyOfOther = ownerId != null &&
+        sourceOwnerId != null &&
+        ownerId == currentUserId &&
+        sourceOwnerId != ownerId;
+    final canManage = currentUserId != null &&
+        ownerId == currentUserId &&
+        !isSavedCopyOfOther;
+    final isSavedByMe = _playlist?['is_saved_by_me'] == true || _savedCopy;
 
     Widget item(IconData icon, String label, VoidCallback onTap,
         {Color? color}) {
@@ -290,20 +393,42 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               final trackList = (_playlist?['tracks'] as List?) ?? [];
               _shufflePlay(trackList);
             }),
-            item(Icons.add_rounded, 'Add tracks', () {
-              Navigator.pop(ctx);
-              _addTracksDialog();
-            }),
-            item(Icons.edit_rounded, 'Edit playlist', () {
-              Navigator.pop(ctx);
-              if (_playlist == null) return;
-              Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        CreatePlaylistScreen(existingPlaylist: _playlist),
-                  )).then((_) => _load());
-            }),
+            if (!canManage)
+              item(
+                isSavedByMe
+                    ? Icons.bookmark_remove_rounded
+                    : Icons.bookmark_border_rounded,
+                isSavedByMe ? 'Remove from library' : 'Save to library',
+                () {
+                  Navigator.pop(ctx);
+                  if (isSavedByMe) {
+                    _removeFromLibrary();
+                  } else {
+                    _saveToLibrary();
+                  }
+                },
+              ),
+            if (canManage)
+              item(Icons.add_rounded, 'Add tracks', () {
+                Navigator.pop(ctx);
+                _addTracksDialog();
+              }),
+            if (canManage)
+              item(Icons.edit_note_rounded, 'Edit description', () {
+                Navigator.pop(ctx);
+                _editDescriptionDialog();
+              }),
+            if (canManage)
+              item(Icons.edit_rounded, 'Edit playlist', () {
+                Navigator.pop(ctx);
+                if (_playlist == null) return;
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          CreatePlaylistScreen(existingPlaylist: _playlist),
+                    )).then((_) => _load());
+              }),
             item(Icons.share_outlined, 'Share', () {
               Navigator.pop(ctx);
               Clipboard.setData(ClipboardData(
@@ -313,10 +438,36 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                 duration: Duration(seconds: 2),
               ));
             }),
-            item(Icons.delete_outline_rounded, 'Delete', () {
-              Navigator.pop(ctx);
-              _deletePlaylistAndPop();
-            }, color: const Color(0xFFef4444)),
+            if (!canManage && _playlist != null)
+              item(Icons.person_outline_rounded, 'View profile', () {
+                Navigator.pop(ctx);
+                final profileOwnerId = ((_playlist?['saved_from_owner_id'] ??
+                        _playlist?['owner_id']) as num?)
+                    ?.toInt();
+                if (profileOwnerId == null) return;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => UserProfileScreen(
+                      userId: profileOwnerId,
+                      initialUser: {
+                        'id': profileOwnerId,
+                        'username': _playlist?['saved_from_username'] ??
+                            _playlist?['owner_username'],
+                        'display_name': _playlist?['saved_from_display_name'] ??
+                            _playlist?['owner_display_name'],
+                        'avatar_url': _playlist?['saved_from_avatar_url'] ??
+                            _playlist?['owner_avatar_url'],
+                      },
+                    ),
+                  ),
+                );
+              }),
+            if (canManage)
+              item(Icons.delete_outline_rounded, 'Delete', () {
+                Navigator.pop(ctx);
+                _deletePlaylistAndPop();
+              }, color: const Color(0xFFef4444)),
             const SizedBox(height: 8),
           ],
         ),
@@ -409,7 +560,18 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     final coverUrl = _playlist?['cover_url']?.toString();
     final isCollab = _playlist?['is_collaborative'] == true;
     final ownerId = (_playlist?['owner_id'] as num?)?.toInt();
-    final isOwner = currentUserId != null && ownerId == currentUserId;
+    final sourceOwnerId =
+        ((_playlist?['saved_from_owner_id'] ?? _playlist?['owner_id']) as num?)
+            ?.toInt();
+    final isSavedCopyOfOther = ownerId != null &&
+        sourceOwnerId != null &&
+        ownerId == currentUserId &&
+        sourceOwnerId != ownerId;
+    final canManage = currentUserId != null &&
+        ownerId == currentUserId &&
+        !isSavedCopyOfOther;
+    final isSavedByMe = _playlist?['is_saved_by_me'] == true || _savedCopy;
+    final savedCount = (_playlist?['saved_count'] as num?)?.toInt() ?? 0;
     final trackCount = _playlist?['track_count'] ?? tracks.length;
     final totalDur = _totalDuration(tracks);
 
@@ -466,36 +628,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                           fontWeight: FontWeight.w700,
                                           color: AppColors.text)),
                                 ),
-                                GestureDetector(
-                                  onTap: isOwner ? null : _saveToLibrary,
-                                  child: Container(
-                                    width: 40,
-                                    height: 40,
-                                    decoration: BoxDecoration(
-                                      color: AppColors.glass,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border:
-                                          Border.all(color: AppColors.border),
-                                    ),
-                                    child: _savingCopy
-                                        ? const Padding(
-                                            padding: EdgeInsets.all(10),
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Colors.white,
-                                            ),
-                                          )
-                                        : Icon(
-                                            _savedCopy || isOwner
-                                                ? Icons.bookmark_rounded
-                                                : Icons.bookmark_border_rounded,
-                                            size: 18,
-                                            color: _savedCopy || isOwner
-                                                ? AppColors.purpleLight
-                                                : Colors.white,
-                                          ),
-                                  ),
-                                ),
+                                const SizedBox(width: 40, height: 40),
                               ],
                             ),
                             const SizedBox(height: 20),
@@ -596,6 +729,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                       Text(
                                         [
                                           '$trackCount songs',
+                                          if (savedCount > 0)
+                                            '$savedCount saved',
                                           if (totalDur.isNotEmpty) totalDur,
                                         ].join(' · '),
                                         style: GoogleFonts.outfit(
@@ -607,6 +742,32 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                 ),
                               ],
                             ),
+                            const SizedBox(height: 12),
+                            // Owner row (only for non-owners)
+                            if ((!canManage || isSavedCopyOfOther) &&
+                                _playlist != null)
+                              _PlaylistOwnerRow(playlist: _playlist!),
+                            // Description
+                            Builder(builder: (_) {
+                              final desc =
+                                  _playlist?['description']?.toString() ?? '';
+                              if (desc.isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+                              return Padding(
+                                padding:
+                                    const EdgeInsets.only(top: 6, bottom: 2),
+                                child: Text(
+                                  desc,
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 13,
+                                      color: AppColors.text2,
+                                      height: 1.45),
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              );
+                            }),
                             const SizedBox(height: 16),
                             // Controls
                             Row(children: [
@@ -648,7 +809,9 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                       ? null
                                       : () => _playAll(tracks),
                                   child: Container(
-                                    padding: const EdgeInsets.all(16),
+                                    height: 52,
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 18),
                                     decoration: BoxDecoration(
                                       gradient: tracks.isEmpty
                                           ? null
@@ -674,11 +837,11 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                             color: tracks.isEmpty
                                                 ? AppColors.text3
                                                 : Colors.white,
-                                            size: 18),
-                                        const SizedBox(width: 8),
+                                            size: 16),
+                                        const SizedBox(width: 6),
                                         Text('Play All',
                                             style: GoogleFonts.outfit(
-                                                fontSize: 16,
+                                                fontSize: 15,
                                                 fontWeight: FontWeight.w700,
                                                 color: tracks.isEmpty
                                                     ? AppColors.text3
@@ -689,6 +852,49 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                 ),
                               ),
                               const SizedBox(width: 12),
+                              if (!canManage) ...[
+                                GestureDetector(
+                                  onTap: _savingCopy
+                                      ? null
+                                      : (isSavedByMe
+                                          ? _removeFromLibrary
+                                          : _saveToLibrary),
+                                  child: Container(
+                                    width: 52,
+                                    height: 52,
+                                    decoration: BoxDecoration(
+                                      color: isSavedByMe
+                                          ? AppColors.purpleLight
+                                              .withOpacity(0.18)
+                                          : AppColors.glass,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: isSavedByMe
+                                            ? AppColors.purpleLight
+                                            : AppColors.border,
+                                      ),
+                                    ),
+                                    child: _savingCopy
+                                        ? const Padding(
+                                            padding: EdgeInsets.all(14),
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : Icon(
+                                            isSavedByMe
+                                                ? Icons.bookmark_rounded
+                                                : Icons.bookmark_border_rounded,
+                                            size: 20,
+                                            color: isSavedByMe
+                                                ? AppColors.purpleLight
+                                                : AppColors.text2,
+                                          ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                              ],
                               GestureDetector(
                                 onTap: _showPlaylistMenu,
                                 child: Container(
@@ -841,6 +1047,102 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                 const SliverToBoxAdapter(child: SizedBox(height: 80)),
               ],
             ),
+    );
+  }
+}
+
+class _PlaylistOwnerRow extends StatelessWidget {
+  final Map<String, dynamic> playlist;
+  const _PlaylistOwnerRow({required this.playlist});
+
+  @override
+  Widget build(BuildContext context) {
+    final ownerId = (playlist['saved_from_owner_id'] as num?)?.toInt() ??
+        (playlist['owner_id'] as num?)?.toInt();
+    final displayName = playlist['saved_from_display_name']?.toString() ??
+        playlist['owner_display_name']?.toString() ??
+        playlist['saved_from_username']?.toString() ??
+        playlist['owner_username']?.toString() ??
+        'Unknown';
+    final avatarUrl = playlist['saved_from_avatar_url']?.toString() ??
+        playlist['owner_avatar_url']?.toString() ??
+        '';
+    final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U';
+
+    return GestureDetector(
+      onTap: ownerId == null
+          ? null
+          : () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => UserProfileScreen(
+                    userId: ownerId,
+                    initialUser: {
+                      'id': ownerId,
+                      'username': playlist['saved_from_username'] ??
+                          playlist['owner_username'],
+                      'display_name': playlist['saved_from_display_name'] ??
+                          playlist['owner_display_name'],
+                      'avatar_url': playlist['saved_from_avatar_url'] ??
+                          playlist['owner_avatar_url'],
+                    },
+                  ),
+                ),
+              ),
+      child: Row(
+        children: [
+          Container(
+            width: 26,
+            height: 26,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: AppColors.gradMixed,
+            ),
+            child: avatarUrl.isNotEmpty
+                ? ClipOval(
+                    child: CachedNetworkImage(
+                      imageUrl: avatarUrl,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) => Center(
+                        child: Text(
+                          initial,
+                          style: GoogleFonts.outfit(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : Center(
+                    child: Text(
+                      initial,
+                      style: GoogleFonts.outfit(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            displayName,
+            style: GoogleFonts.outfit(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: AppColors.text2,
+            ),
+          ),
+          const SizedBox(width: 4),
+          const Icon(
+            Icons.chevron_right_rounded,
+            size: 14,
+            color: AppColors.text3,
+          ),
+        ],
+      ),
     );
   }
 }

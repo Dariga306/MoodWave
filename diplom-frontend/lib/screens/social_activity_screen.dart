@@ -461,7 +461,9 @@ String _subtitle(Map<String, dynamic> friend) {
 String _relTime(String? iso) {
   if (iso == null || iso.isEmpty) return '';
   try {
-    final dt = DateTime.parse(iso).toLocal();
+    final normalized =
+        (iso.endsWith('Z') || iso.contains('+')) ? iso : '${iso}Z';
+    final dt = DateTime.parse(normalized).toLocal();
     final diff = DateTime.now().difference(dt);
     if (diff.inMinutes < 1) return 'now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m';

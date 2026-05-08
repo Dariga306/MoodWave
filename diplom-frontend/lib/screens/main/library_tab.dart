@@ -1,8 +1,11 @@
+import 'dart:convert';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
@@ -13,6 +16,7 @@ import '../create_playlist_screen.dart';
 import '../liked_songs_screen.dart';
 import '../playlist_screen.dart';
 import '../profile_tab_screen.dart';
+import '../user_profile_screen.dart';
 
 class LibraryTab extends StatefulWidget {
   const LibraryTab({super.key});
@@ -21,6 +25,10 @@ class LibraryTab extends StatefulWidget {
 }
 
 class _LibraryTabState extends State<LibraryTab> {
+  static const _legacyPinnedPlaylistsKey = 'pinned_playlist_ids';
+  static const _pinnedLibraryItemsKey = 'pinned_library_item_keys';
+  static const _recentLibraryItemsKey = 'recent_library_item_timestamps';
+  static const _savedPlaylistOriginsKey = 'saved_playlist_origins';
   int _filter = 0; // 0=All, 1=Playlists, 2=Albums, 3=Artists
   int _playlistSubFilter = 0; // 0=All, 1=My, 2=Platform
   bool _isGridMode = false;
@@ -37,6 +45,9 @@ class _LibraryTabState extends State<LibraryTab> {
   bool _artistsLoaded = false;
   bool _artistsLoading = false;
   int _lastProfileRevision = 0;
+  Set<String> _pinnedLibraryItemKeys = <String>{};
+  Map<String, int> _recentLibraryItems = <String, int>{};
+  Map<String, dynamic> _savedPlaylistOrigins = <String, dynamic>{};
 
   @override
   void initState() {
@@ -44,7 +55,29 @@ class _LibraryTabState extends State<LibraryTab> {
     _load();
   }
 
+  String _itemKey(String type, Object? id) => '$type:${id ?? 'unknown'}';
+
+  bool _isPinnedKey(String key) => _pinnedLibraryItemKeys.contains(key);
+
+  int _recentForKey(String key) => _recentLibraryItems[key] ?? 0;
+
+  Future<void> _recordRecentOpen(String type, Object? id) async {
+    final key = _itemKey(type, id);
+    final next = Map<String, int>.from(_recentLibraryItems)
+      ..[key] = DateTime.now().millisecondsSinceEpoch;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_recentLibraryItemsKey, jsonEncode(next));
+    if (!mounted) return;
+    setState(() {
+      _recentLibraryItems = next;
+      _playlists = _decoratePlaylists(_playlists);
+      _albums = _decorateAlbums(_albums);
+      _artists = _decorateArtists(_artists);
+    });
+  }
+
   Future<void> _load({bool force = false}) async {
+    await _loadLibraryPrefs();
     setState(() {
       _loading = true;
       _albumsLoaded = false;
@@ -54,7 +87,7 @@ class _LibraryTabState extends State<LibraryTab> {
       final data = await ApiService().getPlaylists();
       if (!mounted) return;
       setState(() {
-        _playlists = data;
+        _playlists = _decoratePlaylists(data);
         _loading = false;
       });
     } catch (_) {
@@ -69,6 +102,141 @@ class _LibraryTabState extends State<LibraryTab> {
     }
   }
 
+  Future<void> _loadLibraryPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final pinned = prefs.getStringList(_pinnedLibraryItemsKey) ?? const [];
+    final legacyPinned =
+        prefs.getStringList(_legacyPinnedPlaylistsKey) ?? const [];
+    final rawOrigins = prefs.getString(_savedPlaylistOriginsKey);
+    final rawRecent = prefs.getString(_recentLibraryItemsKey);
+    final origins = <String, dynamic>{};
+    final recent = <String, int>{};
+    if (rawOrigins != null && rawOrigins.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawOrigins);
+        if (decoded is Map) {
+          origins.addAll(
+            decoded.map((key, value) => MapEntry(key.toString(), value)),
+          );
+        }
+      } catch (_) {}
+    }
+    if (rawRecent != null && rawRecent.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawRecent);
+        if (decoded is Map) {
+          for (final entry in decoded.entries) {
+            final value = int.tryParse('${entry.value}');
+            if (value != null) {
+              recent[entry.key.toString()] = value;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    final migratedPinned = <String>{
+      ...pinned,
+      ...legacyPinned.map((item) => _itemKey('playlist', item)),
+    };
+    if (legacyPinned.isNotEmpty && pinned.isEmpty) {
+      await prefs.setStringList(
+        _pinnedLibraryItemsKey,
+        migratedPinned.toList(),
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _pinnedLibraryItemKeys = migratedPinned;
+      _recentLibraryItems = recent;
+      _savedPlaylistOrigins = origins;
+    });
+  }
+
+  List<dynamic> _decoratePlaylists(List<dynamic> raw) {
+    return raw.map((item) {
+      if (item is! Map) return item;
+      final playlist = Map<String, dynamic>.from(item);
+      final meta = _savedPlaylistOrigins[(playlist['id'] ?? '').toString()];
+      final itemKey = _itemKey('playlist', playlist['id']);
+      if (meta is Map) {
+        playlist.addAll(Map<String, dynamic>.from(meta));
+      }
+      playlist['item_key'] = itemKey;
+      playlist['is_pinned'] = _isPinnedKey(itemKey);
+      playlist['recent_opened_at'] = _recentForKey(itemKey);
+      return playlist;
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> _decorateAlbums(List<Map<String, dynamic>> raw) {
+    return raw.map((item) {
+      final album = Map<String, dynamic>.from(item);
+      final itemKey = _itemKey('album', album['id']);
+      album['item_key'] = itemKey;
+      album['is_pinned'] = _isPinnedKey(itemKey);
+      album['recent_opened_at'] = _recentForKey(itemKey);
+      return album;
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> _decorateArtists(List<Map<String, dynamic>> raw) {
+    return raw.map((item) {
+      final artist = Map<String, dynamic>.from(item);
+      final itemKey = _itemKey('artist', artist['id']);
+      artist['item_key'] = itemKey;
+      artist['is_pinned'] = false;
+      artist['recent_opened_at'] = _recentForKey(itemKey);
+      return artist;
+    }).toList();
+  }
+
+  Future<void> _togglePinnedItem(String type, Object? id) async {
+    final itemKey = _itemKey(type, id);
+    final next = Set<String>.from(_pinnedLibraryItemKeys);
+    final isPinned = next.contains(itemKey);
+    if (!isPinned && next.length >= 5) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You can pin up to 5 items')),
+        );
+      }
+      return;
+    }
+    if (isPinned) {
+      next.remove(itemKey);
+    } else {
+      next.add(itemKey);
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _pinnedLibraryItemsKey,
+      next.toList(),
+    );
+    if (!mounted) return;
+    setState(() {
+      _pinnedLibraryItemKeys = next;
+      _playlists = _decoratePlaylists(_playlists);
+      _albums = _decorateAlbums(_albums);
+      _artists = _decorateArtists(_artists);
+    });
+  }
+
+  Future<void> _togglePinnedPlaylist(Map<String, dynamic> playlist) async {
+    await _togglePinnedItem('playlist', playlist['id']);
+  }
+
+  Future<void> _togglePinnedAlbum(Map<String, dynamic> album) async {
+    await _togglePinnedItem('album', album['id']);
+  }
+
+  int _recentSortForMap(Map item) {
+    final recent = item['recent_opened_at'];
+    if (recent is int && recent > 0) return recent;
+    return _sortDateForMap(item).millisecondsSinceEpoch;
+  }
+
+  int _pinnedRank(Map item) => item['is_pinned'] == true ? 0 : 1;
+
   Future<void> _loadAlbums({bool force = false}) async {
     if (_albumsLoaded && !force) return;
     setState(() => _albumsLoading = true);
@@ -81,11 +249,12 @@ class _LibraryTabState extends State<LibraryTab> {
                 'title': item['album_name']?.toString() ?? 'Unknown Album',
                 'artist': item['artist_name']?.toString() ?? '',
                 'cover_xl': item['cover_url']?.toString(),
+                'liked_at': item['liked_at'],
                 'liked_count': 0,
               })
           .toList();
       setState(() {
-        _albums = albums;
+        _albums = _decorateAlbums(albums);
         _albumsLoaded = true;
         _albumsLoading = false;
       });
@@ -106,10 +275,10 @@ class _LibraryTabState extends State<LibraryTab> {
       final raw = await ApiService().getFollowedArtistsDetails();
       if (!mounted) return;
       setState(() {
-        _artists = raw
+        _artists = _decorateArtists(raw
             .whereType<Map>()
             .map((e) => Map<String, dynamic>.from(e))
-            .toList();
+            .toList());
         _artistsLoaded = true;
         _artistsLoading = false;
       });
@@ -177,6 +346,54 @@ class _LibraryTabState extends State<LibraryTab> {
     );
   }
 
+  Future<void> _openPlaylist(
+    BuildContext context,
+    Map<String, dynamic> playlist,
+  ) async {
+    await _recordRecentOpen('playlist', playlist['id']);
+    if (!context.mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PlaylistScreen(
+          playlistId: (playlist['id'] as num?)?.toInt(),
+          playlistTitle: (playlist['title'] ?? 'Playlist').toString(),
+        ),
+      ),
+    );
+    if (mounted) {
+      _load();
+    }
+  }
+
+  Future<void> _openAlbum(
+    BuildContext context,
+    Map<String, dynamic> album,
+  ) async {
+    await _recordRecentOpen('album', album['id']);
+    if (!context.mounted) return;
+    await _openSavedAlbum(context, album);
+  }
+
+  Future<void> _openArtist(
+    BuildContext context,
+    Map<String, dynamic> artist,
+  ) async {
+    final artistId = artist['id'];
+    if (artistId == null) return;
+    await _recordRecentOpen('artist', artistId);
+    if (!context.mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ArtistScreen(
+          artistId: artistId.toString(),
+          artistName: (artist['name'] ?? 'Unknown Artist').toString(),
+        ),
+      ),
+    );
+  }
+
   void _onFilterChanged(int i) {
     setState(() {
       _filter = i;
@@ -234,14 +451,28 @@ class _LibraryTabState extends State<LibraryTab> {
         break;
       case 0: // Recent (keep backend order)
       default:
+        list = List.from(list)
+          ..sort((a, b) => _recentSortForMap(b as Map)
+              .compareTo(_recentSortForMap(a as Map)));
         break;
     }
+    list = List.from(list)
+      ..sort((a, b) {
+        final aPinned = (a as Map)['is_pinned'] == true;
+        final bPinned = (b as Map)['is_pinned'] == true;
+        if (aPinned == bPinned) return 0;
+        return aPinned ? -1 : 1;
+      });
     return list;
   }
 
   DateTime _sortDateForMap(Map item) {
     for (final key in [
-      'updated_at', 'created_at', 'liked_at', 'saved_at', 'followed_at'
+      'updated_at',
+      'created_at',
+      'liked_at',
+      'saved_at',
+      'followed_at'
     ]) {
       final raw = item[key];
       if (raw is String && raw.isNotEmpty) {
@@ -251,6 +482,34 @@ class _LibraryTabState extends State<LibraryTab> {
     }
     // Items with no date (e.g. artists) surface at the top alongside recent items
     return DateTime.now();
+  }
+
+  List<Map<String, dynamic>> get _sortedAlbums {
+    final list = _decorateAlbums(_albums);
+    switch (_sortOption) {
+      case 2:
+        list.sort((a, b) => (a['title'] ?? '')
+            .toString()
+            .toLowerCase()
+            .compareTo((b['title'] ?? '').toString().toLowerCase()));
+        break;
+      case 3:
+        list.sort((a, b) => (a['artist'] ?? '')
+            .toString()
+            .toLowerCase()
+            .compareTo((b['artist'] ?? '').toString().toLowerCase()));
+        break;
+      case 1:
+        list.sort((a, b) => _sortDateForMap(b).compareTo(_sortDateForMap(a)));
+        break;
+      case 0:
+      default:
+        list.sort(
+            (a, b) => _recentSortForMap(b).compareTo(_recentSortForMap(a)));
+        break;
+    }
+    list.sort((a, b) => _pinnedRank(a).compareTo(_pinnedRank(b)));
+    return list;
   }
 
   List<Map<String, dynamic>> get _allLibraryItems {
@@ -266,6 +525,8 @@ class _LibraryTabState extends State<LibraryTab> {
         'author': (playlist['description'] ?? playlist['visibility'] ?? '')
             .toString(),
         'sort_date': _sortDateForMap(playlist),
+        'recent_opened_at': _recentSortForMap(playlist),
+        'is_pinned': playlist['is_pinned'] == true,
       });
     }
 
@@ -276,6 +537,8 @@ class _LibraryTabState extends State<LibraryTab> {
         'title': (album['title'] ?? 'Unknown Album').toString(),
         'author': (album['artist'] ?? '').toString(),
         'sort_date': _sortDateForMap(album),
+        'recent_opened_at': _recentSortForMap(album),
+        'is_pinned': album['is_pinned'] == true,
       });
     }
 
@@ -286,6 +549,8 @@ class _LibraryTabState extends State<LibraryTab> {
         'title': (artist['name'] ?? 'Unknown Artist').toString(),
         'author': (artist['artist'] ?? artist['name'] ?? '').toString(),
         'sort_date': _sortDateForMap(artist),
+        'recent_opened_at': _recentSortForMap(artist),
+        'is_pinned': false,
       });
     }
 
@@ -300,12 +565,22 @@ class _LibraryTabState extends State<LibraryTab> {
             .toLowerCase()
             .compareTo((b['author'] as String).toLowerCase()));
         break;
-      // case 0 (Recent) and case 1 (Date added) both sort by date to mix types
-      default:
+      case 1:
         items.sort((a, b) =>
             (b['sort_date'] as DateTime).compareTo(a['sort_date'] as DateTime));
         break;
+      default:
+        items.sort((a, b) => (b['recent_opened_at'] as int)
+            .compareTo(a['recent_opened_at'] as int));
+        break;
     }
+
+    items.sort((a, b) {
+      final aPinned = (a['is_pinned'] == true);
+      final bPinned = (b['is_pinned'] == true);
+      if (aPinned == bPinned) return 0;
+      return aPinned ? -1 : 1;
+    });
 
     return items;
   }
@@ -362,15 +637,21 @@ class _LibraryTabState extends State<LibraryTab> {
                 case 'album':
                   return _AlbumLibraryItem(
                     album: data,
-                    onTap: () => _openSavedAlbum(context, data),
+                    onTap: () => _openAlbum(context, data),
+                    onTogglePin: () => _togglePinnedAlbum(data),
                   );
                 case 'artist':
-                  return _ArtistLibraryItem(artist: data);
+                  return _ArtistLibraryItem(
+                    artist: data,
+                    onTap: () => _openArtist(context, data),
+                  );
                 case 'playlist':
                 default:
                   return _PlaylistItem(
                     playlist: data,
                     onRefresh: _load,
+                    onTogglePin: () => _togglePinnedPlaylist(data),
+                    onTap: () => _openPlaylist(context, data),
                   );
               }
             },
@@ -755,7 +1036,7 @@ class _LibraryTabState extends State<LibraryTab> {
                         strokeWidth: 2, color: AppColors.purpleLight)),
               )
             else if (_filter == 2)
-              _albums.isEmpty
+              _sortedAlbums.isEmpty
                   ? SliverFillRemaining(
                       hasScrollBody: false,
                       child: Center(
@@ -778,89 +1059,14 @@ class _LibraryTabState extends State<LibraryTab> {
                   : SliverList(
                       delegate: SliverChildBuilderDelegate(
                         (ctx, i) {
-                          final album = _albums[i];
-                          final name =
-                              (album['title'] ?? 'Unknown Album').toString();
-                          final artist = (album['artist'] ?? '').toString();
-                          final cover = album['cover_xl']?.toString();
-                          return GestureDetector(
-                            onTap: () => _openSavedAlbum(ctx, album),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 20, vertical: 7),
-                              child: Row(children: [
-                                Container(
-                                  width: 56,
-                                  height: 56,
-                                  decoration: BoxDecoration(
-                                    gradient: AppColors.gradMixed,
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: cover != null
-                                      ? ClipRRect(
-                                          borderRadius:
-                                              BorderRadius.circular(10),
-                                          child: CachedNetworkImage(
-                                              imageUrl: cover,
-                                              fit: BoxFit.cover,
-                                              errorWidget: (_, __, ___) =>
-                                                  const Center(
-                                                      child: Text('💿',
-                                                          style: TextStyle(
-                                                              fontSize: 22)))))
-                                      : const Center(
-                                          child: Text('💿',
-                                              style: TextStyle(fontSize: 22))),
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                    child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                      Text(name,
-                                          style: GoogleFonts.outfit(
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w600,
-                                              color: AppColors.text),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis),
-                                      Row(children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 6, vertical: 2),
-                                          margin:
-                                              const EdgeInsets.only(right: 6),
-                                          decoration: BoxDecoration(
-                                            color: AppColors.purple
-                                                .withOpacity(0.15),
-                                            borderRadius:
-                                                BorderRadius.circular(4),
-                                          ),
-                                          child: Text('Album',
-                                              style: GoogleFonts.outfit(
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.w700,
-                                                  color:
-                                                      AppColors.purpleLight)),
-                                        ),
-                                        Expanded(
-                                            child: Text(artist,
-                                                style: GoogleFonts.outfit(
-                                                    fontSize: 12,
-                                                    color: AppColors.text3),
-                                                maxLines: 1,
-                                                overflow:
-                                                    TextOverflow.ellipsis)),
-                                      ]),
-                                    ])),
-                                const Icon(Icons.chevron_right_rounded,
-                                    color: AppColors.text3, size: 20),
-                              ]),
-                            ),
+                          final album = _sortedAlbums[i];
+                          return _AlbumLibraryItem(
+                            album: album,
+                            onTap: () => _openAlbum(ctx, album),
+                            onTogglePin: () => _togglePinnedAlbum(album),
                           );
                         },
-                        childCount: _albums.length,
+                        childCount: _sortedAlbums.length,
                       ),
                     )
 
@@ -897,89 +1103,9 @@ class _LibraryTabState extends State<LibraryTab> {
                       delegate: SliverChildBuilderDelegate(
                         (ctx, i) {
                           final artist = _artists[i];
-                          final name =
-                              (artist['name'] ?? 'Unknown Artist').toString();
-                          final pic = artist['picture_medium']?.toString() ??
-                              artist['picture_xl']?.toString() ??
-                              artist['picture']?.toString() ??
-                              artist['image_url']?.toString();
-                          final fans = artist['nb_fan'];
-                          final artistId = artist['id'];
-                          final fansNum = fans is int
-                              ? fans
-                              : int.tryParse(fans?.toString() ?? '') ?? 0;
-                          final fansStr = fansNum >= 1000000
-                              ? '${(fansNum / 1000000).toStringAsFixed(1)}M followers'
-                              : fansNum >= 1000
-                                  ? '${(fansNum / 1000).toStringAsFixed(0)}K followers'
-                                  : fansNum > 0
-                                      ? '$fansNum followers'
-                                      : 'Artist';
-                          return GestureDetector(
-                            onTap: () {
-                              if (artistId != null) {
-                                Navigator.push(
-                                    ctx,
-                                    MaterialPageRoute(
-                                      builder: (_) => ArtistScreen(
-                                        artistId: artistId.toString(),
-                                        artistName: name,
-                                      ),
-                                    ));
-                              }
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 20, vertical: 7),
-                              child: Row(children: [
-                                Container(
-                                  width: 56,
-                                  height: 56,
-                                  decoration: BoxDecoration(
-                                    gradient: AppColors.gradPink,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: pic != null
-                                      ? ClipOval(
-                                          child: CachedNetworkImage(
-                                              imageUrl: pic,
-                                              fit: BoxFit.cover,
-                                              errorWidget: (_, __, ___) => Center(
-                                                  child: Text(
-                                                      name[0].toUpperCase(),
-                                                      style: GoogleFonts.outfit(
-                                                          fontSize: 20,
-                                                          fontWeight:
-                                                              FontWeight.w700,
-                                                          color:
-                                                              Colors.white)))))
-                                      : Center(
-                                          child: Text(name[0].toUpperCase(),
-                                              style: GoogleFonts.outfit(
-                                                  fontSize: 20,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: Colors.white))),
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                    child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                      Text(name,
-                                          style: GoogleFonts.outfit(
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w600,
-                                              color: AppColors.text)),
-                                      Text(fansStr,
-                                          style: GoogleFonts.outfit(
-                                              fontSize: 12,
-                                              color: AppColors.text3)),
-                                    ])),
-                                const Icon(Icons.chevron_right_rounded,
-                                    color: AppColors.text3, size: 20),
-                              ]),
-                            ),
+                          return _ArtistLibraryItem(
+                            artist: artist,
+                            onTap: () => _openArtist(ctx, artist),
                           );
                         },
                         childCount: _artists.length,
@@ -1035,6 +1161,17 @@ class _LibraryTabState extends State<LibraryTab> {
                     (_, i) => _PlaylistGridItem(
                       playlist: _filteredPlaylists[i] as Map<String, dynamic>,
                       onRefresh: _load,
+                      onTogglePin: () => _togglePinnedPlaylist(
+                        Map<String, dynamic>.from(
+                          _filteredPlaylists[i] as Map<String, dynamic>,
+                        ),
+                      ),
+                      onTap: () => _openPlaylist(
+                        context,
+                        Map<String, dynamic>.from(
+                          _filteredPlaylists[i] as Map<String, dynamic>,
+                        ),
+                      ),
                     ),
                     childCount: _filteredPlaylists.length,
                   ),
@@ -1046,6 +1183,17 @@ class _LibraryTabState extends State<LibraryTab> {
                   (_, i) => _PlaylistItem(
                     playlist: _filteredPlaylists[i] as Map<String, dynamic>,
                     onRefresh: _load,
+                    onTogglePin: () => _togglePinnedPlaylist(
+                      Map<String, dynamic>.from(
+                        _filteredPlaylists[i] as Map<String, dynamic>,
+                      ),
+                    ),
+                    onTap: () => _openPlaylist(
+                      context,
+                      Map<String, dynamic>.from(
+                        _filteredPlaylists[i] as Map<String, dynamic>,
+                      ),
+                    ),
                   ),
                   childCount: _filteredPlaylists.length,
                 ),
@@ -1093,14 +1241,95 @@ class _SubFilter extends StatelessWidget {
 class _AlbumLibraryItem extends StatelessWidget {
   final Map<String, dynamic> album;
   final VoidCallback onTap;
+  final VoidCallback onTogglePin;
 
-  const _AlbumLibraryItem({required this.album, required this.onTap});
+  const _AlbumLibraryItem({
+    required this.album,
+    required this.onTap,
+    required this.onTogglePin,
+  });
+
+  void _showOptions(BuildContext context) {
+    final isPinned = album['is_pinned'] == true;
+    final title = (album['title'] ?? 'Album').toString();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                child: Text(
+                  title,
+                  style: GoogleFonts.outfit(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.text,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                leading: Icon(
+                  isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+                  color: AppColors.text3,
+                ),
+                title: Text(
+                  isPinned ? 'Unpin item' : 'Pin item',
+                  style: GoogleFonts.outfit(color: AppColors.text),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onTogglePin();
+                },
+              ),
+              ListTile(
+                leading:
+                    const Icon(Icons.share_rounded, color: AppColors.text3),
+                title: Text(
+                  'Share',
+                  style: GoogleFonts.outfit(color: AppColors.text),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Clipboard.setData(ClipboardData(text: title));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Link copied')),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final name = (album['title'] ?? 'Unknown Album').toString();
     final artist = (album['artist'] ?? '').toString();
     final cover = album['cover_xl']?.toString();
+    final isPinned = album['is_pinned'] == true;
 
     return GestureDetector(
       onTap: onTap,
@@ -1151,11 +1380,35 @@ class _AlbumLibraryItem extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
+                if (isPinned) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.push_pin_rounded,
+                          size: 12, color: AppColors.purpleLight),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Pinned',
+                        style: GoogleFonts.outfit(
+                          fontSize: 11,
+                          color: AppColors.purpleLight,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
-          const Icon(Icons.chevron_right_rounded,
-              color: AppColors.text3, size: 20),
+          GestureDetector(
+            onTap: () => _showOptions(context),
+            behavior: HitTestBehavior.opaque,
+            child: const Padding(
+              padding: EdgeInsets.all(8),
+              child: Icon(Icons.more_vert_rounded,
+                  color: AppColors.text3, size: 20),
+            ),
+          ),
         ]),
       ),
     );
@@ -1164,8 +1417,9 @@ class _AlbumLibraryItem extends StatelessWidget {
 
 class _ArtistLibraryItem extends StatelessWidget {
   final Map<String, dynamic> artist;
+  final VoidCallback onTap;
 
-  const _ArtistLibraryItem({required this.artist});
+  const _ArtistLibraryItem({required this.artist, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1175,7 +1429,6 @@ class _ArtistLibraryItem extends StatelessWidget {
         artist['picture']?.toString() ??
         artist['image_url']?.toString();
     final fans = artist['nb_fan'];
-    final artistId = artist['id'];
     final fansNum =
         fans is int ? fans : int.tryParse(fans?.toString() ?? '') ?? 0;
     final fansStr = fansNum >= 1000000
@@ -1188,18 +1441,7 @@ class _ArtistLibraryItem extends StatelessWidget {
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
 
     return GestureDetector(
-      onTap: () {
-        if (artistId == null) return;
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ArtistScreen(
-              artistId: artistId.toString(),
-              artistName: name,
-            ),
-          ),
-        );
-      },
+      onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
         child: Row(children: [
@@ -1319,11 +1561,26 @@ class _VisibilityBadge extends StatelessWidget {
 class _PlaylistItem extends StatelessWidget {
   final Map<String, dynamic> playlist;
   final VoidCallback onRefresh;
-  const _PlaylistItem({required this.playlist, required this.onRefresh});
+  final VoidCallback onTogglePin;
+  final VoidCallback onTap;
+  const _PlaylistItem({
+    required this.playlist,
+    required this.onRefresh,
+    required this.onTogglePin,
+    required this.onTap,
+  });
 
   void _showOptions(BuildContext context) {
     final id = playlist['id'] as int? ?? 0;
     final title = (playlist['title'] ?? 'Untitled').toString();
+    final isPinned = playlist['is_pinned'] == true;
+    final visibility = (playlist['visibility'] ?? '').toString();
+    final ownerId = (playlist['owner_id'] as num?)?.toInt();
+    final savedFromOwnerId = (playlist['saved_from_owner_id'] as num?)?.toInt();
+    final isSavedCopyOfOther = visibility == 'saved' &&
+        savedFromOwnerId != null &&
+        ownerId != null &&
+        savedFromOwnerId != ownerId;
 
     Widget item(IconData icon, String label, VoidCallback onTap,
         {Color? color}) {
@@ -1392,34 +1649,76 @@ class _PlaylistItem extends StatelessWidget {
                   const SnackBar(content: Text('Link copied')),
                 );
               }),
-              item(Icons.add_rounded, 'Add tracks', () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          PlaylistScreen(playlistId: id, playlistTitle: title),
-                    ));
-              }),
+              item(
+                isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+                isPinned ? 'Unpin playlist' : 'Pin playlist',
+                () {
+                  Navigator.pop(ctx);
+                  onTogglePin();
+                },
+              ),
+              if (!isSavedCopyOfOther)
+                item(Icons.add_rounded, 'Add tracks', () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PlaylistScreen(
+                            playlistId: id, playlistTitle: title),
+                      ));
+                }),
               item(Icons.download_outlined, 'Download', () {
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Download coming soon')),
                 );
               }),
-              item(Icons.edit_rounded, 'Edit playlist', () {
-                Navigator.pop(ctx);
-                Navigator.push(
+              if (!isSavedCopyOfOther)
+                item(Icons.edit_rounded, 'Edit playlist', () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            CreatePlaylistScreen(existingPlaylist: playlist),
+                      )).then((_) => onRefresh());
+                }),
+              if (isSavedCopyOfOther)
+                item(Icons.person_outline_rounded, 'View owner profile', () {
+                  Navigator.pop(ctx);
+                  final profileOwnerId =
+                      (playlist['saved_from_owner_id'] as num?)?.toInt();
+                  if (profileOwnerId == null) return;
+                  Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) =>
-                          CreatePlaylistScreen(existingPlaylist: playlist),
-                    )).then((_) => onRefresh());
-              }),
-              item(Icons.delete_rounded, 'Delete playlist', () {
-                Navigator.pop(ctx);
-                _deletePlaylist(context, id);
-              }, color: Colors.redAccent),
+                      builder: (_) => UserProfileScreen(
+                        userId: profileOwnerId,
+                        initialUser: {
+                          'id': profileOwnerId,
+                          'username': playlist['saved_from_username'],
+                          'display_name': playlist['saved_from_display_name'],
+                          'avatar_url': playlist['saved_from_avatar_url'],
+                        },
+                      ),
+                    ),
+                  );
+                }),
+              item(
+                isSavedCopyOfOther
+                    ? Icons.bookmark_remove_rounded
+                    : Icons.delete_rounded,
+                isSavedCopyOfOther ? 'Remove from library' : 'Delete playlist',
+                () {
+                  Navigator.pop(ctx);
+                  if (isSavedCopyOfOther) {
+                    _deletePlaylist(context, id);
+                  } else {
+                    _deletePlaylist(context, id);
+                  }
+                },
+                color: isSavedCopyOfOther ? AppColors.text : Colors.redAccent,
+              ),
             ],
           ),
         ),
@@ -1526,15 +1825,21 @@ class _PlaylistItem extends StatelessWidget {
     final trackCount = playlist['track_count'] ?? playlist['tracks_count'] ?? 0;
     final coverUrl = playlist['cover_url'] as String?;
     final visibility = (playlist['visibility'] ?? 'private').toString();
+    final sourceOwnerId = (playlist['saved_from_owner_id'] as num?)?.toInt();
+    final ownerId = (playlist['owner_id'] as num?)?.toInt();
+    final showOwner =
+        sourceOwnerId != null && ownerId != null && sourceOwnerId != ownerId;
+    final ownerText = showOwner
+        ? (playlist['saved_from_display_name'] ??
+                playlist['saved_from_username'] ??
+                playlist['owner_display_name'] ??
+                playlist['owner_username'])
+            ?.toString()
+        : null;
+    final isPinned = playlist['is_pinned'] == true;
 
     return GestureDetector(
-      onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-              builder: (_) => PlaylistScreen(
-                    playlistId: id,
-                    playlistTitle: title.toString(),
-                  ))),
+      onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
         child: Row(children: [
@@ -1568,8 +1873,25 @@ class _PlaylistItem extends StatelessWidget {
                       color: AppColors.text),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis),
+              if (ownerText != null && ownerText.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'by $ownerText',
+                  style: GoogleFonts.outfit(
+                    fontSize: 11,
+                    color: AppColors.text3,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
               const SizedBox(height: 4),
               Row(children: [
+                if (isPinned) ...[
+                  const Icon(Icons.push_pin_rounded,
+                      size: 12, color: AppColors.purpleLight),
+                  const SizedBox(width: 4),
+                ],
                 _VisibilityBadge(visibility),
                 const SizedBox(width: 6),
                 Text('$trackCount songs',
@@ -1598,7 +1920,14 @@ class _PlaylistItem extends StatelessWidget {
 class _PlaylistGridItem extends StatelessWidget {
   final Map<String, dynamic> playlist;
   final VoidCallback onRefresh;
-  const _PlaylistGridItem({required this.playlist, required this.onRefresh});
+  final VoidCallback onTogglePin;
+  final VoidCallback onTap;
+  const _PlaylistGridItem({
+    required this.playlist,
+    required this.onRefresh,
+    required this.onTogglePin,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1607,15 +1936,21 @@ class _PlaylistGridItem extends StatelessWidget {
     final trackCount = playlist['track_count'] ?? playlist['tracks_count'] ?? 0;
     final coverUrl = playlist['cover_url'] as String?;
     final visibility = (playlist['visibility'] ?? 'private').toString();
+    final sourceOwnerId = (playlist['saved_from_owner_id'] as num?)?.toInt();
+    final ownerId = (playlist['owner_id'] as num?)?.toInt();
+    final showOwner =
+        sourceOwnerId != null && ownerId != null && sourceOwnerId != ownerId;
+    final ownerText = showOwner
+        ? (playlist['saved_from_display_name'] ??
+                playlist['saved_from_username'] ??
+                playlist['owner_display_name'] ??
+                playlist['owner_username'])
+            ?.toString()
+        : null;
+    final isPinned = playlist['is_pinned'] == true;
 
     return GestureDetector(
-      onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-              builder: (_) => PlaylistScreen(
-                    playlistId: id,
-                    playlistTitle: title.toString(),
-                  ))),
+      onTap: onTap,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         AspectRatio(
           aspectRatio: 1,
@@ -1644,8 +1979,18 @@ class _PlaylistGridItem extends StatelessWidget {
                 color: AppColors.text),
             maxLines: 1,
             overflow: TextOverflow.ellipsis),
+        if (ownerText != null && ownerText.isNotEmpty)
+          Text('by $ownerText',
+              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
         const SizedBox(height: 2),
         Row(children: [
+          if (isPinned) ...[
+            const Icon(Icons.push_pin_rounded,
+                size: 12, color: AppColors.purpleLight),
+            const SizedBox(width: 4),
+          ],
           _VisibilityBadge(visibility),
           const SizedBox(width: 6),
           Flexible(

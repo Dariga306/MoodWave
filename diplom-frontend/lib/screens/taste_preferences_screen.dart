@@ -184,6 +184,8 @@ class TastePreferencesScreen extends StatefulWidget {
 }
 
 class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
+  static const int _collapsedRecommendationCount = 10;
+  static const int _expandedRecommendationCount = 20;
   final _searchCtrl = TextEditingController();
   late final Set<String> _selectedGenres;
   late final List<Map<String, dynamic>> _selectedArtists;
@@ -197,7 +199,11 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
   @override
   void initState() {
     super.initState();
-    _selectedGenres = widget.initialGenres.take(3).toSet();
+    _selectedGenres = widget.initialGenres
+        .map(_canonicalGenre)
+        .where((genre) => genre.isNotEmpty)
+        .take(3)
+        .toSet();
     _selectedArtists = widget.initialArtists
         .map((artist) => Map<String, dynamic>.from(artist))
         .toList();
@@ -238,6 +244,16 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
         .trim();
   }
 
+  String _canonicalGenre(String value) {
+    final normalized = _normalizeQuery(value);
+    for (final genre in _tasteGenres) {
+      if (_normalizeQuery(genre) == normalized) {
+        return genre;
+      }
+    }
+    return '';
+  }
+
   int _artistScore(String query, Map<String, dynamic> artist) {
     final q = _normalizeQuery(query);
     final name = _normalizeQuery(_artistName(artist));
@@ -269,10 +285,35 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
     return hash.toString();
   }
 
+  void _warmArtistImages(List<Map<String, dynamic>> artists) {
+    if (!mounted) return;
+    final topArtists = artists.take(12);
+    for (final artist in topArtists) {
+      final imageUrl = _artistImage(artist);
+      if (imageUrl.isEmpty) continue;
+      precacheImage(CachedNetworkImageProvider(imageUrl), context);
+    }
+  }
+
   Future<void> _loadRecommendedArtistsFromApi() async {
     final seeds = <String>[];
-    for (final genre in _selectedGenres) {
-      seeds.addAll(_genreArtistSeeds[genre.toLowerCase()] ?? const []);
+    final groupedSeeds = _selectedGenres
+        .map((genre) =>
+            _genreArtistSeeds[genre.toLowerCase()] ?? const <String>[])
+        .where((items) => items.isNotEmpty)
+        .toList();
+    if (groupedSeeds.isNotEmpty) {
+      final longest = groupedSeeds.fold<int>(
+        0,
+        (best, items) => items.length > best ? items.length : best,
+      );
+      for (var i = 0; i < longest; i++) {
+        for (final items in groupedSeeds) {
+          if (i < items.length) {
+            seeds.add(items[i]);
+          }
+        }
+      }
     }
     if (seeds.isEmpty) {
       seeds.addAll(
@@ -288,9 +329,9 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
 
     try {
       final responses = await Future.wait(
-        uniqueSeeds.take(12).map(
+        uniqueSeeds.take(20).map(
               (name) => ApiService()
-                  .searchArtistsList(name, limit: 3)
+                  .searchArtistsList(name, limit: 4)
                   .catchError((_) => <Map<String, dynamic>>[]),
             ),
       );
@@ -306,27 +347,26 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
           ..sort((a, b) => _artistScore(seed, b).compareTo(
                 _artistScore(seed, a),
               ));
-        if (sorted.isEmpty) continue;
-        final best = sorted.first;
-        final id = _artistId(best);
-        if (id.isEmpty || !seen.add(id)) continue;
-        artists.add(best);
-      }
-      final hydrated = artists.isNotEmpty
-          ? await ApiService().hydrateArtists(artists)
-          : <Map<String, dynamic>>[];
-      if (!mounted) return;
-      if (hydrated.isNotEmpty) {
-        setState(() => _recommendedArtists = hydrated);
-      } else if (artists.isNotEmpty) {
-        setState(() => _recommendedArtists = artists);
-      } else {
-        final hydratedFallback =
-            await ApiService().hydrateArtists(_seedFallbackCards());
-        if (!mounted) return;
-        if (hydratedFallback.isNotEmpty) {
-          setState(() => _recommendedArtists = hydratedFallback);
+        for (final candidate in sorted.take(3)) {
+          final id = _artistId(candidate);
+          if (id.isEmpty || !seen.add(id)) continue;
+          artists.add(candidate);
+          if (artists.length >= _expandedRecommendationCount) {
+            break;
+          }
         }
+        if (artists.length >= _expandedRecommendationCount) {
+          break;
+        }
+      }
+      if (!mounted) return;
+      if (artists.isNotEmpty) {
+        setState(() => _recommendedArtists = artists);
+        _warmArtistImages(artists);
+      } else {
+        final fallback = _seedFallbackCards();
+        setState(() => _recommendedArtists = fallback);
+        _warmArtistImages(fallback);
       }
     } catch (_) {
       // fallback already shown
@@ -348,7 +388,7 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
     });
     try {
       final query = q.trim();
-      final results = await ApiService().searchArtistsList(query, limit: 18);
+      final results = await ApiService().searchArtistsList(query, limit: 30);
       final combined = <Map<String, dynamic>>[
         ...results.map((item) => Map<String, dynamic>.from(item)),
         ..._localSearchFallback(query),
@@ -371,38 +411,48 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
       );
       final filtered = deduped
           .where((artist) => _artistScore(query, artist) > 0)
-          .take(12)
+          .take(20)
           .toList();
-      final hydrated = filtered.isNotEmpty
-          ? await ApiService().hydrateArtists(filtered)
-          : <Map<String, dynamic>>[];
       if (!mounted) return;
       setState(() {
-        _searchResults = hydrated.isNotEmpty
-            ? hydrated
-            : (filtered.isNotEmpty ? filtered : _localSearchFallback(query));
+        _searchResults =
+            filtered.isNotEmpty ? filtered : _localSearchFallback(query);
         _searching = false;
       });
+      _warmArtistImages(_searchResults);
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _searchResults = _localSearchFallback(q.trim());
         _searching = false;
       });
+      _warmArtistImages(_searchResults);
     }
   }
 
   List<Map<String, dynamic>> _seedFallbackCards() {
     final cards = <Map<String, dynamic>>[];
     final seen = <String>{};
-    for (final genre in _selectedGenres) {
-      final names = _genreArtistSeeds[genre.toLowerCase()] ?? const [];
-      for (final name in names) {
-        if (!seen.add(name.toLowerCase())) continue;
-        cards.add({
-          'id': _fallbackArtistId(name),
-          'name': name,
-        });
+    final groupedSeeds = _selectedGenres
+        .map((genre) =>
+            _genreArtistSeeds[genre.toLowerCase()] ?? const <String>[])
+        .where((items) => items.isNotEmpty)
+        .toList();
+    if (groupedSeeds.isNotEmpty) {
+      final longest = groupedSeeds.fold<int>(
+        0,
+        (best, items) => items.length > best ? items.length : best,
+      );
+      for (var i = 0; i < longest; i++) {
+        for (final names in groupedSeeds) {
+          if (i >= names.length) continue;
+          final name = names[i];
+          if (!seen.add(name.toLowerCase())) continue;
+          cards.add({
+            'id': _fallbackArtistId(name),
+            'name': name,
+          });
+        }
       }
     }
     if (cards.isEmpty) {
@@ -418,7 +468,7 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
         });
       }
     }
-    return cards.take(10).toList();
+    return cards.take(_expandedRecommendationCount).toList();
   }
 
   List<Map<String, dynamic>> _localSearchFallback(String query) {
@@ -450,7 +500,7 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
     results.sort(
       (a, b) => _artistScore(query, b).compareTo(_artistScore(query, a)),
     );
-    return results.take(10).toList();
+    return results.take(_expandedRecommendationCount).toList();
   }
 
   void _toggleArtist(Map<String, dynamic> artist) {
@@ -487,6 +537,7 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
       _recommendedArtists = _seedFallbackCards();
       _loadingRecommended = false;
     });
+    _warmArtistImages(_recommendedArtists);
     _loadRecommendedArtistsFromApi();
   }
 
@@ -500,8 +551,10 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
           'weight': 1.0 - (entry.key * 0.02),
         };
       }).toList();
-      await ApiService().saveGenres(genres);
-      await ApiService().saveFavoriteArtists(_selectedArtists);
+      await Future.wait([
+        ApiService().saveGenres(genres),
+        ApiService().saveFavoriteArtists(_selectedArtists),
+      ]);
       if (!mounted) return;
       final auth = context.read<AuthProvider>();
       await auth.reload();
@@ -522,10 +575,11 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
     final isSearchingArtists = _searchCtrl.text.trim().length >= 2;
     final artistList =
         isSearchingArtists ? _searchResults : _recommendedArtists;
-    final visibleArtistList =
-        !isSearchingArtists && !_showAllRecommended && artistList.length > 5
-            ? artistList.take(5).toList()
-            : artistList;
+    final visibleArtistList = !isSearchingArtists &&
+            !_showAllRecommended &&
+            artistList.length > _collapsedRecommendationCount
+        ? artistList.take(_collapsedRecommendationCount).toList()
+        : artistList;
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -541,265 +595,281 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
             color: AppColors.text,
           ),
         ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: GestureDetector(
-                onTap: _saving ? null : _save,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-                  decoration: BoxDecoration(
-                    gradient: AppColors.primaryBtn,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: _saving
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Text(
-                          'Save',
-                          style: GoogleFonts.outfit(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
+      ),
+      body: Stack(
+        children: [
+          ListView(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 110),
+            children: [
+              Text(
+                'Favorite genres',
+                style: GoogleFonts.outfit(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.text,
                 ),
               ),
-            ),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 10, 20, 28),
-        children: [
-          Text(
-            'Favorite genres',
-            style: GoogleFonts.outfit(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              color: AppColors.text,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Pick the styles you genuinely come back to',
-            style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3),
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _tasteGenres.map((genre) {
-              final selected = _selectedGenres.contains(genre);
-              return GestureDetector(
-                onTap: () => _toggleGenre(genre),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    gradient: selected ? AppColors.primaryBtn : null,
-                    color: selected ? null : AppColors.surface,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: selected ? Colors.transparent : AppColors.border,
+              const SizedBox(height: 4),
+              Text(
+                'Pick the styles you genuinely come back to',
+                style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _tasteGenres.map((genre) {
+                  final selected = _selectedGenres.contains(genre);
+                  return GestureDetector(
+                    onTap: () => _toggleGenre(genre),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        gradient: selected ? AppColors.primaryBtn : null,
+                        color: selected ? null : AppColors.surface,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color:
+                              selected ? Colors.transparent : AppColors.border,
+                        ),
+                      ),
+                      child: Text(
+                        genre,
+                        style: GoogleFonts.outfit(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: selected ? Colors.white : AppColors.text2,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 28),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Artists you like',
+                          style: GoogleFonts.outfit(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.text,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Choose up to 5 artists for your profile and matches',
+                          style: GoogleFonts.outfit(
+                            fontSize: 13,
+                            color: AppColors.text3,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  child: Text(
-                    genre,
+                  Text(
+                    '${_selectedArtists.length}/5',
                     style: GoogleFonts.outfit(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: selected ? Colors.white : AppColors.text2,
+                      color: _selectedArtists.isNotEmpty
+                          ? AppColors.purpleLight
+                          : AppColors.text3,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: TextField(
+                  controller: _searchCtrl,
+                  onChanged: _searchArtists,
+                  style:
+                      GoogleFonts.outfit(fontSize: 14, color: AppColors.text),
+                  decoration: InputDecoration(
+                    hintText: 'Search artists...',
+                    hintStyle: GoogleFonts.outfit(
+                        fontSize: 14, color: AppColors.text3),
+                    prefixIcon: const Icon(
+                      Icons.search_rounded,
+                      color: AppColors.text3,
+                    ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 14,
                     ),
                   ),
                 ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 28),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Artists you like',
-                      style: GoogleFonts.outfit(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.text,
-                      ),
+              ),
+              if (_selectedArtists.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                SizedBox(
+                  height: 112,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _selectedArtists.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 10),
+                    itemBuilder: (_, i) {
+                      final artist = _selectedArtists[i];
+                      return _SelectedArtistPreview(
+                        artist: artist,
+                        name: _artistName(artist),
+                        imageUrl: _artistImage(artist),
+                        onRemove: () => _toggleArtist(artist),
+                      );
+                    },
+                  ),
+                ),
+              ],
+              const SizedBox(height: 18),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isSearchingArtists
+                              ? 'Search results'
+                              : _selectedGenres.isNotEmpty
+                                  ? 'Recommended from your genres'
+                                  : 'Popular artists',
+                          style: GoogleFonts.outfit(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.text,
+                          ),
+                        ),
+                        if (!isSearchingArtists && _selectedGenres.isEmpty)
+                          Text(
+                            'Select genres above to get personalised picks',
+                            style: GoogleFonts.outfit(
+                              fontSize: 11,
+                              color: AppColors.text3,
+                            ),
+                          ),
+                      ],
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Choose up to 5 artists for your profile and matches',
-                      style: GoogleFonts.outfit(
-                        fontSize: 13,
-                        color: AppColors.text3,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Text(
-                '${_selectedArtists.length}/5',
-                style: GoogleFonts.outfit(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: _selectedArtists.isNotEmpty
-                      ? AppColors.purpleLight
-                      : AppColors.text3,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: _searchArtists,
-              style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text),
-              decoration: InputDecoration(
-                hintText: 'Search artists...',
-                hintStyle:
-                    GoogleFonts.outfit(fontSize: 14, color: AppColors.text3),
-                prefixIcon: const Icon(
-                  Icons.search_rounded,
-                  color: AppColors.text3,
-                ),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 14,
-                ),
-              ),
-            ),
-          ),
-          if (_selectedArtists.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 112,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _selectedArtists.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (_, i) {
-                  final artist = _selectedArtists[i];
-                  return _SelectedArtistPreview(
-                    artist: artist,
-                    name: _artistName(artist),
-                    imageUrl: _artistImage(artist),
-                    onRemove: () => _toggleArtist(artist),
-                  );
-                },
-              ),
-            ),
-          ],
-          const SizedBox(height: 18),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      isSearchingArtists
-                          ? 'Search results'
-                          : _selectedGenres.isNotEmpty
-                              ? 'Recommended from your genres'
-                              : 'Popular artists',
-                      style: GoogleFonts.outfit(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.text,
-                      ),
-                    ),
-                    if (!isSearchingArtists && _selectedGenres.isEmpty)
-                      Text(
-                        'Select genres above to get personalised picks',
+                  ),
+                  if (!isSearchingArtists &&
+                      artistList.length > _collapsedRecommendationCount)
+                    GestureDetector(
+                      onTap: () => setState(
+                          () => _showAllRecommended = !_showAllRecommended),
+                      child: Text(
+                        _showAllRecommended ? 'Show less' : 'Show all',
                         style: GoogleFonts.outfit(
-                          fontSize: 11,
-                          color: AppColors.text3,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.purpleLight,
                         ),
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
-              if (!isSearchingArtists && artistList.length > 5)
-                GestureDetector(
-                  onTap: () => setState(
-                      () => _showAllRecommended = !_showAllRecommended),
-                  child: Text(
-                    _showAllRecommended ? 'Show less' : 'Show all',
-                    style: GoogleFonts.outfit(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+              const SizedBox(height: 10),
+              if (_loadingRecommended && _recommendedArtists.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 32),
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
                       color: AppColors.purpleLight,
                     ),
                   ),
-                ),
+                )
+              else if (_searching)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 32),
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.purpleLight,
+                    ),
+                  ),
+                )
+              else if (artistList.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Text(
+                    'No artists found yet',
+                    style: GoogleFonts.outfit(
+                      fontSize: 13,
+                      color: AppColors.text3,
+                    ),
+                  ),
+                )
+              else
+                ...visibleArtistList.map((artist) {
+                  final selected = _selectedArtists.any(
+                    (item) => _artistId(item) == _artistId(artist),
+                  );
+                  return _ArtistListTile(
+                    name: _artistName(artist),
+                    imageUrl: _artistImage(artist),
+                    selected: selected,
+                    onTap: () => _toggleArtist(artist),
+                  );
+                }),
             ],
           ),
-          const SizedBox(height: 10),
-          if (_loadingRecommended && _recommendedArtists.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 32),
-              child: Center(
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppColors.purpleLight,
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: 20,
+            child: SafeArea(
+              top: false,
+              child: GestureDetector(
+                onTap: _saving ? null : _save,
+                child: Container(
+                  height: 54,
+                  decoration: BoxDecoration(
+                    gradient: AppColors.primaryBtn,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.purpleDark.withOpacity(0.28),
+                        blurRadius: 22,
+                        offset: const Offset(0, 12),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: _saving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Text(
+                            'Save',
+                            style: GoogleFonts.outfit(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                  ),
                 ),
               ),
-            )
-          else if (_searching)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 32),
-              child: Center(
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppColors.purpleLight,
-                ),
-              ),
-            )
-          else if (artistList.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Text(
-                'No artists found yet',
-                style: GoogleFonts.outfit(
-                  fontSize: 13,
-                  color: AppColors.text3,
-                ),
-              ),
-            )
-          else
-            ...visibleArtistList.map((artist) {
-              final selected = _selectedArtists.any(
-                (item) => _artistId(item) == _artistId(artist),
-              );
-              return _ArtistListTile(
-                name: _artistName(artist),
-                imageUrl: _artistImage(artist),
-                selected: selected,
-                onTap: () => _toggleArtist(artist),
-              );
-            }),
+            ),
+          ),
         ],
       ),
     );

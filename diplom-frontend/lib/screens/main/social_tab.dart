@@ -1144,32 +1144,11 @@ class _ChatItem extends StatelessWidget {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(children: [
-                      Text(name,
-                          style: GoogleFonts.outfit(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.text)),
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(colors: [
-                            AppColors.purple.withOpacity(0.2),
-                            AppColors.pink.withOpacity(0.1),
-                          ]),
-                          borderRadius: BorderRadius.circular(100),
-                          border: Border.all(
-                              color: AppColors.purple.withOpacity(0.25)),
-                        ),
-                        child: Text('$similarity%',
-                            style: GoogleFonts.outfit(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.purpleLight)),
-                      ),
-                    ]),
+                    Text(name,
+                        style: GoogleFonts.outfit(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.text)),
                     if (city.isNotEmpty)
                       Text(city,
                           style: GoogleFonts.outfit(

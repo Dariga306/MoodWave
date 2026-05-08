@@ -71,6 +71,26 @@ Set<String> _lookupTokens(String value) {
       .toSet();
 }
 
+String _stripTrackVersion(String value) {
+  return value
+      .replaceAll(RegExp(r'\((feat|ft|with).*?\)', caseSensitive: false), ' ')
+      .replaceAll(RegExp(r'\[(feat|ft|with).*?\]', caseSensitive: false), ' ')
+      .replaceAll(
+          RegExp(r'\((live|remaster(ed)?|sped up|slowed|version).*?\)',
+              caseSensitive: false),
+          ' ')
+      .replaceAll(
+          RegExp(r'\[(live|remaster(ed)?|sped up|slowed|version).*?\]',
+              caseSensitive: false),
+          ' ')
+      .replaceAll(
+          RegExp(r'\s+-\s+(live|remaster(ed)?|sped up|slowed).*$',
+              caseSensitive: false),
+          ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
 class PlayerScreen extends StatefulWidget {
   final Map<String, dynamic>? track;
 
@@ -139,14 +159,71 @@ class _PlayerScreenState extends State<PlayerScreen>
   Duration get _seekableDuration =>
       _playback.duration > Duration.zero ? _playback.duration : _duration;
 
-  String? get _currentLyricLine {
-    if (_lrcLines.isEmpty) return null;
-    if (_lyricsSynced) {
-      final idx = _currentLyricIdx >= 0 ? _currentLyricIdx : 0;
-      if (idx < _lrcLines.length) return _lrcLines[idx].text;
-      return null;
+  List<Map<String, dynamic>> get _artistEntries {
+    final rawArtists = _track['artists'];
+    if (rawArtists is List) {
+      final artists = rawArtists
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .where(
+              (item) => (item['name']?.toString().trim().isNotEmpty ?? false))
+          .toList();
+      if (artists.isNotEmpty) {
+        return artists;
+      }
     }
-    return _lrcLines.first.text;
+
+    final names = _artist
+        .split(RegExp(r'\s*(?:,| feat\. | ft\. | & )\s*', caseSensitive: false))
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+    return names
+        .map((name) => <String, dynamic>{'id': null, 'name': name})
+        .toList();
+  }
+
+  String get _primaryArtist => _artistEntries.isNotEmpty
+      ? (_artistEntries.first['name'] ?? '').toString()
+      : _artist;
+
+  List<String> get _titleVariants {
+    final variants = <String>{};
+    final raw = _title.trim();
+    if (raw.isNotEmpty) {
+      variants.add(raw);
+      final stripped = _stripTrackVersion(raw);
+      if (stripped.isNotEmpty) {
+        variants.add(stripped);
+      }
+    }
+    return variants.where((value) => value.isNotEmpty).toList();
+  }
+
+  List<String> get _artistVariants {
+    final variants = <String>{};
+    final full = _artist.trim();
+    if (full.isNotEmpty) {
+      variants.add(full);
+    }
+    final primary = _primaryArtist.trim();
+    if (primary.isNotEmpty) {
+      variants.add(primary);
+    }
+    for (final artist in _artistEntries) {
+      final name = (artist['name'] ?? '').toString().trim();
+      if (name.isNotEmpty) {
+        variants.add(name);
+      }
+    }
+    return variants.toList();
+  }
+
+  String? get _currentLyricLine {
+    if (!_lyricsSynced || _lrcLines.isEmpty) return null;
+    final idx = _currentLyricIdx >= 0 ? _currentLyricIdx : 0;
+    if (idx < _lrcLines.length) return _lrcLines[idx].text;
+    return null;
   }
 
   @override
@@ -297,161 +374,197 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (mounted) {
       setState(() => _lyricsLoading = true);
     }
-
-    final encodedTitle = Uri.encodeComponent(_title);
-    final encodedArtist = Uri.encodeComponent(_artist);
-    final encodedAlbum = _album.isNotEmpty ? Uri.encodeComponent(_album) : null;
     final durationSeconds = _duration.inSeconds > 0
         ? _duration.inSeconds
         : (((_track['duration_ms'] as int?) ?? 0) ~/ 1000);
+    final albumName = _album.trim();
+    final queries = <Map<String, String>>[];
+    for (final title in _titleVariants) {
+      for (final artist in _artistVariants) {
+        queries.add({
+          'title': title,
+          'artist': artist,
+          if (albumName.isNotEmpty) 'album': albumName,
+        });
+      }
+    }
+    if (queries.isEmpty) {
+      queries.add({
+        'title': _title,
+        'artist': _primaryArtist,
+        if (albumName.isNotEmpty) 'album': albumName,
+      });
+    }
 
     try {
-      final response = await http
-          .get(
-            Uri.parse(
-              'https://lrclib.net/api/search?track_name=$encodedTitle&artist_name=$encodedArtist'
-              '${encodedAlbum != null ? '&album_name=$encodedAlbum' : ''}'
-              '${durationSeconds > 0 ? '&duration=$durationSeconds' : ''}',
-            ),
-          )
-          .timeout(const Duration(seconds: 8));
-      if (response.statusCode == 200) {
+      final seenKeys = <String>{};
+      final candidates = <Map<String, dynamic>>[];
+      for (final query in queries.take(8)) {
+        final encodedTitle = Uri.encodeComponent(query['title'] ?? '');
+        final encodedArtist = Uri.encodeComponent(query['artist'] ?? '');
+        final encodedAlbum = (query['album']?.isNotEmpty ?? false)
+            ? Uri.encodeComponent(query['album']!)
+            : null;
+        final response = await http
+            .get(
+              Uri.parse(
+                'https://lrclib.net/api/search?track_name=$encodedTitle&artist_name=$encodedArtist'
+                '${encodedAlbum != null ? '&album_name=$encodedAlbum' : ''}'
+                '${durationSeconds > 0 ? '&duration=$durationSeconds' : ''}',
+              ),
+            )
+            .timeout(const Duration(seconds: 8));
+        if (response.statusCode != 200) continue;
         final raw = jsonDecode(response.body);
-        if (raw is List) {
-          final candidates = raw.whereType<Map>().cast<Map>().toList();
-          candidates.sort((a, b) {
-            int score(Map item) {
-              final itemTitle = (item['trackName'] ??
-                      item['name'] ??
-                      item['track_name'] ??
-                      '')
+        if (raw is! List) continue;
+        for (final candidate in raw.whereType<Map>()) {
+          final lyricsMap = Map<String, dynamic>.from(candidate);
+          final key = '${lyricsMap['id'] ?? ''}'
+              '${lyricsMap['trackName'] ?? lyricsMap['name'] ?? ''}'
+              '${lyricsMap['artistName'] ?? lyricsMap['artist'] ?? ''}';
+          if (!seenKeys.add(key)) continue;
+          candidates.add(lyricsMap);
+        }
+      }
+      if (candidates.isNotEmpty) {
+        int score(Map<String, dynamic> item) {
+          final itemTitle =
+              (item['trackName'] ?? item['name'] ?? item['track_name'] ?? '')
                   .toString();
-              final itemArtist = (item['artistName'] ??
-                      item['artist'] ??
-                      item['artist_name'] ??
-                      '')
-                  .toString();
-              final synced =
-                  (item['syncedLyrics'] as String?)?.isNotEmpty == true
-                      ? 1000
-                      : 0;
-              final plain = (item['plainLyrics'] as String?)?.isNotEmpty == true
-                  ? 250
-                  : 0;
-              final titleTokens = _lookupTokens(_title);
-              final artistTokens = _lookupTokens(_artist);
-              final itemTitleTokens = _lookupTokens(itemTitle);
-              final itemArtistTokens = _lookupTokens(itemArtist);
-              final titleMatches =
-                  titleTokens.intersection(itemTitleTokens).length;
-              final artistMatches =
-                  artistTokens.intersection(itemArtistTokens).length;
-              final titleBonus = titleTokens.isNotEmpty
-                  ? titleMatches * 90 +
-                      (titleMatches == titleTokens.length ? 220 : 0)
-                  : 0;
-              final artistBonus = artistTokens.isNotEmpty
-                  ? artistMatches * 120 +
-                      (artistMatches == artistTokens.length ? 260 : 0)
-                  : 0;
-              final itemDuration =
-                  (item['duration'] as num?)?.toInt() ?? durationSeconds;
-              final durationPenalty = durationSeconds > 0
-                  ? (durationSeconds - itemDuration).abs()
-                  : 0;
-              final albumBonus = encodedAlbum != null &&
-                      (item['albumName']?.toString().toLowerCase() ==
-                          _album.toLowerCase())
-                  ? 50
-                  : 0;
-              return synced +
-                  plain +
-                  titleBonus +
-                  artistBonus +
-                  albumBonus -
-                  durationPenalty;
-            }
-
-            return score(b).compareTo(score(a));
+          final itemArtist = (item['artistName'] ??
+                  item['artist'] ??
+                  item['artist_name'] ??
+                  '')
+              .toString();
+          final synced =
+              (item['syncedLyrics'] as String?)?.isNotEmpty == true ? 1000 : 0;
+          final plain =
+              (item['plainLyrics'] as String?)?.isNotEmpty == true ? 250 : 0;
+          final itemTitleTokens = _lookupTokens(itemTitle);
+          final itemArtistTokens = _lookupTokens(itemArtist);
+          final titleScores = _titleVariants.map((title) {
+            final titleTokens = _lookupTokens(title);
+            final matches = titleTokens.intersection(itemTitleTokens).length;
+            return titleTokens.isNotEmpty
+                ? matches * 110 + (matches == titleTokens.length ? 260 : 0)
+                : 0;
           });
+          final artistScores = _artistVariants.map((artist) {
+            final artistTokens = _lookupTokens(artist);
+            final matches = artistTokens.intersection(itemArtistTokens).length;
+            return artistTokens.isNotEmpty
+                ? matches * 130 + (matches == artistTokens.length ? 320 : 0)
+                : 0;
+          });
+          final titleBonus = titleScores.isEmpty
+              ? 0
+              : titleScores.reduce((a, b) => a > b ? a : b);
+          final artistBonus = artistScores.isEmpty
+              ? 0
+              : artistScores.reduce((a, b) => a > b ? a : b);
+          final itemDuration =
+              (item['duration'] as num?)?.toInt() ?? durationSeconds;
+          final durationPenalty = durationSeconds > 0
+              ? (durationSeconds - itemDuration).abs() * 2
+              : 0;
+          final albumBonus = albumName.isNotEmpty &&
+                  (item['albumName']?.toString().toLowerCase() ==
+                      albumName.toLowerCase())
+              ? 80
+              : 0;
+          return synced +
+              plain +
+              titleBonus +
+              artistBonus +
+              albumBonus -
+              durationPenalty;
+        }
 
-          for (final candidate in candidates) {
-            final lyricsMap = Map<String, dynamic>.from(candidate);
-            final candidateTitle = (lyricsMap['trackName'] ??
-                    lyricsMap['name'] ??
-                    lyricsMap['track_name'] ??
-                    '')
-                .toString();
-            final candidateArtist = (lyricsMap['artistName'] ??
-                    lyricsMap['artist'] ??
-                    lyricsMap['artist_name'] ??
-                    '')
-                .toString();
-            final titleOverlap = _lookupTokens(_title)
-                .intersection(_lookupTokens(candidateTitle))
-                .length;
-            final artistOverlap = _lookupTokens(_artist)
-                .intersection(_lookupTokens(candidateArtist))
-                .length;
-            final candidateDuration =
-                (lyricsMap['duration'] as num?)?.toInt() ?? 0;
-            if ((_title.isNotEmpty && titleOverlap == 0) ||
-                (_artist.isNotEmpty &&
-                    candidateArtist.isNotEmpty &&
-                    artistOverlap == 0)) {
-              continue;
-            }
-            if (durationSeconds > 0 &&
-                candidateDuration > 0 &&
-                (durationSeconds - candidateDuration).abs() > 8) {
-              continue;
-            }
-            if (await _applyLyricsPayload(lyricsMap)) {
-              return;
-            }
+        candidates.sort((a, b) => score(b).compareTo(score(a)));
+
+        for (final lyricsMap in candidates) {
+          final candidateTitle = (lyricsMap['trackName'] ??
+                  lyricsMap['name'] ??
+                  lyricsMap['track_name'] ??
+                  '')
+              .toString();
+          final candidateArtist = (lyricsMap['artistName'] ??
+                  lyricsMap['artist'] ??
+                  lyricsMap['artist_name'] ??
+                  '')
+              .toString();
+          final candidateDuration =
+              (lyricsMap['duration'] as num?)?.toInt() ?? 0;
+          final titleMatch = _titleVariants.any((title) => _lookupTokens(title)
+              .intersection(_lookupTokens(candidateTitle))
+              .isNotEmpty);
+          final artistMatch = _artistVariants.any((artist) =>
+              _lookupTokens(artist)
+                  .intersection(_lookupTokens(candidateArtist))
+                  .isNotEmpty);
+          if (!titleMatch || !artistMatch) {
+            continue;
+          }
+          if (durationSeconds > 0 &&
+              candidateDuration > 0 &&
+              (durationSeconds - candidateDuration).abs() > 10) {
+            continue;
+          }
+          if (await _applyLyricsPayload(lyricsMap)) {
+            return;
           }
         }
       }
     } catch (_) {}
 
-    if (_artist.isNotEmpty) {
+    if (_artistVariants.isNotEmpty) {
       try {
-        final response = await http
-            .get(
-              Uri.parse(
-                'https://lrclib.net/api/get?track_name=$encodedTitle&artist_name=$encodedArtist',
-              ),
-            )
-            .timeout(const Duration(seconds: 8));
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body) as Map<String, dynamic>;
-          if (await _applyLyricsPayload(data)) {
-            return;
+        for (final query in queries.take(4)) {
+          final response = await http
+              .get(
+                Uri.parse(
+                  'https://lrclib.net/api/get?track_name=${Uri.encodeComponent(query['title'] ?? '')}'
+                  '&artist_name=${Uri.encodeComponent(query['artist'] ?? '')}',
+                ),
+              )
+              .timeout(const Duration(seconds: 8));
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body) as Map<String, dynamic>;
+            if (await _applyLyricsPayload(data)) {
+              return;
+            }
           }
         }
       } catch (_) {}
 
       try {
-        final response = await http
-            .get(Uri.parse(
-                'https://api.lyrics.ovh/v1/$encodedArtist/$encodedTitle'))
-            .timeout(const Duration(seconds: 8));
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body) as Map<String, dynamic>;
-          final raw = data['lyrics'] as String? ?? '';
-          final lines = raw
-              .split('\n')
-              .map((line) => line.trim())
-              .where((line) => line.isNotEmpty)
-              .map((line) => _LrcLine(time: Duration.zero, text: line))
-              .toList();
-          if (!mounted) return;
-          setState(() {
-            _lrcLines = lines;
-            _lyricsSynced = false;
-            _lyricsLoading = false;
-          });
-          return;
+        for (final query in queries.take(3)) {
+          final encodedArtist = Uri.encodeComponent(query['artist'] ?? '');
+          final encodedTitle = Uri.encodeComponent(query['title'] ?? '');
+          final response = await http
+              .get(Uri.parse(
+                  'https://api.lyrics.ovh/v1/$encodedArtist/$encodedTitle'))
+              .timeout(const Duration(seconds: 8));
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body) as Map<String, dynamic>;
+            final raw = data['lyrics'] as String? ?? '';
+            final lines = raw
+                .split('\n')
+                .map((line) => line.trim())
+                .where((line) => line.isNotEmpty)
+                .map((line) => _LrcLine(time: Duration.zero, text: line))
+                .toList();
+            if (lines.isEmpty) {
+              continue;
+            }
+            if (!mounted) return;
+            setState(() {
+              _lrcLines = lines;
+              _lyricsSynced = false;
+              _lyricsLoading = false;
+            });
+            return;
+          }
         }
       } catch (_) {}
     }
@@ -564,6 +677,22 @@ class _PlayerScreenState extends State<PlayerScreen>
     await _playback.prevTrack();
   }
 
+  Future<void> _openArtistProfile(Map<String, dynamic> artist) async {
+    final name = (artist['name'] ?? '').toString().trim();
+    if (name.isEmpty) return;
+    final id = artist['id']?.toString() ?? '';
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ArtistScreen(
+          artistId:
+              id.isNotEmpty ? id : name.toLowerCase().replaceAll(' ', '_'),
+          artistName: name,
+        ),
+      ),
+    );
+  }
+
   void _openLyricsScreen() {
     Navigator.push(
       context,
@@ -638,6 +767,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                           _currentLyricLine!.isNotEmpty)
                         GestureDetector(
                           onTap: _openLyricsScreen,
+                          onLongPress: _lyricsSynced && _currentLyricIdx >= 0
+                              ? () => _seekTo(_lrcLines[_currentLyricIdx].time)
+                              : null,
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 24,
@@ -789,32 +921,13 @@ class _PlayerScreenState extends State<PlayerScreen>
                 Wrap(
                   spacing: 0,
                   children: () {
-                    final names = _artist
-                        .split(',')
-                        .map((s) => s.trim())
-                        .where((s) => s.isNotEmpty)
-                        .toList();
-                    return names.asMap().entries.map((entry) {
-                      final name = entry.value;
-                      final isLast = entry.key == names.length - 1;
+                    final artists = _artistEntries;
+                    return artists.asMap().entries.map((entry) {
+                      final artist = entry.value;
+                      final name = (artist['name'] ?? '').toString();
+                      final isLast = entry.key == artists.length - 1;
                       return GestureDetector(
-                        onTap: () {
-                          final numericId = names.length == 1
-                              ? (_track['artist_id']?.toString() ?? '')
-                              : '';
-                          final artistId = numericId.isNotEmpty
-                              ? numericId
-                              : name.toLowerCase().replaceAll(' ', '_');
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ArtistScreen(
-                                artistId: artistId,
-                                artistName: name,
-                              ),
-                            ),
-                          );
-                        },
+                        onTap: () => _openArtistProfile(artist),
                         child: Text(
                           isLast ? name : '$name, ',
                           style: GoogleFonts.outfit(

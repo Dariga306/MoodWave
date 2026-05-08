@@ -325,7 +325,7 @@ async def get_listening_history(
             "cover_url": track.cover_url,
             "preview_url": track.preview_url or None,
             "duration_ms": track.duration_ms,
-            "played_at": history.created_at.isoformat(),
+            "played_at": history.created_at.isoformat() + "Z",
         })
 
     return [{"date": label, "tracks": tracks} for label, tracks in grouped.items()]
@@ -367,7 +367,7 @@ async def get_recent_tracks(
             "cover_url": track.cover_url,
             "preview_url": track.preview_url or None,
             "duration_ms": track.duration_ms,
-            "played_at": played_at.isoformat() if played_at else None,
+            "played_at": (played_at.isoformat() + "Z") if played_at else None,
         }
         for track, played_at in rows
     ]

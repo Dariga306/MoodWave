@@ -131,6 +131,10 @@ class _ArtistScreenState extends State<ArtistScreen> {
         };
     final tracks = (_profile?['top_tracks'] as List?) ?? [];
     final albums = (_profile?['albums'] as List?) ?? [];
+    final singles = (_profile?['singles'] as List?) ?? [];
+    final eps = (_profile?['eps'] as List?) ?? [];
+    final discographyPreview =
+        albums.isNotEmpty ? albums : (singles.isNotEmpty ? singles : eps);
     final relatedArtists = (_profile?['related_artists'] as List?) ?? [];
     final imageUrl = artist['picture_xl']?.toString();
 
@@ -342,17 +346,17 @@ class _ArtistScreenState extends State<ArtistScreen> {
                           }),
                         const SizedBox(height: 20),
                         // ─── Discography header with See All ──────────────
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text('Discography',
-                                  style: GoogleFonts.outfit(
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppColors.text)),
-                              if (albums.isNotEmpty)
+                        if (discographyPreview.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Discography',
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.text)),
                                 GestureDetector(
                                   onTap: () => Navigator.push(
                                     context,
@@ -372,52 +376,54 @@ class _ArtistScreenState extends State<ArtistScreen> {
                                           color: AppColors.purpleLight,
                                           fontWeight: FontWeight.w600)),
                                 ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          height: 195,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(horizontal: 20),
-                            itemCount: albums.take(10).length,
-                            itemBuilder: (_, index) {
-                              final album = Map<String, dynamic>.from(
-                                  albums[index] as Map);
-                              final albumId = album['id'];
-                              final parsedAlbumId = albumId != null
-                                  ? int.tryParse(albumId.toString())
-                                  : null;
-                              return GestureDetector(
-                                onTap: parsedAlbumId == null
-                                    ? null
-                                    : () => Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => AlbumScreen(
-                                              albumId: parsedAlbumId,
-                                              initialTitle:
-                                                  album['title']?.toString(),
-                                              initialCover:
-                                                  album['cover_xl']?.toString(),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            height: 195,
+                            child: ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
+                              itemCount: discographyPreview.take(10).length,
+                              itemBuilder: (_, index) {
+                                final album = Map<String, dynamic>.from(
+                                    discographyPreview[index] as Map);
+                                final albumId = album['id'];
+                                final parsedAlbumId = albumId != null
+                                    ? int.tryParse(albumId.toString())
+                                    : null;
+                                return GestureDetector(
+                                  onTap: parsedAlbumId == null
+                                      ? null
+                                      : () => Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) => AlbumScreen(
+                                                albumId: parsedAlbumId,
+                                                initialTitle:
+                                                    album['title']?.toString(),
+                                                initialCover: album['cover_xl']
+                                                    ?.toString(),
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                child: _AlbumCard(
-                                  title:
-                                      album['title']?.toString() ?? 'Unknown',
-                                  imageUrl: album['cover_xl']?.toString(),
-                                  year: _albumYear(
-                                      album['release_date']?.toString()),
-                                  recordType:
-                                      album['record_type']?.toString() ??
-                                          'album',
-                                ),
-                              );
-                            },
+                                  child: _AlbumCard(
+                                    title:
+                                        album['title']?.toString() ?? 'Unknown',
+                                    imageUrl: album['cover_xl']?.toString(),
+                                    year: _albumYear(
+                                        album['release_date']?.toString()),
+                                    recordType:
+                                        album['record_type']?.toString() ??
+                                            'album',
+                                  ),
+                                );
+                              },
+                            ),
                           ),
-                        ),
+                        ],
                         // ─── "This Is [Artist]" Spotify-style card ───────
                         if (tracks.isNotEmpty) ...[
                           const SizedBox(height: 24),

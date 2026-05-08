@@ -12,6 +12,8 @@ import '../artist_screen.dart';
 import '../extra_screens.dart';
 import '../genre_tracks_screen.dart';
 import '../player_screen.dart';
+import '../playlist_screen.dart';
+import '../user_profile_screen.dart';
 import '../weather_screen.dart';
 import '../ai_playlist_screen.dart';
 
@@ -31,11 +33,16 @@ class _SearchTabState extends State<SearchTab> {
   List<dynamic> _tracks = [];
   List<dynamic> _artists = [];
   List<dynamic> _albums = [];
+  List<dynamic> _playlists = [];
+  List<dynamic> _users = [];
+  int _categoryIndex =
+      0; // 0=All 1=Tracks 2=Artists 3=Albums 4=Playlists 5=Profiles
   List<String> _trendingSearches = [];
   List<String> _suggestions = [];
   Timer? _suggestionDebounce;
   bool _searching = false;
   bool _hasQuery = false;
+  bool _showAllHistory = false;
 
   String _normalizeSearchText(String value) {
     return value
@@ -137,6 +144,30 @@ class _SearchTabState extends State<SearchTab> {
     return sorted;
   }
 
+  List<Map<String, dynamic>> _sortPlaylists(
+    List<Map<String, dynamic>> items,
+    String query,
+  ) {
+    final sorted = List<Map<String, dynamic>>.from(items);
+    sorted.sort((a, b) {
+      final aScore = _scoreSearchMatch(
+        query,
+        a['title']?.toString() ?? '',
+        secondary: a['description']?.toString() ?? '',
+      );
+      final bScore = _scoreSearchMatch(
+        query,
+        b['title']?.toString() ?? '',
+        secondary: b['description']?.toString() ?? '',
+      );
+      if (aScore != bScore) return bScore.compareTo(aScore);
+      final aTracks = int.tryParse('${a['track_count'] ?? 0}') ?? 0;
+      final bTracks = int.tryParse('${b['track_count'] ?? 0}') ?? 0;
+      return bTracks.compareTo(aTracks);
+    });
+    return sorted;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -225,6 +256,39 @@ class _SearchTabState extends State<SearchTab> {
     } catch (_) {}
   }
 
+  Future<void> _saveUserHistory(Map<String, dynamic> user) async {
+    try {
+      final query = _ctrl.text.trim().isNotEmpty
+          ? _ctrl.text.trim()
+          : ((user['display_name'] ?? user['username'] ?? 'User').toString());
+      await ApiService().saveSearchHistory(
+        query: query,
+        resultType: 'profile',
+        resultId: user['id']?.toString(),
+        resultTitle:
+            (user['display_name'] ?? user['username'] ?? 'User').toString(),
+        resultCover: (user['avatar_url'] ?? '').toString(),
+      );
+      await _loadHistory();
+    } catch (_) {}
+  }
+
+  Future<void> _savePlaylistHistory(Map<String, dynamic> playlist) async {
+    try {
+      final query = _ctrl.text.trim().isNotEmpty
+          ? _ctrl.text.trim()
+          : (playlist['title']?.toString() ?? 'Playlist');
+      await ApiService().saveSearchHistory(
+        query: query,
+        resultType: 'playlist',
+        resultId: playlist['id']?.toString(),
+        resultTitle: playlist['title']?.toString(),
+        resultCover: playlist['cover_url']?.toString(),
+      );
+      await _loadHistory();
+    } catch (_) {}
+  }
+
   Future<void> _openTrack(Map<String, dynamic> track) async {
     await _saveTrackHistory(track);
     if (!mounted) return;
@@ -265,6 +329,9 @@ class _SearchTabState extends State<SearchTab> {
         _tracks = [];
         _artists = [];
         _albums = [];
+        _playlists = [];
+        _users = [];
+        _categoryIndex = 0;
         _searching = false;
         _suggestions = [];
       });
@@ -309,6 +376,7 @@ class _SearchTabState extends State<SearchTab> {
         ApiService()
             .searchAlbums(q, limit: 8)
             .catchError((_) => <Map<String, dynamic>>[]),
+        ApiService().globalSearch(q).catchError((_) => <String, dynamic>{}),
       ]);
       if (!mounted) return;
 
@@ -338,10 +406,25 @@ class _SearchTabState extends State<SearchTab> {
         q,
       );
 
+      final globalResult = results[3] as Map<String, dynamic>;
+      final users = ((globalResult['users'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      final playlists = _sortPlaylists(
+        ((globalResult['playlists'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList(),
+        q,
+      );
+
       setState(() {
         _tracks = tracks;
         _artists = _sortArtists(artists, artistQuery);
         _albums = albums;
+        _playlists = playlists;
+        _users = users;
         _searching = false;
       });
     } catch (_) {
@@ -385,42 +468,69 @@ class _SearchTabState extends State<SearchTab> {
         .whereType<Map>()
         .map((a) => Map<String, dynamic>.from(a))
         .toList();
+    final playlistList = _playlists
+        .whereType<Map>()
+        .map((p) => Map<String, dynamic>.from(p))
+        .toList();
+    final userList = _users
+        .whereType<Map>()
+        .map((u) => Map<String, dynamic>.from(u))
+        .toList();
 
     final widgets = <Widget>[];
 
-    // Lead with up to 3 most relevant artists
-    for (var i = 0; i < artistList.length && i < 3; i++) {
-      final a = artistList[i];
-      widgets.add(_FlatArtistRow(artist: a, onTap: () => _openArtist(a)));
+    if (_categoryIndex == 1) {
+      for (final t in trackList) {
+        widgets.add(_FlatTrackRow(track: t, onTap: () => _openTrack(t)));
+      }
+    } else if (_categoryIndex == 2) {
+      for (final a in artistList) {
+        widgets.add(_FlatArtistRow(artist: a, onTap: () => _openArtist(a)));
+      }
+    } else if (_categoryIndex == 3) {
+      for (final a in albumList) {
+        widgets.add(_FlatAlbumRow(album: a, onTap: () => _openAlbum(a)));
+      }
+    } else if (_categoryIndex == 4) {
+      for (final p in playlistList) {
+        widgets
+            .add(_FlatPlaylistRow(playlist: p, onTap: () => _openPlaylist(p)));
+      }
+    } else if (_categoryIndex == 5) {
+      for (final u in userList) {
+        widgets.add(_FlatUserRow(user: u, onTap: () => _openUser(u)));
+      }
+    } else {
+      for (var i = 0; i < artistList.length && i < 3; i++) {
+        final a = artistList[i];
+        widgets.add(_FlatArtistRow(artist: a, onTap: () => _openArtist(a)));
+      }
+      for (var i = 0; i < userList.length && i < 2; i++) {
+        final u = userList[i];
+        widgets.add(_FlatUserRow(user: u, onTap: () => _openUser(u)));
+      }
+      for (var i = 0; i < trackList.length && i < 4; i++) {
+        final t = trackList[i];
+        widgets.add(_FlatTrackRow(track: t, onTap: () => _openTrack(t)));
+      }
+      for (var i = 0; i < playlistList.length && i < 3; i++) {
+        final p = playlistList[i];
+        widgets
+            .add(_FlatPlaylistRow(playlist: p, onTap: () => _openPlaylist(p)));
+      }
+      for (final album in albumList) {
+        widgets
+            .add(_FlatAlbumRow(album: album, onTap: () => _openAlbum(album)));
+      }
+      for (var i = 4; i < trackList.length; i++) {
+        final t = trackList[i];
+        widgets.add(_FlatTrackRow(track: t, onTap: () => _openTrack(t)));
+      }
     }
 
-    // First batch of tracks (up to 4)
-    for (var i = 0; i < trackList.length && i < 4; i++) {
-      final t = trackList[i];
-      widgets.add(_FlatTrackRow(track: t, onTap: () => _openTrack(t)));
-    }
-
-    // Albums
-    for (final album in albumList) {
-      widgets.add(_FlatAlbumRow(
-        album: album,
-        onTap: () => _openAlbum(album),
-      ));
-    }
-
-    // Remaining tracks
-    for (var i = 4; i < trackList.length; i++) {
-      final t = trackList[i];
-      widgets.add(_FlatTrackRow(track: t, onTap: () => _openTrack(t)));
-    }
-
-    if (trackList.isNotEmpty || artistList.isNotEmpty || albumList.isNotEmpty) {
+    if (widgets.isNotEmpty) {
       widgets.add(
-        _ShowAllResultsRow(
-          query: _ctrl.text.trim(),
-          onTap: _openAllResults,
-        ),
-      );
+          _ShowAllResultsRow(query: _ctrl.text.trim(), onTap: _openAllResults));
     }
 
     return widgets;
@@ -446,6 +556,14 @@ class _SearchTabState extends State<SearchTab> {
               .whereType<Map>()
               .map((e) => Map<String, dynamic>.from(e))
               .toList(),
+          initialPlaylists: _playlists
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList(),
+          initialUsers: _users
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList(),
         ),
       ),
     );
@@ -466,6 +584,130 @@ class _SearchTabState extends State<SearchTab> {
         ),
       ),
     );
+  }
+
+  void _openUser(Map<String, dynamic> user) {
+    final rawId = user['id'];
+    final userId = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
+    if (userId == null) return;
+    _saveUserHistory(user);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => UserProfileScreen(userId: userId, initialUser: user),
+      ),
+    );
+  }
+
+  Future<void> _openPlaylist(Map<String, dynamic> playlist) async {
+    final playlistId = (playlist['id'] as num?)?.toInt() ??
+        int.tryParse(playlist['id']?.toString() ?? '');
+    if (playlistId == null || playlistId <= 0) return;
+    await _savePlaylistHistory(playlist);
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PlaylistScreen(
+          playlistId: playlistId,
+          playlistTitle: playlist['title']?.toString(),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openHistoryItem(Map<String, dynamic> item) async {
+    final type = (item['result_type'] ?? '').toString().toLowerCase();
+    final resultId = item['result_id']?.toString() ?? '';
+    if (type == 'playlist') {
+      final playlistId = int.tryParse(resultId);
+      if (playlistId != null) {
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PlaylistScreen(
+              playlistId: playlistId,
+              playlistTitle: item['result_title']?.toString(),
+            ),
+          ),
+        );
+        return;
+      }
+    } else if (type == 'profile' || type == 'user') {
+      final userId = int.tryParse(resultId);
+      if (userId != null) {
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => UserProfileScreen(userId: userId),
+          ),
+        );
+        return;
+      }
+    } else if (type == 'artist') {
+      if (resultId.isNotEmpty) {
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ArtistScreen(
+              artistId: resultId,
+              artistName: item['result_title']?.toString() ?? 'Artist',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+    _useHistoryItem(item);
+  }
+
+  List<Widget> _buildCategoryChips() {
+    const labels = [
+      'All',
+      'Tracks',
+      'Artists',
+      'Albums',
+      'Playlists',
+      'Profiles'
+    ];
+    return [
+      SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+        child: Row(
+          children: List.generate(labels.length, (i) {
+            final selected = _categoryIndex == i;
+            return GestureDetector(
+              onTap: () => setState(() => _categoryIndex = i),
+              child: Container(
+                margin: const EdgeInsets.only(right: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: selected ? AppColors.primaryBtn : null,
+                  color: selected ? null : AppColors.surface,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                      color: selected ? Colors.transparent : AppColors.border),
+                ),
+                child: Text(
+                  labels[i],
+                  style: GoogleFonts.outfit(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: selected ? Colors.white : AppColors.text2,
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
+      const SizedBox(height: 8),
+    ];
   }
 
   @override
@@ -542,6 +784,9 @@ class _SearchTabState extends State<SearchTab> {
                                     _tracks = [];
                                     _artists = [];
                                     _albums = [];
+                                    _playlists = [];
+                                    _users = [];
+                                    _categoryIndex = 0;
                                     _searching = false;
                                   });
                                 },
@@ -561,6 +806,10 @@ class _SearchTabState extends State<SearchTab> {
                   ),
                 ),
               ),
+              if (_hasQuery) ...[
+                const SizedBox(height: 4),
+                ..._buildCategoryChips(),
+              ],
               if (_searching) ...[
                 ..._buildSuggestions(),
                 if (_suggestions.isEmpty)
@@ -573,7 +822,11 @@ class _SearchTabState extends State<SearchTab> {
                     ),
                   ),
               ] else if (_hasQuery) ...[
-                if (_tracks.isEmpty && _artists.isEmpty && _albums.isEmpty)
+                if (_tracks.isEmpty &&
+                    _artists.isEmpty &&
+                    _albums.isEmpty &&
+                    _playlists.isEmpty &&
+                    _users.isEmpty)
                   Padding(
                     padding: const EdgeInsets.all(40),
                     child: Center(
@@ -606,16 +859,36 @@ class _SearchTabState extends State<SearchTab> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Recently Played',
+                        Text('Recently searched',
                             style: GoogleFonts.outfit(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w700,
                                 color: AppColors.text)),
-                        GestureDetector(
-                          onTap: _clearAllHistory,
-                          child: Text('Clear all',
-                              style: GoogleFonts.outfit(
-                                  fontSize: 13, color: AppColors.purpleLight)),
+                        Row(
+                          children: [
+                            if (_searchHistory.length > 4)
+                              GestureDetector(
+                                onTap: () => setState(
+                                  () => _showAllHistory = !_showAllHistory,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.only(right: 14),
+                                  child: Text(
+                                    _showAllHistory ? 'See less' : 'See all',
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 13,
+                                        color: AppColors.purpleLight),
+                                  ),
+                                ),
+                              ),
+                            GestureDetector(
+                              onTap: _clearAllHistory,
+                              child: Text('Clear all',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 13,
+                                      color: AppColors.purpleLight)),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -624,16 +897,30 @@ class _SearchTabState extends State<SearchTab> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Column(
-                      children: _searchHistory.map((item) {
+                      children: (_showAllHistory
+                              ? _searchHistory
+                              : _searchHistory.take(4).toList())
+                          .map((item) {
                         final itemId = item['id'] as int?;
                         final title = item['result_title']?.toString() ??
                             item['query']?.toString() ??
                             '';
-                        final subtitle =
-                            item['result_type']?.toString() ?? 'track';
+                        final subtitle = () {
+                          switch ((item['result_type'] ?? '').toString()) {
+                            case 'playlist':
+                              return 'playlist';
+                            case 'profile':
+                            case 'user':
+                              return 'profile';
+                            case 'artist':
+                              return 'artist';
+                            default:
+                              return 'track';
+                          }
+                        }();
                         final coverUrl = item['result_cover']?.toString();
                         return GestureDetector(
-                          onTap: () => _useHistoryItem(item),
+                          onTap: () => _openHistoryItem(item),
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: const BoxDecoration(
@@ -1731,12 +2018,16 @@ class _SearchResultsScreen extends StatefulWidget {
   final List<Map<String, dynamic>> initialTracks;
   final List<Map<String, dynamic>> initialArtists;
   final List<Map<String, dynamic>> initialAlbums;
+  final List<Map<String, dynamic>> initialPlaylists;
+  final List<Map<String, dynamic>> initialUsers;
 
   const _SearchResultsScreen({
     required this.query,
     required this.initialTracks,
     required this.initialArtists,
     required this.initialAlbums,
+    this.initialPlaylists = const [],
+    this.initialUsers = const [],
   });
 
   @override
@@ -1747,6 +2038,8 @@ class _SearchResultsScreenState extends State<_SearchResultsScreen> {
   late List<Map<String, dynamic>> _tracks;
   late List<Map<String, dynamic>> _artists;
   late List<Map<String, dynamic>> _albums;
+  List<Map<String, dynamic>> _playlists = [];
+  List<Map<String, dynamic>> _users = [];
   bool _loading = true;
 
   @override
@@ -1755,6 +2048,8 @@ class _SearchResultsScreenState extends State<_SearchResultsScreen> {
     _tracks = widget.initialTracks;
     _artists = widget.initialArtists;
     _albums = widget.initialAlbums;
+    _playlists = widget.initialPlaylists;
+    _users = widget.initialUsers;
     _load();
   }
 
@@ -1787,6 +2082,9 @@ class _SearchResultsScreenState extends State<_SearchResultsScreen> {
         ApiService().searchTracksWithFallback(widget.query, limit: 30),
         ApiService().searchArtistsList(artistQuery, limit: 20),
         ApiService().searchAlbums(widget.query, limit: 24),
+        ApiService()
+            .globalSearch(widget.query)
+            .catchError((_) => <String, dynamic>{}),
       ]);
       if (!mounted) return;
 
@@ -1819,11 +2117,33 @@ class _SearchResultsScreenState extends State<_SearchResultsScreen> {
                 secondary: a['artist']?.toString() ?? '',
               ),
             ));
+      final globalResult = results[3] as Map<String, dynamic>;
+      final users = ((globalResult['users'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      final playlists = ((globalResult['playlists'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList()
+        ..sort((a, b) => _score(
+              widget.query,
+              b['title']?.toString() ?? '',
+              secondary: b['description']?.toString() ?? '',
+            ).compareTo(
+              _score(
+                widget.query,
+                a['title']?.toString() ?? '',
+                secondary: a['description']?.toString() ?? '',
+              ),
+            ));
 
       setState(() {
         _tracks = tracks;
         _artists = artists;
         _albums = albums;
+        _playlists = playlists;
+        _users = users;
         _loading = false;
       });
     } catch (_) {
@@ -1863,6 +2183,33 @@ class _SearchResultsScreenState extends State<_SearchResultsScreen> {
           albumId: albumId,
           initialTitle: album['title']?.toString(),
           initialCover: album['cover_xl']?.toString(),
+        ),
+      ),
+    );
+  }
+
+  void _openUser(Map<String, dynamic> user) {
+    final rawId = user['id'];
+    final userId = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
+    if (userId == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => UserProfileScreen(userId: userId, initialUser: user),
+      ),
+    );
+  }
+
+  void _openPlaylist(Map<String, dynamic> playlist) {
+    final playlistId = (playlist['id'] as num?)?.toInt() ??
+        int.tryParse(playlist['id']?.toString() ?? '');
+    if (playlistId == null || playlistId <= 0) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PlaylistScreen(
+          playlistId: playlistId,
+          playlistTitle: playlist['title']?.toString(),
         ),
       ),
     );
@@ -1951,6 +2298,15 @@ class _SearchResultsScreenState extends State<_SearchResultsScreen> {
                           minHeight: 2,
                         ),
                       ),
+                    if (_users.isNotEmpty) ...[
+                      _sectionTitle('People'),
+                      ..._users
+                          .map((user) => _FlatUserRow(
+                                user: user,
+                                onTap: () => _openUser(user),
+                              ))
+                          .toList(),
+                    ],
                     if (_artists.isNotEmpty) ...[
                       _sectionTitle('Artists'),
                       ..._artists
@@ -1969,6 +2325,15 @@ class _SearchResultsScreenState extends State<_SearchResultsScreen> {
                               ))
                           .toList(),
                     ],
+                    if (_playlists.isNotEmpty) ...[
+                      _sectionTitle('Playlists'),
+                      ..._playlists
+                          .map((playlist) => _FlatPlaylistRow(
+                                playlist: playlist,
+                                onTap: () => _openPlaylist(playlist),
+                              ))
+                          .toList(),
+                    ],
                     if (_tracks.isNotEmpty) ...[
                       _sectionTitle('Tracks'),
                       ..._tracks
@@ -1979,8 +2344,10 @@ class _SearchResultsScreenState extends State<_SearchResultsScreen> {
                           .toList(),
                     ],
                     if (!_loading &&
+                        _users.isEmpty &&
                         _artists.isEmpty &&
                         _albums.isEmpty &&
+                        _playlists.isEmpty &&
                         _tracks.isEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 40),
@@ -2146,6 +2513,96 @@ class _FlatAlbumRow extends StatelessWidget {
   }
 }
 
+class _FlatPlaylistRow extends StatelessWidget {
+  final Map<String, dynamic> playlist;
+  final VoidCallback onTap;
+  const _FlatPlaylistRow({required this.playlist, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final title = playlist['title']?.toString() ?? 'Playlist';
+    final subtitle =
+        (playlist['description']?.toString().trim().isNotEmpty == true)
+            ? playlist['description'].toString()
+            : '${playlist['track_count'] ?? 0} songs';
+    final coverUrl = playlist['cover_url']?.toString();
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: coverUrl != null && coverUrl.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: coverUrl,
+                      width: 52,
+                      height: 52,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => Container(
+                        width: 52,
+                        height: 52,
+                        color: AppColors.surface,
+                      ),
+                      errorWidget: (_, __, ___) => Container(
+                        width: 52,
+                        height: 52,
+                        color: AppColors.surface,
+                        child: const Icon(Icons.queue_music_rounded,
+                            color: AppColors.text3),
+                      ),
+                    )
+                  : Container(
+                      width: 52,
+                      height: 52,
+                      color: AppColors.surface,
+                      child: const Icon(Icons.queue_music_rounded,
+                          color: AppColors.text3),
+                    ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.text,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      color: AppColors.text3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              'Playlist',
+              style: GoogleFonts.outfit(
+                fontSize: 12,
+                color: AppColors.text3,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _FlatTrackRow extends StatelessWidget {
   final Map<String, dynamic> track;
   final VoidCallback onTap;
@@ -2238,20 +2695,118 @@ class _FlatTrackRow extends StatelessWidget {
                       .searchArtistsList(artistName, limit: 6);
                   if (!context.mounted || candidates.isEmpty) return;
                   final artistId = candidates.first['id']?.toString();
-                  if (artistId == null ||
-                      artistId.isEmpty ||
-                      !context.mounted) return;
+                  if (artistId == null || artistId.isEmpty || !context.mounted)
+                    return;
                   Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) => ArtistScreen(
                       artistId: artistId,
-                      artistName: candidates.first['name']?.toString() ??
-                          artistName,
+                      artistName:
+                          candidates.first['name']?.toString() ?? artistName,
                     ),
                   ));
                 },
               ),
               child: const Icon(Icons.more_vert_rounded,
                   size: 18, color: AppColors.text3),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FlatUserRow extends StatelessWidget {
+  final Map<String, dynamic> user;
+  final VoidCallback onTap;
+  const _FlatUserRow({required this.user, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = (user['display_name'] ??
+            user['first_name'] ??
+            user['username'] ??
+            'User')
+        .toString();
+    final username = (user['username'] ?? '').toString();
+    final avatarUrl = (user['avatar_url'] ?? '').toString();
+    final city = (user['city'] ?? '').toString();
+    final sub = city.isNotEmpty
+        ? city
+        : (username.isNotEmpty ? '@$username' : 'Profile');
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: AppColors.gradMixed,
+              ),
+              child: avatarUrl.isNotEmpty
+                  ? ClipOval(
+                      child: CachedNetworkImage(
+                        imageUrl: avatarUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) => const SizedBox(),
+                        errorWidget: (_, __, ___) => Center(
+                          child: Text(
+                            initial,
+                            style: GoogleFonts.outfit(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                  : Center(
+                      child: Text(
+                        initial,
+                        style: GoogleFonts.outfit(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.text,
+                    ),
+                  ),
+                  Text(
+                    sub,
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      color: AppColors.text3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.text3,
+              size: 18,
             ),
           ],
         ),

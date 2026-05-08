@@ -61,6 +61,20 @@ class _LyricsScreenState extends State<LyricsScreen> {
   // Ignore stale stream events right after a seek
   DateTime? _seekedAt;
 
+  String get _cleanTitle => widget.title
+      .replaceAll(RegExp(r'\((feat|ft|with).*?\)', caseSensitive: false), ' ')
+      .replaceAll(RegExp(r'\[(feat|ft|with).*?\]', caseSensitive: false), ' ')
+      .replaceAll(
+          RegExp(r'\((live|remaster(ed)?|version).*?\)', caseSensitive: false),
+          ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  String get _primaryArtist => widget.artist
+      .split(RegExp(r'\s*(?:,| feat\. | ft\. | & )\s*', caseSensitive: false))
+      .map((item) => item.trim())
+      .firstWhere((item) => item.isNotEmpty, orElse: () => widget.artist);
+
   // Extrapolates current position using wall-clock time since last update.
   // Capped at 500 ms so a paused player doesn't drift.
   int get _interpolatedPositionMs {
@@ -133,8 +147,9 @@ class _LyricsScreenState extends State<LyricsScreen> {
     setState(() => _loading = true);
 
     try {
-      final title = Uri.encodeComponent(widget.title);
-      final artist = Uri.encodeComponent(widget.artist);
+      final title = Uri.encodeComponent(
+          _cleanTitle.isNotEmpty ? _cleanTitle : widget.title);
+      final artist = Uri.encodeComponent(_primaryArtist);
       final album = widget.album.isNotEmpty
           ? '&album_name=${Uri.encodeComponent(widget.album)}'
           : '';
@@ -174,8 +189,9 @@ class _LyricsScreenState extends State<LyricsScreen> {
     } catch (_) {}
 
     try {
-      final title = Uri.encodeComponent(widget.title);
-      final artist = Uri.encodeComponent(widget.artist);
+      final title = Uri.encodeComponent(
+          _cleanTitle.isNotEmpty ? _cleanTitle : widget.title);
+      final artist = Uri.encodeComponent(_primaryArtist);
       final response = await http
           .get(Uri.parse('https://api.lyrics.ovh/v1/$artist/$title'))
           .timeout(const Duration(seconds: 10));
@@ -206,8 +222,9 @@ class _LyricsScreenState extends State<LyricsScreen> {
     final itemTitle = (item['trackName'] ?? item['name'] ?? '').toString();
     final itemArtist = (item['artistName'] ?? item['artist'] ?? '').toString();
     final itemAlbum = (item['albumName'] ?? '').toString();
-    final titleTokens = _tokens(widget.title);
-    final artistTokens = _tokens(widget.artist);
+    final titleTokens =
+        _tokens(_cleanTitle.isNotEmpty ? _cleanTitle : widget.title);
+    final artistTokens = _tokens(_primaryArtist);
     final itemTitleTokens = _tokens(itemTitle);
     final itemArtistTokens = _tokens(itemArtist);
     final synced =
@@ -235,8 +252,9 @@ class _LyricsScreenState extends State<LyricsScreen> {
   bool _looksLikeRequestedSong(Map item) {
     final itemTitle = (item['trackName'] ?? item['name'] ?? '').toString();
     final itemArtist = (item['artistName'] ?? item['artist'] ?? '').toString();
-    final titleTokens = _tokens(widget.title);
-    final artistTokens = _tokens(widget.artist);
+    final titleTokens =
+        _tokens(_cleanTitle.isNotEmpty ? _cleanTitle : widget.title);
+    final artistTokens = _tokens(_primaryArtist);
     if (titleTokens.isNotEmpty &&
         titleTokens.intersection(_tokens(itemTitle)).isEmpty) {
       return false;

@@ -24,6 +24,7 @@ class PlaylistVisibility(str, enum.Enum):
     public = "public"
     friends = "friends"
     private = "private"
+    saved = "saved"
 
 
 class TrackCache(Base):
@@ -65,6 +66,10 @@ class Playlist(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    source_playlist_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("playlists.id", ondelete="SET NULL"),
+        index=True,
+    )
     collab_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String(500))

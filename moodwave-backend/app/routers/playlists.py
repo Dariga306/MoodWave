@@ -22,6 +22,7 @@ class PlaylistCreateRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=500)
     cover_url: Optional[str] = Field(default=None)
+    source_playlist_id: Optional[int] = None
     visibility: PlaylistVisibility = PlaylistVisibility.private
     is_collaborative: bool = False
     collab_user_id: Optional[int] = None
@@ -85,6 +86,7 @@ def _playlist_payload(playlist: Playlist, track_count: int = 0) -> dict:
     return {
         "id": playlist.id,
         "owner_id": playlist.owner_id,
+        "source_playlist_id": playlist.source_playlist_id,
         "title": playlist.title,
         "description": playlist.description,
         "cover_url": playlist.cover_url,
@@ -93,7 +95,70 @@ def _playlist_payload(playlist: Playlist, track_count: int = 0) -> dict:
         "collab_user_id": playlist.collab_user_id,
         "track_count": track_count,
         "created_at": playlist.created_at.isoformat(),
+        "updated_at": playlist.updated_at.isoformat(),
     }
+
+
+def _apply_source_snapshot(payload: dict, source_playlist: Playlist) -> dict:
+    payload["title"] = source_playlist.title
+    payload["description"] = source_playlist.description
+    payload["cover_url"] = source_playlist.cover_url
+    payload["source_updated_at"] = source_playlist.updated_at.isoformat()
+    return payload
+
+
+async def _saved_copy_metadata(
+    db: AsyncSession,
+    *,
+    playlist: Playlist,
+    current_user: User,
+) -> tuple[int, bool, int | None]:
+    root_id = playlist.source_playlist_id or playlist.id
+    saved_count = int(
+        await db.scalar(
+            select(func.count(Playlist.id)).where(
+                Playlist.visibility == PlaylistVisibility.saved,
+                Playlist.source_playlist_id == root_id,
+            )
+        )
+        or 0
+    )
+
+    if playlist.visibility == PlaylistVisibility.saved and playlist.owner_id == current_user.id:
+        return saved_count, True, playlist.id
+
+    saved_copy_id = await db.scalar(
+        select(Playlist.id).where(
+            Playlist.owner_id == current_user.id,
+            Playlist.visibility == PlaylistVisibility.saved,
+            Playlist.source_playlist_id == root_id,
+        )
+    )
+    return saved_count, saved_copy_id is not None, int(saved_copy_id) if saved_copy_id else None
+
+
+async def _attach_owner_metadata(
+    payload: dict,
+    db: AsyncSession,
+    *,
+    playlist: Playlist,
+) -> dict:
+    owner = await db.get(User, playlist.owner_id)
+    payload["owner_username"] = owner.username if owner else None
+    payload["owner_display_name"] = (owner.first_name or owner.username) if owner else None
+    payload["owner_avatar_url"] = owner.avatar_url if owner else None
+
+    source_playlist = None
+    if playlist.source_playlist_id:
+        source_playlist = await db.get(Playlist, playlist.source_playlist_id)
+    source_owner = await db.get(User, source_playlist.owner_id) if source_playlist else owner
+    payload["saved_from_owner_id"] = source_owner.id if source_owner else None
+    payload["saved_from_username"] = source_owner.username if source_owner else None
+    payload["saved_from_display_name"] = (
+        (source_owner.first_name or source_owner.username) if source_owner else None
+    )
+    payload["saved_from_avatar_url"] = source_owner.avatar_url if source_owner else None
+    return payload
 
 
 def _has_playlist_access(playlist: Playlist, user_id: int) -> bool:
@@ -102,6 +167,76 @@ def _has_playlist_access(playlist: Playlist, user_id: int) -> bool:
     if playlist.is_collaborative and playlist.collab_user_id == user_id:
         return True
     return False
+
+
+async def _can_view_playlist(
+    db: AsyncSession,
+    *,
+    playlist: Playlist,
+    current_user: User,
+) -> bool:
+    if _has_playlist_access(playlist, current_user.id):
+        return True
+    if playlist.visibility == PlaylistVisibility.public:
+        return True
+    if playlist.visibility == PlaylistVisibility.friends:
+        return await are_friends(db, playlist.owner_id, current_user.id)
+    return False
+
+
+async def _get_visible_source_playlist(
+    db: AsyncSession,
+    *,
+    playlist: Playlist,
+    current_user: User,
+    cleanup_unavailable: bool = False,
+) -> Playlist | None:
+    if not playlist.source_playlist_id:
+        return None
+    source_playlist = await db.get(Playlist, playlist.source_playlist_id)
+    if source_playlist and await _can_view_playlist(
+        db,
+        playlist=source_playlist,
+        current_user=current_user,
+    ):
+        return source_playlist
+
+    if cleanup_unavailable and playlist.visibility == PlaylistVisibility.saved:
+        await db.delete(playlist)
+        await db.commit()
+    return None
+
+
+async def _track_payloads_for_playlist(
+    db: AsyncSession,
+    *,
+    playlist: Playlist,
+) -> list[dict]:
+    await db.refresh(playlist, ["tracks"])
+    track_ids = [t.spotify_track_id for t in playlist.tracks]
+    cache_rows = []
+    if track_ids:
+        cache_rows = (
+            await db.execute(
+                select(TrackCache).where(TrackCache.spotify_id.in_(track_ids))
+            )
+        ).scalars().all()
+    cache_map = {row.spotify_id: row for row in cache_rows}
+    sorted_tracks = sorted(playlist.tracks, key=lambda t: t.position)
+    return [
+        {
+            "spotify_id": t.spotify_track_id,
+            "deezer_id": t.spotify_track_id,
+            "position": t.position,
+            "added_at": t.added_at.isoformat(),
+            "title": cache_map[t.spotify_track_id].title if t.spotify_track_id in cache_map else "Unknown",
+            "artist": cache_map[t.spotify_track_id].artist if t.spotify_track_id in cache_map else "",
+            "cover_url": cache_map[t.spotify_track_id].cover_url if t.spotify_track_id in cache_map else None,
+            "preview_url": cache_map[t.spotify_track_id].preview_url if t.spotify_track_id in cache_map else None,
+            "duration_ms": cache_map[t.spotify_track_id].duration_ms if t.spotify_track_id in cache_map else 0,
+        }
+        for t in sorted_tracks
+    ]
 
 
 @router.get(
@@ -132,7 +267,42 @@ async def list_playlists(
             .order_by(Playlist.created_at.desc())
         )
     ).all()
-    return {"playlists": [_playlist_payload(pl, track_count=count) for pl, count in rows]}
+    items: list[dict] = []
+    for playlist, count in rows:
+        effective_playlist = playlist
+        effective_count = int(count or 0)
+        if playlist.visibility == PlaylistVisibility.saved and playlist.source_playlist_id:
+            source_playlist = await _get_visible_source_playlist(
+                db,
+                playlist=playlist,
+                current_user=current_user,
+                cleanup_unavailable=True,
+            )
+            if source_playlist is None:
+                continue
+            effective_playlist = source_playlist
+            effective_count = int(
+                await db.scalar(
+                    select(func.count(PlaylistTrack.id)).where(
+                        PlaylistTrack.playlist_id == source_playlist.id
+                    )
+                )
+                or 0
+            )
+        payload = _playlist_payload(playlist, track_count=effective_count)
+        if effective_playlist.id != playlist.id:
+            payload = _apply_source_snapshot(payload, effective_playlist)
+        payload = await _attach_owner_metadata(payload, db, playlist=playlist)
+        saved_count, is_saved_by_me, saved_copy_id = await _saved_copy_metadata(
+            db,
+            playlist=playlist,
+            current_user=current_user,
+        )
+        payload["saved_count"] = saved_count
+        payload["is_saved_by_me"] = is_saved_by_me
+        payload["saved_copy_id"] = saved_copy_id
+        items.append(payload)
+    return {"playlists": items}
 
 
 @router.get(
@@ -177,7 +347,25 @@ async def search_playlists(
         key=lambda item: item["score"],
         reverse=True,
     )
-    return {"playlists": [{k: v for k, v in item.items() if k != "score"} for item in ranked[:limit] if item["score"] > 0]}
+    result_items: list[dict] = []
+    for item in ranked[:limit]:
+        if item["score"] <= 0:
+            continue
+        playlist = await db.get(Playlist, item["id"])
+        if playlist is None:
+            continue
+        payload = {k: v for k, v in item.items() if k != "score"}
+        payload = await _attach_owner_metadata(payload, db, playlist=playlist)
+        saved_count, is_saved_by_me, saved_copy_id = await _saved_copy_metadata(
+            db,
+            playlist=playlist,
+            current_user=current_user,
+        )
+        payload["saved_count"] = saved_count
+        payload["is_saved_by_me"] = is_saved_by_me
+        payload["saved_copy_id"] = saved_copy_id
+        result_items.append(payload)
+    return {"playlists": result_items}
 
 
 @router.post(
@@ -202,6 +390,7 @@ async def create_playlist(
 
     playlist = Playlist(
         owner_id=current_user.id,
+        source_playlist_id=body.source_playlist_id,
         collab_user_id=body.collab_user_id if body.is_collaborative else None,
         title=body.title.strip(),
         description=body.description,
@@ -212,7 +401,17 @@ async def create_playlist(
     db.add(playlist)
     await db.commit()
     await db.refresh(playlist)
-    return _playlist_payload(playlist, track_count=0)
+    payload = _playlist_payload(playlist, track_count=0)
+    payload = await _attach_owner_metadata(payload, db, playlist=playlist)
+    saved_count, is_saved_by_me, saved_copy_id = await _saved_copy_metadata(
+        db,
+        playlist=playlist,
+        current_user=current_user,
+    )
+    payload["saved_count"] = saved_count
+    payload["is_saved_by_me"] = is_saved_by_me
+    payload["saved_copy_id"] = saved_copy_id
+    return payload
 
 
 @router.get(
@@ -229,42 +428,41 @@ async def get_playlist(
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
 
-    if not _has_playlist_access(playlist, current_user.id):
-        if playlist.visibility == PlaylistVisibility.private:
-            raise HTTPException(status_code=403, detail="Access denied")
-        if (
-            playlist.visibility == PlaylistVisibility.friends
-            and not await are_friends(db, playlist.owner_id, current_user.id)
-        ):
-            raise HTTPException(status_code=403, detail="Access denied")
-
-    await db.refresh(playlist, ["tracks"])
-
-    # Join with TrackCache to get full track metadata in one pass
-    track_ids = [t.spotify_track_id for t in playlist.tracks]
-    cache_rows = (
-        await db.execute(
-            select(TrackCache).where(TrackCache.spotify_id.in_(track_ids))
+    effective_playlist = playlist
+    if playlist.visibility == PlaylistVisibility.saved and playlist.source_playlist_id:
+        source_playlist = await _get_visible_source_playlist(
+            db,
+            playlist=playlist,
+            current_user=current_user,
+            cleanup_unavailable=playlist.owner_id == current_user.id,
         )
-    ).scalars().all()
-    cache_map = {row.spotify_id: row for row in cache_rows}
+        if source_playlist is None:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+        effective_playlist = source_playlist
+    elif not await _can_view_playlist(
+        db,
+        playlist=playlist,
+        current_user=current_user,
+    ):
+        raise HTTPException(status_code=403, detail="Access denied")
 
-    sorted_tracks = sorted(playlist.tracks, key=lambda t: t.position)
-    payload = _playlist_payload(playlist, track_count=len(sorted_tracks))
-    payload["tracks"] = [
-        {
-            "spotify_id": t.spotify_track_id,
-            "deezer_id": t.spotify_track_id,
-            "position": t.position,
-            "added_at": t.added_at.isoformat(),
-            "title": cache_map[t.spotify_track_id].title if t.spotify_track_id in cache_map else "Unknown",
-            "artist": cache_map[t.spotify_track_id].artist if t.spotify_track_id in cache_map else "",
-            "cover_url": cache_map[t.spotify_track_id].cover_url if t.spotify_track_id in cache_map else None,
-            "preview_url": cache_map[t.spotify_track_id].preview_url if t.spotify_track_id in cache_map else None,
-            "duration_ms": cache_map[t.spotify_track_id].duration_ms if t.spotify_track_id in cache_map else 0,
-        }
-        for t in sorted_tracks
-    ]
+    track_payloads = await _track_payloads_for_playlist(
+        db,
+        playlist=effective_playlist,
+    )
+    payload = _playlist_payload(playlist, track_count=len(track_payloads))
+    if effective_playlist.id != playlist.id:
+        payload = _apply_source_snapshot(payload, effective_playlist)
+    payload = await _attach_owner_metadata(payload, db, playlist=playlist)
+    saved_count, is_saved_by_me, saved_copy_id = await _saved_copy_metadata(
+        db,
+        playlist=playlist,
+        current_user=current_user,
+    )
+    payload["saved_count"] = saved_count
+    payload["is_saved_by_me"] = is_saved_by_me
+    payload["saved_copy_id"] = saved_copy_id
+    payload["tracks"] = track_payloads
     return payload
 
 
@@ -296,7 +494,17 @@ async def update_playlist(
     track_count = await db.scalar(
         select(func.count(PlaylistTrack.id)).where(PlaylistTrack.playlist_id == playlist.id)
     )
-    return _playlist_payload(playlist, track_count=track_count or 0)
+    payload = _playlist_payload(playlist, track_count=track_count or 0)
+    payload = await _attach_owner_metadata(payload, db, playlist=playlist)
+    saved_count, is_saved_by_me, saved_copy_id = await _saved_copy_metadata(
+        db,
+        playlist=playlist,
+        current_user=current_user,
+    )
+    payload["saved_count"] = saved_count
+    payload["is_saved_by_me"] = is_saved_by_me
+    payload["saved_copy_id"] = saved_copy_id
+    return payload
 
 
 @router.delete(

@@ -126,6 +126,20 @@ class ApiService {
         track['artistName'] != null) {
       track['artist'] = track['artistName'].toString();
     }
+    final rawArtists = track['artists'];
+    if (rawArtists is List) {
+      final artists = rawArtists
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .where(
+              (item) => (item['name']?.toString().trim().isNotEmpty ?? false))
+          .toList();
+      if (artists.isNotEmpty) {
+        track['artists'] = artists;
+        track['artist'] ??=
+            artists.map((item) => item['name'].toString()).join(', ');
+      }
+    }
     if ((track['cover_url'] == null || track['cover_url'].toString().isEmpty) &&
         track['artworkUrl100'] != null) {
       track['cover_url'] = track['artworkUrl100'].toString();
@@ -890,13 +904,15 @@ class ApiService {
   Future<Map<String, dynamic>> createPlaylist(String title,
       {String visibility = 'private',
       String? description,
-      String? coverUrl}) async {
+      String? coverUrl,
+      int? sourcePlaylistId}) async {
     final resp = await _dio.post('/playlists/', data: {
       'title': title,
       'visibility': visibility,
       if (description != null && description.isNotEmpty)
         'description': description,
       if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+      if (sourcePlaylistId != null) 'source_playlist_id': sourcePlaylistId,
     });
     return resp.data;
   }
@@ -1358,20 +1374,16 @@ class ApiService {
     final description = (playlist['description'] ?? '').toString();
     final coverUrl = (playlist['cover_url'] ?? '').toString();
     final detail = await getPlaylist((playlist['id'] as num).toInt());
+    final sourcePlaylistId = (detail['source_playlist_id'] as num?)?.toInt() ??
+        (playlist['source_playlist_id'] as num?)?.toInt() ??
+        (playlist['id'] as num?)?.toInt();
     final created = await createPlaylist(
       title,
-      visibility: 'private',
-      description: description.isNotEmpty
-          ? '$description\n\nSaved to your library'
-          : 'Saved to your library',
+      visibility: 'saved',
+      description: description.isNotEmpty ? description : null,
       coverUrl: coverUrl.isNotEmpty ? coverUrl : null,
+      sourcePlaylistId: sourcePlaylistId,
     );
-    final newId = (created['id'] as num).toInt();
-    final tracks = (detail['tracks'] as List?) ?? const [];
-    for (final raw in tracks) {
-      if (raw is! Map) continue;
-      await addTrackToPlaylist(newId, Map<String, dynamic>.from(raw));
-    }
     return created;
   }
 
@@ -1404,9 +1416,11 @@ class ApiService {
       'title': title,
       'artist': artist,
       if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
-      if (previewUrl != null && previewUrl.isNotEmpty) 'preview_url': previewUrl,
+      if (previewUrl != null && previewUrl.isNotEmpty)
+        'preview_url': previewUrl,
       if (phrase != null && phrase.isNotEmpty) 'phrase': phrase,
-      if (phraseEmoji != null && phraseEmoji.isNotEmpty) 'phrase_emoji': phraseEmoji,
+      if (phraseEmoji != null && phraseEmoji.isNotEmpty)
+        'phrase_emoji': phraseEmoji,
       if (note != null && note.isNotEmpty) 'note': note,
     });
   }
@@ -1427,9 +1441,11 @@ class ApiService {
       'title': title,
       'artist': artist,
       if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
-      if (previewUrl != null && previewUrl.isNotEmpty) 'preview_url': previewUrl,
+      if (previewUrl != null && previewUrl.isNotEmpty)
+        'preview_url': previewUrl,
       if (phrase != null && phrase.isNotEmpty) 'phrase': phrase,
-      if (phraseEmoji != null && phraseEmoji.isNotEmpty) 'phrase_emoji': phraseEmoji,
+      if (phraseEmoji != null && phraseEmoji.isNotEmpty)
+        'phrase_emoji': phraseEmoji,
       if (note != null && note.isNotEmpty) 'note': note,
     });
   }

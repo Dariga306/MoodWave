@@ -11,6 +11,7 @@ import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../utils/error_helper.dart';
 import '../utils/show_snackbar.dart';
+import 'taste_preferences_screen.dart';
 
 // 12 gradient presets for avatar
 const List<List<Color>> _avatarGradients = [
@@ -86,6 +87,53 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _gender = widget.user['gender'];
     _savedAvatarUrl = widget.user['avatar_url'] as String?;
     _savedBannerUrl = widget.user['banner_url'] as String?;
+  }
+
+  Future<void> _openMusicTaste() async {
+    final auth = context.read<AuthProvider>();
+    final authUser = auth.user;
+    final userId = (authUser?['id'] ?? widget.user['id']) as int?;
+    var initialGenres = (((authUser?['genres'] as List?) ??
+            (widget.user['genres'] as List?) ??
+            const [])
+        .map((item) => item.toString())
+        .toList());
+    var initialArtists = <Map<String, dynamic>>[];
+
+    if (userId != null) {
+      try {
+        final summary = await ApiService().getUserProfileSummary(
+          userId,
+          playlistLimit: 1,
+          tracksLimit: 1,
+        );
+        initialArtists = ((summary['favorite_artists'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+        final summaryGenres =
+            (((summary['user'] as Map?)?['genres'] as List?) ?? const [])
+                .map((item) => item.toString())
+                .toList();
+        if (summaryGenres.isNotEmpty) {
+          initialGenres = summaryGenres;
+        }
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    final updated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => TastePreferencesScreen(
+          initialGenres: initialGenres,
+          initialArtists: initialArtists,
+        ),
+      ),
+    );
+    if (!mounted || updated != true) return;
+    await auth.reload();
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _pickAvatarImage() async {
@@ -724,6 +772,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   _buildGenderSelector(),
                   const SizedBox(height: 14),
 
+                  _buildActionRow(
+                    'Music Taste',
+                    'Choose genres and favorite artists',
+                    Icons.library_music_rounded,
+                    _openMusicTaste,
+                  ),
+                  const SizedBox(height: 14),
+
                   // Privacy toggles
                   _buildToggleRow(
                     'Public Profile',
@@ -948,6 +1004,71 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ),
         ),
       ]),
+    );
+  }
+
+  Widget _buildActionRow(
+    String title,
+    String subtitle,
+    IconData icon,
+    VoidCallback onTap,
+  ) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: AppColors.purple.withOpacity(0.14),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                icon,
+                size: 18,
+                color: AppColors.purpleLight,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.outfit(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      color: AppColors.text3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.text3,
+              size: 22,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

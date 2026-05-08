@@ -294,7 +294,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   backgroundColor: AppColors.surface,
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(
-                      parent: BouncingScrollPhysics(),
+                      parent: ClampingScrollPhysics(),
                     ),
                     padding: EdgeInsets.zero,
                     children: [
@@ -364,15 +364,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                 messageBusy: _messageBusy,
                                 onFollow: _toggleFollow,
                                 onMessage: _openChat,
-                              ),
-                            ],
-                            if (_relation['is_self'] != true &&
-                                _friendStatusText != null) ...[
-                              const SizedBox(height: 12),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: _FriendStatusBadge(
-                                    text: _friendStatusText!),
                               ),
                             ],
                             if (!_musicTasteHidden &&
@@ -1858,7 +1849,9 @@ class _UserProfileCollectionScreenState
 String _relTime(String iso) {
   if (iso.isEmpty) return '';
   try {
-    final dt = DateTime.parse(iso).toLocal();
+    final normalized =
+        (iso.endsWith('Z') || iso.contains('+')) ? iso : '${iso}Z';
+    final dt = DateTime.parse(normalized).toLocal();
     final diff = DateTime.now().difference(dt);
     if (diff.inMinutes < 1) return 'now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m';
