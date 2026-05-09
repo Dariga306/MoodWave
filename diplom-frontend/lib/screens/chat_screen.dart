@@ -8,9 +8,13 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/auth_provider.dart';
 import '../providers/player_provider.dart';
+import 'album_screen.dart';
+import 'extra_screens.dart';
 import 'player_screen.dart';
+import 'playlist_screen.dart';
 import 'user_profile_screen.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
@@ -60,6 +64,7 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
+  static const _mutedChatsKey = 'muted_chat_threads_v1';
   final _textCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   List<GlobalKey> _messageKeys = [];
@@ -67,12 +72,16 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _sending = false;
   Timer? _pollTimer;
   int _lastCount = 0;
+  bool _chatMuted = false;
 
   bool get _usesDirectThread => widget.matchId == null && widget.chatId != null;
+  String get _conversationStorageKey =>
+      _usesDirectThread ? 'thread:${widget.chatId}' : 'match:${widget.matchId}';
 
   @override
   void initState() {
     super.initState();
+    _loadMuteState();
     _loadMessages();
     _pollTimer =
         Timer.periodic(const Duration(seconds: 4), (_) => _loadMessages());
@@ -84,6 +93,38 @@ class _ChatScreenState extends State<ChatScreen> {
     _textCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadMuteState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final muted = prefs.getStringList(_mutedChatsKey) ?? const <String>[];
+    if (!mounted) return;
+    setState(() => _chatMuted = muted.contains(_conversationStorageKey));
+  }
+
+  Future<void> _toggleMuteConversation() async {
+    final prefs = await SharedPreferences.getInstance();
+    final muted =
+        (prefs.getStringList(_mutedChatsKey) ?? const <String>[]).toSet();
+    if (_chatMuted) {
+      muted.remove(_conversationStorageKey);
+    } else {
+      muted.add(_conversationStorageKey);
+    }
+    await prefs.setStringList(_mutedChatsKey, muted.toList());
+    if (!mounted) return;
+    setState(() => _chatMuted = !_chatMuted);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AppColors.surface,
+        content: Text(
+          _chatMuted
+              ? 'Notifications for this chat are muted'
+              : 'Notifications for this chat are back on',
+        ),
+      ),
+    );
   }
 
   Future<void> _loadMessages() async {
@@ -427,11 +468,11 @@ class _ChatScreenState extends State<ChatScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             _menuTile(
-              icon: Icons.person_outline_rounded,
-              label: 'View profile',
+              icon: Icons.group_add_rounded,
+              label: 'Create listening group',
               onTap: () {
                 Navigator.pop(context);
-                _openPartnerProfile();
+                _createListeningGroup();
               },
             ),
             _menuTile(
@@ -451,16 +492,24 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
             _menuTile(
-              icon: Icons.notifications_off_outlined,
-              label: 'Mute notifications',
-              trailing: 'Soon',
+              icon: _chatMuted
+                  ? Icons.notifications_active_outlined
+                  : Icons.notifications_off_outlined,
+              label: _chatMuted ? 'Unmute notifications' : 'Mute notifications',
               onTap: () {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    behavior: SnackBarBehavior.floating,
-                    content: Text('Mute controls are coming soon'),
-                    backgroundColor: AppColors.surface,
+                _toggleMuteConversation();
+              },
+            ),
+            _menuTile(
+              icon: Icons.graphic_eq_rounded,
+              label: 'Browse live groups',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const BrowseRoomsScreen(),
                   ),
                 );
               },
@@ -469,6 +518,26 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _createListeningGroup() async {
+    try {
+      final room = await ApiService().createListeningRoom(
+        name: '${widget.partnerName} Listening Group',
+        isPublic: false,
+        maxGuests: 8,
+      );
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ListeningPartyScreen(room: room),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showSendError(e, fallback: 'Could not create listening group');
+    }
   }
 
   void _openSharedContent() {
@@ -487,7 +556,6 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _openSearchInChat() {
-    final queryCtrl = TextEditingController();
     final candidates = _messages
         .asMap()
         .entries
@@ -502,156 +570,20 @@ class _ChatScreenState extends State<ChatScreen> {
             ))
         .where((item) => item.text.trim().isNotEmpty)
         .toList();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setModalState) {
-          final query = queryCtrl.text.trim().toLowerCase();
-          final results = query.isEmpty
-              ? candidates
-              : candidates
-                  .where((item) => item.text.toLowerCase().contains(query))
-                  .toList();
-          return Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom,
-            ),
-            child: Container(
-              margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.glass,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: TextField(
-                      controller: queryCtrl,
-                      autofocus: true,
-                      onChanged: (_) => setModalState(() {}),
-                      style: GoogleFonts.outfit(
-                        fontSize: 14,
-                        color: AppColors.text,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: 'Search in chat',
-                        hintStyle: GoogleFonts.outfit(
-                          fontSize: 14,
-                          color: AppColors.text3,
-                        ),
-                        prefixIcon: const Icon(
-                          Icons.search_rounded,
-                          color: AppColors.text3,
-                        ),
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 14,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (results.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 24),
-                      child: Text(
-                        'No messages found',
-                        style: GoogleFonts.outfit(
-                          fontSize: 13,
-                          color: AppColors.text3,
-                        ),
-                      ),
-                    )
-                  else
-                    Flexible(
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        itemCount: results.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (_, i) {
-                          final item = results[i];
-                          return GestureDetector(
-                            onTap: () {
-                              Navigator.pop(context);
-                              _jumpToMessage(item.index);
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: AppColors.glass,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: AppColors.border),
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 34,
-                                    height: 34,
-                                    decoration: BoxDecoration(
-                                      color: AppColors.purple.withOpacity(0.12),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Icon(
-                                      _messageTypeIcon(item.type),
-                                      size: 18,
-                                      color: AppColors.purpleLight,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          item.text,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: GoogleFonts.outfit(
-                                            fontSize: 13,
-                                            color: AppColors.text,
-                                            height: 1.35,
-                                          ),
-                                        ),
-                                        if (item.time.isNotEmpty) ...[
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            item.time,
-                                            style: GoogleFonts.outfit(
-                                              fontSize: 11,
-                                              color: AppColors.text3,
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
-        },
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _ChatSearchScreen(
+          partnerName: widget.partnerName,
+          results: candidates,
+          onJumpToMessage: (index) {
+            Navigator.of(context).pop();
+            _jumpToMessage(index);
+          },
+          typeIconBuilder: _messageTypeIcon,
+        ),
       ),
-    ).whenComplete(queryCtrl.dispose);
+    );
   }
 
   String _searchableMessageText(Map<String, dynamic> msg) {
@@ -1871,6 +1803,340 @@ class _ChatSearchResult {
   });
 }
 
+class _ChatSearchScreen extends StatefulWidget {
+  final String partnerName;
+  final List<_ChatSearchResult> results;
+  final void Function(int index) onJumpToMessage;
+  final IconData Function(String type) typeIconBuilder;
+
+  const _ChatSearchScreen({
+    required this.partnerName,
+    required this.results,
+    required this.onJumpToMessage,
+    required this.typeIconBuilder,
+  });
+
+  @override
+  State<_ChatSearchScreen> createState() => _ChatSearchScreenState();
+}
+
+class _ChatSearchScreenState extends State<_ChatSearchScreen> {
+  final _queryCtrl = TextEditingController();
+  int _selectedIndex = 0;
+
+  @override
+  void dispose() {
+    _queryCtrl.dispose();
+    super.dispose();
+  }
+
+  List<_ChatSearchResult> get _filteredResults {
+    final query = _queryCtrl.text.trim().toLowerCase();
+    if (query.isEmpty) return widget.results;
+    return widget.results
+        .where((item) => item.text.toLowerCase().contains(query))
+        .toList();
+  }
+
+  void _moveSelection(int delta) {
+    final results = _filteredResults;
+    if (results.isEmpty) return;
+    setState(() {
+      _selectedIndex = (_selectedIndex + delta) % results.length;
+      if (_selectedIndex < 0) {
+        _selectedIndex = results.length - 1;
+      }
+    });
+  }
+
+  String _snippet(String text, String query) {
+    final normalized = query.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return text.length > 90 ? '${text.substring(0, 90)}…' : text;
+    }
+    final lower = text.toLowerCase();
+    final idx = lower.indexOf(normalized);
+    if (idx < 0) {
+      return text.length > 90 ? '${text.substring(0, 90)}…' : text;
+    }
+    final start = (idx - 28).clamp(0, text.length);
+    final end = (idx + normalized.length + 48).clamp(0, text.length);
+    final prefix = start > 0 ? '…' : '';
+    final suffix = end < text.length ? '…' : '';
+    return '$prefix${text.substring(start, end)}$suffix';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final results = _filteredResults;
+    if (_selectedIndex >= results.length && results.isNotEmpty) {
+      _selectedIndex = results.length - 1;
+    }
+    if (results.isEmpty) {
+      _selectedIndex = 0;
+    }
+    final query = _queryCtrl.text.trim();
+
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      GestureDetector(
+                        onTap: () => Navigator.of(context).pop(),
+                        child: Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: AppColors.glass,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: const Icon(
+                            Icons.arrow_back_rounded,
+                            color: AppColors.text,
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: TextField(
+                            controller: _queryCtrl,
+                            autofocus: true,
+                            onChanged: (_) =>
+                                setState(() => _selectedIndex = 0),
+                            style: GoogleFonts.outfit(
+                              fontSize: 16,
+                              color: AppColors.text,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Search in chat',
+                              prefixIcon: const Icon(
+                                Icons.search_rounded,
+                                color: AppColors.text3,
+                              ),
+                              suffixIcon: _queryCtrl.text.isEmpty
+                                  ? null
+                                  : GestureDetector(
+                                      onTap: () => setState(() {
+                                        _queryCtrl.clear();
+                                        _selectedIndex = 0;
+                                      }),
+                                      child: const Icon(
+                                        Icons.close_rounded,
+                                        color: AppColors.text3,
+                                      ),
+                                    ),
+                              hintStyle: GoogleFonts.outfit(
+                                fontSize: 15,
+                                color: AppColors.text3,
+                              ),
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 15,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Text(
+                          results.isEmpty
+                              ? 'No matches'
+                              : '${_selectedIndex + 1} of ${results.length}',
+                          style: GoogleFonts.outfit(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.text2,
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      _SearchNavButton(
+                        icon: Icons.keyboard_arrow_up_rounded,
+                        enabled: results.isNotEmpty,
+                        onTap: () => _moveSelection(-1),
+                      ),
+                      const SizedBox(width: 8),
+                      _SearchNavButton(
+                        icon: Icons.keyboard_arrow_down_rounded,
+                        enabled: results.isNotEmpty,
+                        onTap: () => _moveSelection(1),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: results.isEmpty
+                  ? Center(
+                      child: Text(
+                        query.isEmpty
+                            ? 'Type a word to search through the chat'
+                            : 'No matches for "$query"',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.outfit(
+                          fontSize: 14,
+                          color: AppColors.text3,
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
+                      itemCount: results.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) {
+                        final item = results[i];
+                        final selected = i == _selectedIndex;
+                        return GestureDetector(
+                          onTap: () => widget.onJumpToMessage(item.index),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? AppColors.purple.withOpacity(0.14)
+                                  : AppColors.surface,
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(
+                                color: selected
+                                    ? AppColors.purpleLight.withOpacity(0.5)
+                                    : AppColors.border,
+                              ),
+                              boxShadow: selected
+                                  ? [
+                                      BoxShadow(
+                                        color:
+                                            AppColors.purple.withOpacity(0.14),
+                                        blurRadius: 18,
+                                        offset: const Offset(0, 8),
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    gradient: AppColors.gradMixed,
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  child: Icon(
+                                    widget.typeIconBuilder(item.type),
+                                    size: 20,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _snippet(item.text, query),
+                                        maxLines: 3,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.outfit(
+                                          fontSize: 14,
+                                          color: AppColors.text,
+                                          height: 1.4,
+                                          fontWeight: selected
+                                              ? FontWeight.w700
+                                              : FontWeight.w500,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        item.time.isEmpty
+                                            ? 'Open in chat'
+                                            : 'Open in chat · ${item.time}',
+                                        style: GoogleFonts.outfit(
+                                          fontSize: 12,
+                                          color: AppColors.text3,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchNavButton extends StatelessWidget {
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _SearchNavButton({
+    required this.icon,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: enabled ? AppColors.surface : AppColors.glass,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Icon(
+          icon,
+          color: enabled ? AppColors.text : AppColors.text3,
+          size: 22,
+        ),
+      ),
+    );
+  }
+}
+
 // ─── Track Picker Sheet ───────────────────────────────────────────────────────
 
 class _TrackPickerSheet extends StatefulWidget {
@@ -2446,29 +2712,63 @@ class _AttachmentOptionsSheet extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(18),
+            gradient: LinearGradient(
+              colors: [
+                AppColors.surface.withOpacity(0.98),
+                AppColors.surface2.withOpacity(0.88),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(color: AppColors.border),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.08),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
           child: Row(
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
                   color: color.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 child: Icon(icon, color: color, size: 20),
               ),
               const SizedBox(width: 12),
-              Text(
-                label,
-                style: GoogleFonts.outfit(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.text,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.text,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      label == 'Send a photo'
+                          ? 'Share a memory from your gallery'
+                          : 'Drop it into the conversation instantly',
+                      style: GoogleFonts.outfit(
+                        fontSize: 11,
+                        color: AppColors.text3,
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 14,
+                color: AppColors.text3,
               ),
             ],
           ),
@@ -2478,7 +2778,7 @@ class _AttachmentOptionsSheet extends StatelessWidget {
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
       decoration: BoxDecoration(
         color: AppColors.bg2,
         borderRadius: BorderRadius.circular(24),
@@ -2487,6 +2787,36 @@ class _AttachmentOptionsSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          Container(
+            width: 42,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Text(
+                'Share in chat',
+                style: GoogleFonts.outfit(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.text,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                'Choose what to send',
+                style: GoogleFonts.outfit(
+                  fontSize: 12,
+                  color: AppColors.text3,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
           option(Icons.music_note_rounded, 'Share a track',
               AppColors.purpleLight, onTrack),
           const SizedBox(height: 10),
@@ -2931,7 +3261,7 @@ class _SharedContentScreenState extends State<_SharedContentScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 4, vsync: this);
+    _tabCtrl = TabController(length: 5, vsync: this);
   }
 
   @override
@@ -2947,17 +3277,9 @@ class _SharedContentScreenState extends State<_SharedContentScreen>
       .toList();
 
   List<Map<String, dynamic>> get _images => _byType('image');
-  List<Map<String, dynamic>> get _tracks => _byType('track');
-  List<Map<String, dynamic>> get _albums => _byType('album');
   List<Map<String, dynamic>> get _playlists => _byType('playlist');
-
-  List<Map<String, dynamic>> get _musicAll {
-    return [
-      ..._tracks,
-      ..._albums,
-      ..._playlists,
-    ];
-  }
+  List<Map<String, dynamic>> get _musicOnly => _byType('track');
+  List<Map<String, dynamic>> get _albumsOnly => _byType('album');
 
   List<Map<String, dynamic>> get _links {
     final regex = RegExp(r'https?://\S+');
@@ -3017,19 +3339,21 @@ class _SharedContentScreenState extends State<_SharedContentScreen>
           ),
           tabs: const [
             Tab(text: 'Music'),
-            Tab(text: 'Media'),
+            Tab(text: 'Photos'),
+            Tab(text: 'Albums'),
+            Tab(text: 'Playlists'),
             Tab(text: 'Links'),
-            Tab(text: 'All'),
           ],
         ),
       ),
       body: TabBarView(
         controller: _tabCtrl,
         children: [
-          _MusicTab(items: _musicAll),
+          _MusicTab(items: _musicOnly),
           _MediaTab(images: _images),
+          _AlbumTab(items: _albumsOnly),
+          _PlaylistTab(items: _playlists),
           _LinksTab(links: _links),
-          _AllTab(messages: widget.messages),
         ],
       ),
     );
@@ -3053,106 +3377,250 @@ class _MusicTab extends StatelessWidget {
       itemCount: items.length,
       itemBuilder: (_, i) {
         final m = items[i];
-        final type = m['type']?.toString() ?? 'track';
-        final title = (m['track_title'] ??
-                m['album_title'] ??
-                m['playlist_title'] ??
-                'Unknown')
-            .toString();
-        final artist =
-            (m['track_artist'] ?? m['album_artist'] ?? '').toString();
-        final coverUrl = (m['track_cover_url'] ??
-                m['album_cover_url'] ??
-                m['playlist_cover_url'] ??
-                '')
-            .toString();
+        final title = (m['track_title'] ?? 'Unknown').toString();
+        final artist = (m['track_artist'] ?? '').toString();
+        final coverUrl = (m['track_cover_url'] ?? '').toString();
+        final note = (m['note'] ?? '').toString().trim();
         final time = _formatChatTime(m['sent_at']?.toString());
-        final typeLabel = type == 'album'
-            ? 'Album'
-            : type == 'playlist'
-                ? 'Playlist'
-                : 'Track';
 
-        return Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
+        return _SharedCard(
+          icon: Icons.music_note_rounded,
+          title: title,
+          subtitle: artist,
+          tertiary: note.isNotEmpty ? note : null,
+          imageUrl: coverUrl,
+          time: time,
+          badge: 'Track',
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => PlayerScreen(track: m)),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _AlbumTab extends StatelessWidget {
+  final List<Map<String, dynamic>> items;
+  const _AlbumTab({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return _SharedEmptyState(
+        icon: Icons.album_rounded,
+        label: 'No albums shared yet',
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      itemCount: items.length,
+      itemBuilder: (_, i) {
+        final m = items[i];
+        final title = (m['album_title'] ?? 'Album').toString();
+        final artist = (m['album_artist'] ?? '').toString();
+        final coverUrl = (m['album_cover_url'] ?? '').toString();
+        final albumId = int.tryParse((m['album_id'] ?? '').toString());
+        final note = (m['note'] ?? '').toString().trim();
+        final time = _formatChatTime(m['sent_at']?.toString());
+        return _SharedCard(
+          icon: Icons.album_rounded,
+          title: title,
+          subtitle: artist,
+          tertiary: note.isNotEmpty ? note : null,
+          imageUrl: coverUrl,
+          time: time,
+          badge: 'Album',
+          onTap: albumId == null
+              ? null
+              : () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AlbumScreen(albumId: albumId),
+                    ),
+                  );
+                },
+        );
+      },
+    );
+  }
+}
+
+class _PlaylistTab extends StatelessWidget {
+  final List<Map<String, dynamic>> items;
+  const _PlaylistTab({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return _SharedEmptyState(
+        icon: Icons.queue_music_rounded,
+        label: 'No playlists shared yet',
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      itemCount: items.length,
+      itemBuilder: (_, i) {
+        final m = items[i];
+        final title = (m['playlist_title'] ?? 'Playlist').toString();
+        final coverUrl = (m['playlist_cover_url'] ?? '').toString();
+        final playlistId = (m['playlist_id'] as num?)?.toInt();
+        final note = (m['note'] ?? '').toString().trim();
+        final time = _formatChatTime(m['sent_at']?.toString());
+        return _SharedCard(
+          icon: Icons.queue_music_rounded,
+          title: title,
+          subtitle: 'Playlist',
+          tertiary: note.isNotEmpty ? note : null,
+          imageUrl: coverUrl,
+          time: time,
+          badge: 'Playlist',
+          onTap: playlistId == null
+              ? null
+              : () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PlaylistScreen(playlistId: playlistId),
+                    ),
+                  );
+                },
+        );
+      },
+    );
+  }
+}
+
+class _SharedCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? tertiary;
+  final String imageUrl;
+  final String time;
+  final String badge;
+  final VoidCallback? onTap;
+
+  const _SharedCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.tertiary,
+    required this.imageUrl,
+    required this.time,
+    required this.badge,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              AppColors.surface.withOpacity(0.98),
+              AppColors.surface2.withOpacity(0.86),
+            ],
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  gradient: AppColors.gradMixed,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: coverUrl.isNotEmpty
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: CachedNetworkImage(
-                          imageUrl: coverUrl,
-                          fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) => const Icon(
-                              Icons.music_note_rounded,
-                              color: Colors.white70),
-                        ),
-                      )
-                    : const Icon(Icons.music_note_rounded,
-                        color: Colors.white70),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                gradient: AppColors.gradMixed,
+                borderRadius: BorderRadius.circular(16),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+              child: imageUrl.isNotEmpty
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: CachedNetworkImage(
+                        imageUrl: imageUrl,
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) =>
+                            Icon(icon, color: Colors.white70),
+                      ),
+                    )
+                  : Icon(icon, color: Colors.white70, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.outfit(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.text,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppColors.purple.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          badge,
+                          style: GoogleFonts.outfit(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.purpleLight,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 3),
                     Text(
-                      title,
+                      subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.outfit(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.text,
+                        fontSize: 12,
+                        color: AppColors.text2,
                       ),
                     ),
-                    if (artist.isNotEmpty)
-                      Text(
-                        artist,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.outfit(
-                          fontSize: 12,
-                          color: AppColors.text3,
-                        ),
-                      ),
                   ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AppColors.purple.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      typeLabel,
+                  if (tertiary != null && tertiary!.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      tertiary!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.outfit(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.purpleLight,
+                        fontSize: 11,
+                        color: AppColors.text3,
+                        height: 1.35,
                       ),
                     ),
-                  ),
+                  ],
                   if (time.isNotEmpty) ...[
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Text(
                       time,
                       style: GoogleFonts.outfit(
@@ -3163,10 +3631,10 @@ class _MusicTab extends StatelessWidget {
                   ],
                 ],
               ),
-            ],
-          ),
-        );
-      },
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -3184,11 +3652,11 @@ class _MediaTab extends StatelessWidget {
       );
     }
     return GridView.builder(
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.fromLTRB(12, 16, 12, 28),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
-        crossAxisSpacing: 3,
-        mainAxisSpacing: 3,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
       ),
       itemCount: images.length,
       itemBuilder: (_, i) {
@@ -3196,16 +3664,47 @@ class _MediaTab extends StatelessWidget {
             (images[i]['image_url'] ?? images[i]['url'] ?? '').toString();
         if (url.isEmpty) return const SizedBox.shrink();
         return ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: CachedNetworkImage(
-            imageUrl: url,
-            fit: BoxFit.cover,
-            placeholder: (_, __) => Container(color: AppColors.surface),
-            errorWidget: (_, __, ___) => Container(
-              color: AppColors.surface,
-              child: const Icon(Icons.broken_image_rounded,
-                  color: AppColors.text3),
-            ),
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: CachedNetworkImage(
+                  imageUrl: url,
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => Container(color: AppColors.surface),
+                  errorWidget: (_, __, ___) => Container(
+                    color: AppColors.surface,
+                    child: const Icon(Icons.broken_image_rounded,
+                        color: AppColors.text3),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Color(0xAA000000)],
+                    ),
+                  ),
+                  child: Text(
+                    _formatChatTime(images[i]['sent_at']?.toString()),
+                    textAlign: TextAlign.right,
+                    style: GoogleFonts.outfit(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         );
       },
@@ -3233,186 +3732,13 @@ class _LinksTab extends StatelessWidget {
         final url = (m['_link_url'] ?? '').toString();
         final text = (m['text'] ?? '').toString();
         final time = _formatChatTime(m['sent_at']?.toString());
-        return Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppColors.blue.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.link_rounded,
-                    size: 20, color: AppColors.blue),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      url,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.outfit(
-                        fontSize: 13,
-                        color: AppColors.blue,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (text != url && text.isNotEmpty)
-                      Text(
-                        text.replaceAll(url, '').trim(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.outfit(
-                          fontSize: 11,
-                          color: AppColors.text3,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              if (time.isNotEmpty)
-                Text(
-                  time,
-                  style: GoogleFonts.outfit(
-                    fontSize: 10,
-                    color: AppColors.text3,
-                  ),
-                ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _AllTab extends StatelessWidget {
-  final List<Map<String, dynamic>> messages;
-  const _AllTab({required this.messages});
-
-  @override
-  Widget build(BuildContext context) {
-    final nonText = messages
-        .where((m) => m['type']?.toString() != 'text')
-        .toList()
-        .reversed
-        .toList();
-    if (nonText.isEmpty) {
-      return _SharedEmptyState(
-        icon: Icons.folder_rounded,
-        label: 'No shared content yet',
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-      itemCount: nonText.length,
-      itemBuilder: (_, i) {
-        final m = nonText[i];
-        final type = m['type']?.toString() ?? '';
-        final time = _formatChatTime(m['sent_at']?.toString());
-        String title = 'Shared content';
-        String subtitle = type;
-        IconData icon = Icons.attach_file_rounded;
-        String imageUrl = '';
-
-        if (type == 'track') {
-          title = (m['track_title'] ?? 'Track').toString();
-          subtitle = (m['track_artist'] ?? '').toString();
-          imageUrl = (m['track_cover_url'] ?? '').toString();
-          icon = Icons.music_note_rounded;
-        } else if (type == 'album') {
-          title = (m['album_title'] ?? 'Album').toString();
-          subtitle = (m['album_artist'] ?? '').toString();
-          icon = Icons.album_rounded;
-        } else if (type == 'playlist') {
-          title = (m['playlist_title'] ?? 'Playlist').toString();
-          subtitle = 'Playlist';
-          icon = Icons.queue_music_rounded;
-        } else if (type == 'image') {
-          title = 'Image';
-          subtitle = m['caption']?.toString() ?? '';
-          imageUrl = (m['image_url'] ?? m['url'] ?? '').toString();
-          icon = Icons.image_rounded;
-        }
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  gradient: AppColors.gradMixed,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: imageUrl.isNotEmpty
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: CachedNetworkImage(
-                          imageUrl: imageUrl,
-                          fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) =>
-                              Icon(icon, color: Colors.white70),
-                        ),
-                      )
-                    : Icon(icon, color: Colors.white70, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.outfit(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.text,
-                      ),
-                    ),
-                    if (subtitle.isNotEmpty)
-                      Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.outfit(
-                          fontSize: 12,
-                          color: AppColors.text3,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              if (time.isNotEmpty)
-                Text(
-                  time,
-                  style: GoogleFonts.outfit(
-                    fontSize: 10,
-                    color: AppColors.text3,
-                  ),
-                ),
-            ],
-          ),
+        return _SharedCard(
+          icon: Icons.link_rounded,
+          title: url,
+          subtitle: text.replaceAll(url, '').trim(),
+          imageUrl: '',
+          time: time,
+          badge: 'Link',
         );
       },
     );
@@ -3427,34 +3753,50 @@ class _SharedEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              shape: BoxShape.circle,
-              border: Border.all(color: AppColors.border),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 28),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 68,
+              height: 68,
+              decoration: BoxDecoration(
+                gradient: AppColors.gradMixed,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.purple.withOpacity(0.18),
+                    blurRadius: 22,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Icon(icon, size: 28, color: Colors.white),
             ),
-            child: Icon(icon, size: 28, color: AppColors.text3),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            label,
-            style: GoogleFonts.outfit(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: AppColors.text2,
+            const SizedBox(height: 14),
+            Text(
+              label,
+              style: GoogleFonts.outfit(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppColors.text2,
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Shared content will appear here',
-            style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3),
-          ),
-        ],
+            const SizedBox(height: 4),
+            Text(
+              'Open your conversation and send something beautiful here',
+              style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }

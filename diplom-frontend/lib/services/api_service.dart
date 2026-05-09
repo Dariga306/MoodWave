@@ -1149,6 +1149,19 @@ class ApiService {
     return Map<String, dynamic>.from(resp.data as Map);
   }
 
+  Future<Map<String, dynamic>> createListeningRoom({
+    String? name,
+    bool isPublic = false,
+    int maxGuests = 10,
+  }) async {
+    final resp = await _dio.post('/rooms/create', data: {
+      if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
+      'is_public': isPublic,
+      'max_guests': maxGuests,
+    });
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
   Future<void> sendJoinRequest(int roomId) async {
     await _dio.post('/rooms/$roomId/join-request');
   }
@@ -1214,6 +1227,14 @@ class ApiService {
 
   Future<void> unfollowUser(int userId) async {
     await _dio.delete('/users/$userId/follow');
+  }
+
+  Future<void> blockUser(int userId) async {
+    await _dio.post('/social/users/$userId/block');
+  }
+
+  Future<void> unblockUser(int userId) async {
+    await _dio.delete('/social/users/$userId/block');
   }
 
   Future<List<Map<String, dynamic>>> getUserFollowers(

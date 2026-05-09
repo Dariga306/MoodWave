@@ -15,6 +15,42 @@ class SyncedLine {
   });
 }
 
+List<SyncedLine> _buildApproximateSyncedLines(
+  List<String> rawLines,
+  Duration duration,
+) {
+  final lines = rawLines
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .toList();
+  if (lines.isEmpty) return const [];
+  if (duration <= const Duration(seconds: 8)) {
+    return lines.map((line) => SyncedLine(timeMs: 0, text: line)).toList();
+  }
+
+  final weights = lines
+      .map((line) => line.replaceAll(RegExp(r'\s+'), '').length.clamp(8, 48))
+      .toList();
+  final totalWeight = weights.fold<int>(0, (sum, value) => sum + value);
+  final introPaddingMs =
+      (duration.inMilliseconds * 0.12).round().clamp(1200, 12000);
+  final outroPaddingMs =
+      (duration.inMilliseconds * 0.08).round().clamp(1200, 9000);
+  final usableDurationMs =
+      (duration.inMilliseconds - introPaddingMs - outroPaddingMs)
+          .clamp(2000, duration.inMilliseconds);
+  var cursor = 0;
+
+  return List<SyncedLine>.generate(lines.length, (index) {
+    final progress = totalWeight == 0 ? 0.0 : cursor / totalWeight;
+    final timeMs = (introPaddingMs + usableDurationMs * progress)
+        .round()
+        .clamp(0, duration.inMilliseconds);
+    cursor += weights[index];
+    return SyncedLine(timeMs: timeMs, text: lines[index]);
+  });
+}
+
 class LyricsScreen extends StatefulWidget {
   final String artist;
   final String title;
@@ -23,6 +59,7 @@ class LyricsScreen extends StatefulWidget {
   final List<String> lyricsLines;
   final Duration currentPosition;
   final List<int> syncedLineTimesMs;
+  final bool approximateSync;
   final void Function(Duration)? onSeek;
   final Stream<Duration>? positionStream;
 
@@ -35,6 +72,7 @@ class LyricsScreen extends StatefulWidget {
     required this.lyricsLines,
     required this.currentPosition,
     this.syncedLineTimesMs = const [],
+    this.approximateSync = false,
     this.onSeek,
     this.positionStream,
   });
@@ -74,6 +112,19 @@ class _LyricsScreenState extends State<LyricsScreen> {
       .split(RegExp(r'\s*(?:,| feat\. | ft\. | & )\s*', caseSensitive: false))
       .map((item) => item.trim())
       .firstWhere((item) => item.isNotEmpty, orElse: () => widget.artist);
+
+  List<String> get _artistVariants {
+    final variants = widget.artist
+        .split(RegExp(r'\s*(?:,| feat\. | ft\. | & )\s*', caseSensitive: false))
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toSet()
+        .toList();
+    if (_primaryArtist.isNotEmpty && !variants.contains(_primaryArtist)) {
+      variants.insert(0, _primaryArtist);
+    }
+    return variants;
+  }
 
   // Extrapolates current position using wall-clock time since last update.
   // Capped at 500 ms so a paused player doesn't drift.
@@ -127,7 +178,8 @@ class _LyricsScreenState extends State<LyricsScreen> {
   void _seedInitialLyrics() {
     if (widget.lyricsLines.isNotEmpty) {
       _lyricsLines = List<String>.from(widget.lyricsLines);
-      if (widget.syncedLineTimesMs.length == widget.lyricsLines.length) {
+      if (widget.syncedLineTimesMs.length == widget.lyricsLines.length &&
+          widget.syncedLineTimesMs.any((time) => time > 0)) {
         _syncedLines = List.generate(
           widget.lyricsLines.length,
           (index) => SyncedLine(
@@ -147,44 +199,83 @@ class _LyricsScreenState extends State<LyricsScreen> {
     setState(() => _loading = true);
 
     try {
-      final title = Uri.encodeComponent(
-          _cleanTitle.isNotEmpty ? _cleanTitle : widget.title);
-      final artist = Uri.encodeComponent(_primaryArtist);
-      final album = widget.album.isNotEmpty
-          ? '&album_name=${Uri.encodeComponent(widget.album)}'
-          : '';
-      final duration = widget.duration.inSeconds > 0
-          ? '&duration=${widget.duration.inSeconds}'
-          : '';
-      final response = await http
-          .get(
-            Uri.parse(
-              'https://lrclib.net/api/search?track_name=$title&artist_name=$artist$album$duration',
-            ),
-          )
-          .timeout(const Duration(seconds: 10));
-      if (response.statusCode == 200) {
+      final queries = <Map<String, String>>[];
+      final title = _cleanTitle.isNotEmpty ? _cleanTitle : widget.title;
+      for (final artist in _artistVariants) {
+        queries.add({
+          'title': title,
+          'artist': artist,
+          if (widget.album.isNotEmpty) 'album': widget.album,
+        });
+      }
+      if (queries.isEmpty) {
+        queries.add({
+          'title': title,
+          'artist': _primaryArtist,
+          if (widget.album.isNotEmpty) 'album': widget.album,
+        });
+      }
+
+      final candidates = <Map<String, dynamic>>[];
+      final seen = <String>{};
+      for (final query in queries.take(6)) {
+        final response = await http
+            .get(
+              Uri.parse(
+                'https://lrclib.net/api/search?track_name=${Uri.encodeComponent(query['title'] ?? '')}'
+                '&artist_name=${Uri.encodeComponent(query['artist'] ?? '')}'
+                '${query['album']?.isNotEmpty == true ? '&album_name=${Uri.encodeComponent(query['album']!)}' : ''}'
+                '${widget.duration.inSeconds > 0 ? '&duration=${widget.duration.inSeconds}' : ''}',
+              ),
+            )
+            .timeout(const Duration(seconds: 10));
+        if (response.statusCode != 200) continue;
         final data = jsonDecode(response.body) as List<dynamic>;
-        final candidates = data.whereType<Map>().cast<Map>().toList()
-          ..sort((a, b) => _lyricsScore(b).compareTo(_lyricsScore(a)));
-        for (final item in candidates) {
+        for (final item in data.whereType<Map>()) {
           final map = Map<String, dynamic>.from(item);
-          if (!_looksLikeRequestedSong(map)) continue;
-          final syncedLyrics = map['syncedLyrics'] as String?;
-          if (syncedLyrics != null && syncedLyrics.isNotEmpty) {
-            final lines = _parseSyncedLyrics(syncedLyrics);
-            if (lines.isNotEmpty) {
-              if (!mounted) return;
-              setState(() {
-                _syncedLines = lines;
-                _lyricsLines = lines.map((line) => line.text).toList();
-                _loading = false;
-              });
-              _startTicker();
-              return;
-            }
+          final key =
+              '${map['id'] ?? ''}|${map['trackName'] ?? ''}|${map['artistName'] ?? ''}';
+          if (!seen.add(key)) continue;
+          candidates.add(map);
+        }
+      }
+
+      if (candidates.isEmpty) {
+        final response = await http
+            .get(
+              Uri.parse(
+                'https://lrclib.net/api/search?track_name=${Uri.encodeComponent(title)}'
+                '${widget.duration.inSeconds > 0 ? '&duration=${widget.duration.inSeconds}' : ''}',
+              ),
+            )
+            .timeout(const Duration(seconds: 10));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as List<dynamic>;
+          for (final item in data.whereType<Map>()) {
+            final map = Map<String, dynamic>.from(item);
+            final key =
+                '${map['id'] ?? ''}|${map['trackName'] ?? ''}|${map['artistName'] ?? ''}';
+            if (!seen.add(key)) continue;
+            candidates.add(map);
           }
         }
+      }
+
+      candidates.sort((a, b) => _lyricsScore(b).compareTo(_lyricsScore(a)));
+      for (final map in candidates) {
+        if (!_looksLikeRequestedSong(map)) continue;
+        final syncedLyrics = map['syncedLyrics'] as String?;
+        if (syncedLyrics == null || syncedLyrics.isEmpty) continue;
+        final lines = _parseSyncedLyrics(syncedLyrics);
+        if (lines.isEmpty) continue;
+        if (!mounted) return;
+        setState(() {
+          _syncedLines = lines;
+          _lyricsLines = lines.map((line) => line.text).toList();
+          _loading = false;
+        });
+        _startTicker();
+        return;
       }
     } catch (_) {}
 
@@ -203,13 +294,15 @@ class _LyricsScreenState extends State<LyricsScreen> {
             .map((line) => line.trim())
             .where((line) => line.isNotEmpty)
             .toList();
+        final approx = _buildApproximateSyncedLines(lines, widget.duration);
         if (!mounted) return;
         setState(() {
           _lyricsLines = lines;
-          _syncedLines = [];
-          _activeIndex = -1;
+          _syncedLines = approx.any((line) => line.timeMs > 0) ? approx : [];
+          _activeIndex = _syncedLines.isNotEmpty ? 0 : -1;
           _loading = false;
         });
+        _startTicker();
         return;
       }
     } catch (_) {}
@@ -233,6 +326,14 @@ class _LyricsScreenState extends State<LyricsScreen> {
         (item['plainLyrics'] as String?)?.isNotEmpty == true ? 100 : 0;
     final titleMatches = titleTokens.intersection(itemTitleTokens).length;
     final artistMatches = artistTokens.intersection(itemArtistTokens).length;
+    final exactTitleBonus = _strongTitleMatch(
+            itemTitle, _cleanTitle.isNotEmpty ? _cleanTitle : widget.title)
+        ? 600
+        : -1200;
+    final exactArtistBonus =
+        _artistVariants.any((artist) => _strongTitleMatch(itemArtist, artist))
+            ? 480
+            : -900;
     final durationSeconds = widget.duration.inSeconds;
     final itemDuration = (item['duration'] as num?)?.toInt() ?? durationSeconds;
     final durationPenalty =
@@ -245,6 +346,8 @@ class _LyricsScreenState extends State<LyricsScreen> {
         plain +
         titleMatches * 120 +
         artistMatches * 140 +
+        exactTitleBonus +
+        exactArtistBonus +
         albumBonus -
         durationPenalty;
   }
@@ -254,14 +357,17 @@ class _LyricsScreenState extends State<LyricsScreen> {
     final itemArtist = (item['artistName'] ?? item['artist'] ?? '').toString();
     final titleTokens =
         _tokens(_cleanTitle.isNotEmpty ? _cleanTitle : widget.title);
-    final artistTokens = _tokens(_primaryArtist);
     if (titleTokens.isNotEmpty &&
-        titleTokens.intersection(_tokens(itemTitle)).isEmpty) {
+        !_strongTitleMatch(
+          itemTitle,
+          _cleanTitle.isNotEmpty ? _cleanTitle : widget.title,
+        )) {
       return false;
     }
-    if (artistTokens.isNotEmpty &&
-        itemArtist.isNotEmpty &&
-        artistTokens.intersection(_tokens(itemArtist)).isEmpty) {
+    final artistMatch = _artistVariants.any(
+      (artist) => _strongTitleMatch(itemArtist, artist),
+    );
+    if (itemArtist.isNotEmpty && !artistMatch) {
       return false;
     }
     final durationSeconds = widget.duration.inSeconds;
@@ -287,6 +393,22 @@ class _LyricsScreenState extends State<LyricsScreen> {
 
   Set<String> _tokens(String value) =>
       _normalize(value).split(' ').where((token) => token.isNotEmpty).toSet();
+
+  bool _strongTitleMatch(String candidate, String wantedRaw) {
+    final wanted = _normalize(wantedRaw);
+    final normalizedCandidate = _normalize(candidate);
+    if (wanted.isEmpty || normalizedCandidate.isEmpty) return false;
+    if (wanted == normalizedCandidate ||
+        wanted.contains(normalizedCandidate) ||
+        normalizedCandidate.contains(wanted)) {
+      return true;
+    }
+    final wantedTokens = _tokens(wanted);
+    final candidateTokens = _tokens(normalizedCandidate);
+    if (wantedTokens.isEmpty || candidateTokens.isEmpty) return false;
+    final overlap = wantedTokens.intersection(candidateTokens).length;
+    return overlap / wantedTokens.length >= 0.75;
+  }
 
   List<SyncedLine> _parseSyncedLyrics(String raw) {
     final regex = RegExp(r'^\[(\d+):(\d+)[.:](\d+)\]\s*(.*)$');
@@ -398,12 +520,17 @@ class _LyricsScreenState extends State<LyricsScreen> {
                 )
               : _lyricsLines.isEmpty
                   ? Center(
-                      child: Text(
-                        'Lyrics not found',
-                        style: GoogleFonts.outfit(
-                          fontSize: 16,
-                          color: Colors.white60,
-                        ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Lyrics not found',
+                            style: GoogleFonts.outfit(
+                              fontSize: 16,
+                              color: Colors.white60,
+                            ),
+                          ),
+                        ],
                       ),
                     )
                   : ListView.builder(
@@ -450,6 +577,32 @@ class _LyricsScreenState extends State<LyricsScreen> {
                     ),
         ),
       ),
+      bottomNavigationBar: widget.approximateSync && _lyricsLines.isNotEmpty
+          ? SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Text(
+                    'Tap any line to jump. Timing is approximate for this song.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            )
+          : null,
     );
   }
 }

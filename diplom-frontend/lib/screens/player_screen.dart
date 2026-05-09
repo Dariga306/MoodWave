@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -51,6 +52,47 @@ List<_LrcLine> _parseLrc(String lrc) {
     );
   }
   return lines;
+}
+
+List<_LrcLine> _buildApproximateLyricsTiming(
+  List<String> rawLines,
+  Duration totalDuration,
+) {
+  final lines = rawLines
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .toList();
+  if (lines.isEmpty) return const [];
+  if (totalDuration <= const Duration(seconds: 8)) {
+    return lines
+        .map((line) => _LrcLine(time: Duration.zero, text: line))
+        .toList();
+  }
+
+  final weights = lines
+      .map((line) => line.replaceAll(RegExp(r'\s+'), '').length.clamp(8, 48))
+      .toList();
+  final totalWeight = weights.fold<int>(0, (sum, value) => sum + value);
+  final introPaddingMs =
+      (totalDuration.inMilliseconds * 0.12).round().clamp(1200, 12000);
+  final outroPaddingMs =
+      (totalDuration.inMilliseconds * 0.08).round().clamp(1200, 9000);
+  final usableDurationMs =
+      (totalDuration.inMilliseconds - introPaddingMs - outroPaddingMs)
+          .clamp(2000, totalDuration.inMilliseconds);
+  var cursor = 0;
+
+  return List<_LrcLine>.generate(lines.length, (index) {
+    final line = lines[index];
+    final progress = totalWeight == 0 ? 0.0 : cursor / totalWeight;
+    final time = Duration(
+      milliseconds: (introPaddingMs + usableDurationMs * progress)
+          .round()
+          .clamp(0, totalDuration.inMilliseconds),
+    );
+    cursor += weights[index];
+    return _LrcLine(time: time, text: line);
+  });
 }
 
 String _normalizeLookupText(String value) {
@@ -119,9 +161,12 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   bool _lyricsLoading = false;
   bool _lyricsSynced = false;
+  bool _lyricsHasExactSync = false;
   List<_LrcLine> _lrcLines = [];
   int _currentLyricIdx = -1;
   String _lyricsTrackKey = '';
+  int _lyricsLookupDurationSeconds = 0;
+  int _lyricsRequestNonce = 0;
 
   Timer? _sleepTimer;
   int? _sleepMinutesLeft;
@@ -220,10 +265,53 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   String? get _currentLyricLine {
-    if (!_lyricsSynced || _lrcLines.isEmpty) return null;
-    final idx = _currentLyricIdx >= 0 ? _currentLyricIdx : 0;
+    if (!_lyricsHasExactSync || _lrcLines.isEmpty) return null;
+    if (_currentLyricIdx < 0 || _currentLyricIdx >= _lrcLines.length) {
+      return null;
+    }
+    if (_shouldHideLeadingLyricLine || !_isCurrentLyricReadyForPreview) {
+      return null;
+    }
+    final idx = _currentLyricIdx;
     if (idx < _lrcLines.length) return _lrcLines[idx].text;
     return null;
+  }
+
+  bool get _shouldHideLeadingLyricLine {
+    if (_currentLyricIdx != 0 || _lrcLines.length < 2) {
+      return false;
+    }
+
+    final firstLine = _lrcLines[0].time;
+    final secondLine = _lrcLines[1].time;
+    final introGap = secondLine - firstLine;
+    if (introGap < const Duration(seconds: 5)) {
+      return false;
+    }
+
+    final guardSeconds = math.min(
+      8,
+      math.max(3, (introGap.inMilliseconds * 0.55 / 1000).round()),
+    );
+    final guardedStart = firstLine + Duration(seconds: guardSeconds);
+    return _position < guardedStart;
+  }
+
+  bool get _isCurrentLyricReadyForPreview {
+    if (_currentLyricIdx < 0 || _currentLyricIdx >= _lrcLines.length) {
+      return false;
+    }
+
+    final currentLine = _lrcLines[_currentLyricIdx].time;
+    final nextGap = _currentLyricIdx + 1 < _lrcLines.length
+        ? _lrcLines[_currentLyricIdx + 1].time - currentLine
+        : const Duration(seconds: 3);
+
+    final delayMs = _currentLyricIdx == 0
+        ? (nextGap.inMilliseconds * 0.28).round().clamp(1200, 4500)
+        : (nextGap.inMilliseconds * 0.18).round().clamp(250, 1500);
+
+    return _position >= currentLine + Duration(milliseconds: delayMs);
   }
 
   @override
@@ -320,6 +408,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     final nextTrack = Map<String, dynamic>.from(providerTrack);
     final nextKey = _trackStateKey(nextTrack);
     final oldKey = _trackStateKey(_track);
+    final trackChanged = nextKey != oldKey;
 
     setState(() {
       _track = nextTrack;
@@ -329,11 +418,27 @@ class _PlayerScreenState extends State<PlayerScreen>
       _duration = _playback.duration;
       _shuffle = _playback.shuffleOn;
       _repeatMode = _playback.repeatMode;
-      _updateLyricIdx(_position);
+      if (trackChanged) {
+        _lrcLines = [];
+        _lyricsSynced = false;
+        _lyricsHasExactSync = false;
+        _currentLyricIdx = -1;
+        _lyricsLoading = true;
+      } else {
+        _updateLyricIdx(_position);
+      }
     });
 
-    if (nextKey != oldKey) {
+    if (trackChanged) {
       _maybeRefreshLyrics(force: true);
+    } else {
+      final currentDurationSeconds = _seekableDuration.inSeconds;
+      if (!_lyricsLoading &&
+          currentDurationSeconds > 0 &&
+          (_lyricsLines.isEmpty || !_lyricsHasExactSync) &&
+          (currentDurationSeconds - _lyricsLookupDurationSeconds).abs() >= 2) {
+        _maybeRefreshLyrics(force: true);
+      }
     }
   }
 
@@ -341,12 +446,77 @@ class _PlayerScreenState extends State<PlayerScreen>
     final key = _trackStateKey(_track);
     if (!force && key == _lyricsTrackKey) return;
     _lyricsTrackKey = key;
+    _lyricsLookupDurationSeconds = 0;
+    _lyricsRequestNonce++;
     setState(() {
       _lrcLines = [];
       _lyricsSynced = false;
+      _lyricsHasExactSync = false;
       _currentLyricIdx = -1;
+      _lyricsLoading = true;
     });
-    unawaited(_fetchLyrics());
+    final requestNonce = _lyricsRequestNonce;
+    unawaited(_fetchLyrics(requestKey: key, requestNonce: requestNonce));
+  }
+
+  bool _isCurrentLyricsRequest(String requestKey, int requestNonce) {
+    return mounted &&
+        requestNonce == _lyricsRequestNonce &&
+        requestKey == _lyricsTrackKey &&
+        requestKey == _trackStateKey(_track);
+  }
+
+  String _normalizeLyricLookup(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll('&', ' and ')
+        .replaceAll(RegExp(r'\((feat|ft|with).*?\)', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'\[(feat|ft|with).*?\]', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'[^a-z0-9а-яё]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  bool _strongTitleMatch(String candidateTitle) {
+    final candidate = _normalizeLyricLookup(candidateTitle);
+    if (candidate.isEmpty) return false;
+    for (final title in _titleVariants) {
+      final wanted = _normalizeLyricLookup(title);
+      if (wanted.isEmpty) continue;
+      if (candidate == wanted ||
+          candidate.contains(wanted) ||
+          wanted.contains(candidate)) {
+        return true;
+      }
+      final wantedTokens = _lookupTokens(wanted);
+      final candidateTokens = _lookupTokens(candidate);
+      if (wantedTokens.isEmpty || candidateTokens.isEmpty) continue;
+      final overlap = wantedTokens.intersection(candidateTokens).length;
+      final ratio = overlap / wantedTokens.length;
+      if (ratio >= 0.75) return true;
+    }
+    return false;
+  }
+
+  bool _strongArtistMatch(String candidateArtist) {
+    final candidate = _normalizeLyricLookup(candidateArtist);
+    if (candidate.isEmpty) return false;
+    for (final artist in _artistVariants) {
+      final wanted = _normalizeLyricLookup(artist);
+      if (wanted.isEmpty) continue;
+      if (candidate == wanted ||
+          candidate.contains(wanted) ||
+          wanted.contains(candidate)) {
+        return true;
+      }
+      final wantedTokens = _lookupTokens(wanted);
+      final candidateTokens = _lookupTokens(candidate);
+      if (wantedTokens.isEmpty || candidateTokens.isEmpty) continue;
+      final overlap = wantedTokens.intersection(candidateTokens).length;
+      final ratio = overlap / wantedTokens.length;
+      if (ratio >= 0.6) return true;
+    }
+    return false;
   }
 
   bool _sameTrack(Map<String, dynamic> a, Map<String, dynamic> b) {
@@ -369,14 +539,18 @@ class _PlayerScreenState extends State<PlayerScreen>
             (b['artist'] ?? b['artistName']).toString();
   }
 
-  Future<void> _fetchLyrics() async {
+  Future<void> _fetchLyrics({
+    required String requestKey,
+    required int requestNonce,
+  }) async {
     if (_title.isEmpty) return;
-    if (mounted) {
+    if (_isCurrentLyricsRequest(requestKey, requestNonce)) {
       setState(() => _lyricsLoading = true);
     }
     final durationSeconds = _duration.inSeconds > 0
         ? _duration.inSeconds
         : (((_track['duration_ms'] as int?) ?? 0) ~/ 1000);
+    _lyricsLookupDurationSeconds = durationSeconds;
     final albumName = _album.trim();
     final queries = <Map<String, String>>[];
     for (final title in _titleVariants) {
@@ -426,6 +600,30 @@ class _PlayerScreenState extends State<PlayerScreen>
           candidates.add(lyricsMap);
         }
       }
+      if (candidates.isEmpty) {
+        for (final title in _titleVariants.take(3)) {
+          final encodedTitle = Uri.encodeComponent(title);
+          final response = await http
+              .get(
+                Uri.parse(
+                  'https://lrclib.net/api/search?track_name=$encodedTitle'
+                  '${durationSeconds > 0 ? '&duration=$durationSeconds' : ''}',
+                ),
+              )
+              .timeout(const Duration(seconds: 8));
+          if (response.statusCode != 200) continue;
+          final raw = jsonDecode(response.body);
+          if (raw is! List) continue;
+          for (final candidate in raw.whereType<Map>()) {
+            final lyricsMap = Map<String, dynamic>.from(candidate);
+            final key = '${lyricsMap['id'] ?? ''}'
+                '${lyricsMap['trackName'] ?? lyricsMap['name'] ?? ''}'
+                '${lyricsMap['artistName'] ?? lyricsMap['artist'] ?? ''}';
+            if (!seenKeys.add(key)) continue;
+            candidates.add(lyricsMap);
+          }
+        }
+      }
       if (candidates.isNotEmpty) {
         int score(Map<String, dynamic> item) {
           final itemTitle =
@@ -462,6 +660,8 @@ class _PlayerScreenState extends State<PlayerScreen>
           final artistBonus = artistScores.isEmpty
               ? 0
               : artistScores.reduce((a, b) => a > b ? a : b);
+          final exactTitleBonus = _strongTitleMatch(itemTitle) ? 600 : -1200;
+          final exactArtistBonus = _strongArtistMatch(itemArtist) ? 500 : -900;
           final itemDuration =
               (item['duration'] as num?)?.toInt() ?? durationSeconds;
           final durationPenalty = durationSeconds > 0
@@ -476,6 +676,8 @@ class _PlayerScreenState extends State<PlayerScreen>
               plain +
               titleBonus +
               artistBonus +
+              exactTitleBonus +
+              exactArtistBonus +
               albumBonus -
               durationPenalty;
         }
@@ -495,13 +697,8 @@ class _PlayerScreenState extends State<PlayerScreen>
               .toString();
           final candidateDuration =
               (lyricsMap['duration'] as num?)?.toInt() ?? 0;
-          final titleMatch = _titleVariants.any((title) => _lookupTokens(title)
-              .intersection(_lookupTokens(candidateTitle))
-              .isNotEmpty);
-          final artistMatch = _artistVariants.any((artist) =>
-              _lookupTokens(artist)
-                  .intersection(_lookupTokens(candidateArtist))
-                  .isNotEmpty);
+          final titleMatch = _strongTitleMatch(candidateTitle);
+          final artistMatch = _strongArtistMatch(candidateArtist);
           if (!titleMatch || !artistMatch) {
             continue;
           }
@@ -510,7 +707,11 @@ class _PlayerScreenState extends State<PlayerScreen>
               (durationSeconds - candidateDuration).abs() > 10) {
             continue;
           }
-          if (await _applyLyricsPayload(lyricsMap)) {
+          if (await _applyLyricsPayload(
+            lyricsMap,
+            requestKey: requestKey,
+            requestNonce: requestNonce,
+          )) {
             return;
           }
         }
@@ -530,7 +731,11 @@ class _PlayerScreenState extends State<PlayerScreen>
               .timeout(const Duration(seconds: 8));
           if (response.statusCode == 200) {
             final data = jsonDecode(response.body) as Map<String, dynamic>;
-            if (await _applyLyricsPayload(data)) {
+            if (await _applyLyricsPayload(
+              data,
+              requestKey: requestKey,
+              requestNonce: requestNonce,
+            )) {
               return;
             }
           }
@@ -548,43 +753,48 @@ class _PlayerScreenState extends State<PlayerScreen>
           if (response.statusCode == 200) {
             final data = jsonDecode(response.body) as Map<String, dynamic>;
             final raw = data['lyrics'] as String? ?? '';
-            final lines = raw
-                .split('\n')
-                .map((line) => line.trim())
-                .where((line) => line.isNotEmpty)
-                .map((line) => _LrcLine(time: Duration.zero, text: line))
-                .toList();
+            final lines = _buildApproximateLyricsTiming(
+              raw.split('\n'),
+              _seekableDuration,
+            );
             if (lines.isEmpty) {
               continue;
             }
-            if (!mounted) return;
+            if (!_isCurrentLyricsRequest(requestKey, requestNonce)) return;
             setState(() {
               _lrcLines = lines;
-              _lyricsSynced = false;
+              _lyricsSynced = lines.any((line) => line.time > Duration.zero);
+              _lyricsHasExactSync = false;
               _lyricsLoading = false;
             });
+            _updateLyricIdx(_position);
             return;
           }
         }
       } catch (_) {}
     }
 
-    if (mounted) {
+    if (_isCurrentLyricsRequest(requestKey, requestNonce)) {
       setState(() => _lyricsLoading = false);
     }
   }
 
-  Future<bool> _applyLyricsPayload(Map<String, dynamic> data) async {
+  Future<bool> _applyLyricsPayload(
+    Map<String, dynamic> data, {
+    required String requestKey,
+    required int requestNonce,
+  }) async {
     final synced = data['syncedLyrics'] as String?;
     final plain = data['plainLyrics'] as String?;
 
     if (synced != null && synced.isNotEmpty) {
       final lines = _parseLrc(synced);
       if (lines.isNotEmpty) {
-        if (!mounted) return true;
+        if (!_isCurrentLyricsRequest(requestKey, requestNonce)) return true;
         setState(() {
           _lrcLines = lines;
           _lyricsSynced = true;
+          _lyricsHasExactSync = true;
           _lyricsLoading = false;
         });
         _updateLyricIdx(_position);
@@ -593,18 +803,18 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
 
     if (plain != null && plain.isNotEmpty) {
-      final lines = plain
-          .split('\n')
-          .map((line) => line.trim())
-          .where((line) => line.isNotEmpty)
-          .map((line) => _LrcLine(time: Duration.zero, text: line))
-          .toList();
-      if (!mounted) return true;
+      final lines = _buildApproximateLyricsTiming(
+        plain.split('\n'),
+        _seekableDuration,
+      );
+      if (!_isCurrentLyricsRequest(requestKey, requestNonce)) return true;
       setState(() {
         _lrcLines = lines;
-        _lyricsSynced = false;
+        _lyricsSynced = lines.any((line) => line.time > Duration.zero);
+        _lyricsHasExactSync = false;
         _lyricsLoading = false;
       });
+      _updateLyricIdx(_position);
       return true;
     }
 
@@ -705,6 +915,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           lyricsLines: _lyricsLines,
           currentPosition: _position,
           syncedLineTimesMs: _lyricsTimesMs,
+          approximateSync: _lyricsSynced && !_lyricsHasExactSync,
           positionStream: _playback.positionStream,
           onSeek: (Duration pos) {
             unawaited(_seekTo(pos));

@@ -1850,8 +1850,18 @@ class _RecentHistoryScreenState extends State<RecentHistoryScreen> {
                                 color: AppColors.text),
                           ),
                         ),
-                        ...tracks.map((t) =>
-                            _HistoryTrackRow(track: t as Map<String, dynamic>)),
+                        ..._buildHistoryEntries(
+                          tracks
+                              .whereType<Map>()
+                              .map((t) => Map<String, dynamic>.from(t))
+                              .toList(),
+                        ).map((entry) {
+                          final kind = (entry['_kind'] ?? 'track').toString();
+                          if (kind == 'album_summary') {
+                            return _HistoryAlbumSummary(entry: entry);
+                          }
+                          return _HistoryTrackRow(track: entry);
+                        }),
                       ],
                     );
                   },
@@ -1898,6 +1908,13 @@ class _HistoryTrackRow extends StatelessWidget {
     final coverUrl = track['cover_url'] as String?;
     final title = track['title'] as String? ?? 'Unknown';
     final artist = track['artist'] as String? ?? '';
+    final album = track['album'] as String? ?? '';
+    final playCount = (track['play_count'] as num?)?.toInt() ?? 1;
+    final subtitle = <String>[
+      if (artist.isNotEmpty) artist,
+      if (album.isNotEmpty) 'Album · $album',
+      if (playCount > 1) 'Played $playCount times',
+    ].join(' · ');
     return InkWell(
       onTap: () => Navigator.push(context,
           MaterialPageRoute(builder: (_) => PlayerScreen(track: track))),
@@ -1935,6 +1952,14 @@ class _HistoryTrackRow extends StatelessWidget {
                         fontSize: 12, color: AppColors.text3),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
+                if (subtitle.isNotEmpty && subtitle != artist) ...[
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: GoogleFonts.outfit(
+                          fontSize: 12, color: AppColors.text3),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ],
               ],
             ),
           ),
@@ -1970,6 +1995,170 @@ class _HistoryTrackRow extends StatelessWidget {
         child: const Icon(Icons.music_note_rounded,
             color: Colors.white54, size: 20),
       );
+}
+
+class _HistoryAlbumSummary extends StatelessWidget {
+  final Map<String, dynamic> entry;
+  const _HistoryAlbumSummary({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final title = (entry['album'] ?? 'Album').toString();
+    final artist = (entry['artist'] ?? '').toString();
+    final coverUrl = (entry['cover_url'] ?? '').toString();
+    final trackCount = (entry['track_count'] as num?)?.toInt() ?? 0;
+    final playCount = (entry['play_count'] as num?)?.toInt() ?? trackCount;
+    final subtitle = [
+      'Played ${trackCount > 0 ? trackCount : playCount} track${(trackCount > 1 || playCount > 1) ? 's' : ''}',
+      'Album',
+      if (artist.isNotEmpty) artist,
+    ].join(' · ');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: coverUrl.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: coverUrl,
+                      width: 56,
+                      height: 56,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => const SizedBox(),
+                      errorWidget: (_, __, ___) => _historyCoverFallback(56),
+                    )
+                  : _historyCoverFallback(56),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.text,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      color: AppColors.text3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Widget _historyCoverFallback(double size) => Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: AppColors.glass,
+        borderRadius: BorderRadius.circular(size * 0.16),
+      ),
+      child: const Icon(Icons.album_rounded, color: Colors.white54, size: 22),
+    );
+
+List<Map<String, dynamic>> _buildHistoryEntries(
+  List<Map<String, dynamic>> tracks,
+) {
+  final normalized =
+      tracks.map((item) => Map<String, dynamic>.from(item)).toList()
+        ..sort((a, b) => (b['played_at']?.toString() ?? '').compareTo(
+              a['played_at']?.toString() ?? '',
+            ));
+
+  final albumGroups = <String, List<Map<String, dynamic>>>{};
+  for (final track in normalized) {
+    final album = (track['album'] ?? '').toString().trim();
+    final artist = (track['artist'] ?? '').toString().trim();
+    if (album.isEmpty) continue;
+    final key = '${album.toLowerCase()}|${artist.toLowerCase()}';
+    albumGroups.putIfAbsent(key, () => []).add(track);
+  }
+
+  final duplicateCounts = <String, int>{};
+  for (final track in normalized) {
+    final key = _historyTrackKey(track);
+    duplicateCounts[key] = (duplicateCounts[key] ?? 0) + 1;
+  }
+
+  final emittedAlbums = <String>{};
+  final emittedTracks = <String>{};
+  final entries = <Map<String, dynamic>>[];
+
+  for (final track in normalized) {
+    final album = (track['album'] ?? '').toString().trim();
+    final artist = (track['artist'] ?? '').toString().trim();
+    final albumKey =
+        album.isEmpty ? '' : '${album.toLowerCase()}|${artist.toLowerCase()}';
+    final albumItems = albumKey.isEmpty
+        ? const <Map<String, dynamic>>[]
+        : (albumGroups[albumKey] ?? const <Map<String, dynamic>>[]);
+
+    final uniqueTracks =
+        albumItems.map((item) => _historyTrackKey(item)).toSet().length;
+
+    if (uniqueTracks >= 2 && !emittedAlbums.contains(albumKey)) {
+      emittedAlbums.add(albumKey);
+      for (final item in albumItems) {
+        emittedTracks.add(_historyTrackKey(item));
+      }
+      entries.add({
+        '_kind': 'album_summary',
+        'album': album,
+        'artist': artist,
+        'cover_url': track['cover_url'],
+        'track_count': uniqueTracks,
+        'play_count': albumItems.length,
+      });
+      continue;
+    }
+
+    final trackKey = _historyTrackKey(track);
+    if (emittedTracks.contains(trackKey)) {
+      continue;
+    }
+    emittedTracks.add(trackKey);
+    final item = Map<String, dynamic>.from(track);
+    item['play_count'] = duplicateCounts[trackKey] ?? 1;
+    entries.add(item);
+  }
+
+  return entries;
+}
+
+String _historyTrackKey(Map<String, dynamic> track) {
+  return [
+    (track['spotify_id'] ?? '').toString(),
+    (track['title'] ?? '').toString().trim().toLowerCase(),
+    (track['artist'] ?? '').toString().trim().toLowerCase(),
+    (track['album'] ?? '').toString().trim().toLowerCase(),
+  ].join('|');
 }
 
 // ══════════════════════════════════════════

@@ -1,7 +1,9 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
@@ -42,14 +44,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         ..sort((a, b) => (b['updated_at']?.toString() ?? '').compareTo(
               a['updated_at']?.toString() ?? '',
             ));
-  List<Map<String, dynamic>> get _recentTracks =>
-      ((_data?['recent_tracks'] as List?) ?? const [])
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .toList()
-        ..sort((a, b) => (b['played_at']?.toString() ?? '').compareTo(
-              a['played_at']?.toString() ?? '',
-            ));
+  List<Map<String, dynamic>> get _recentTracks => _condenseRecentTracks(
+        ((_data?['recent_tracks'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList()
+          ..sort((a, b) => (b['played_at']?.toString() ?? '').compareTo(
+                a['played_at']?.toString() ?? '',
+              )),
+      );
   List<Map<String, dynamic>> get _favoriteArtists =>
       ((_data?['favorite_artists'] as List?) ?? const [])
           .whereType<Map>()
@@ -145,6 +148,155 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       if (!mounted) return;
       setState(() => _loading = false);
     }
+  }
+
+  String get _profileShareLink {
+    final handle =
+        _username.isNotEmpty ? '@$_username' : 'user-${widget.userId}';
+    return 'moodwave://profile/$handle';
+  }
+
+  Future<void> _shareProfile() async {
+    final text = 'Check out $_displayName on MoodWave\n$_profileShareLink';
+    await Share.share(text, subject: 'MoodWave profile');
+  }
+
+  Future<void> _copyProfileLink() async {
+    await Clipboard.setData(ClipboardData(text: _profileShareLink));
+    if (!mounted) return;
+    _showSnack('Profile link copied');
+  }
+
+  Future<void> _copyUsername() async {
+    if (_username.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: '@$_username'));
+    if (!mounted) return;
+    _showSnack('Username copied');
+  }
+
+  Future<void> _toggleBlock() async {
+    final blockedByMe = _relation['blocked_by_me'] == true;
+    try {
+      if (blockedByMe) {
+        await ApiService().unblockUser(widget.userId);
+        if (!mounted) return;
+        _showSnack('User unblocked');
+      } else {
+        await ApiService().blockUser(widget.userId);
+        if (!mounted) return;
+        _showSnack('User blocked');
+      }
+      await _load();
+    } on DioException catch (e) {
+      _showSnack(
+        _detailFromError(e,
+            fallback: blockedByMe
+                ? 'Could not unblock user'
+                : 'Could not block user'),
+        isError: true,
+      );
+    } catch (_) {
+      _showSnack(
+          blockedByMe ? 'Could not unblock user' : 'Could not block user',
+          isError: true);
+    }
+  }
+
+  Future<void> _showProfileMenu() async {
+    final blockedByMe = _relation['blocked_by_me'] == true;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        Widget item(IconData icon, String label, VoidCallback onTap,
+            {Color? color}) {
+          final resolvedColor = color ?? AppColors.text;
+          return InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              child: Row(
+                children: [
+                  Icon(icon, color: resolvedColor, size: 20),
+                  const SizedBox(width: 14),
+                  Text(
+                    label,
+                    style: GoogleFonts.outfit(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: resolvedColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return SafeArea(
+          top: false,
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            padding: const EdgeInsets.only(top: 8, bottom: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surface2,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.18),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                item(Icons.share_outlined, 'Share profile', () {
+                  Navigator.pop(ctx);
+                  _shareProfile();
+                }),
+                item(Icons.link_rounded, 'Copy profile link', () {
+                  Navigator.pop(ctx);
+                  _copyProfileLink();
+                }),
+                if (_username.isNotEmpty)
+                  item(Icons.alternate_email_rounded, 'Copy username', () {
+                    Navigator.pop(ctx);
+                    _copyUsername();
+                  }),
+                if (_playlists.isNotEmpty)
+                  item(Icons.queue_music_rounded, 'View playlists', () {
+                    Navigator.pop(ctx);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => _UserProfileCollectionScreen(
+                          userId: widget.userId,
+                          userName: _displayName,
+                          mode: _CollectionMode.playlists,
+                        ),
+                      ),
+                    );
+                  }),
+                item(
+                  blockedByMe ? Icons.lock_open_rounded : Icons.block_rounded,
+                  blockedByMe ? 'Unblock user' : 'Block user',
+                  () {
+                    Navigator.pop(ctx);
+                    _toggleBlock();
+                  },
+                  color: blockedByMe ? AppColors.text : const Color(0xFFFF7676),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _toggleFollow() async {
@@ -480,6 +632,33 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     ),
                   ),
                 ),
+                if (_relation['is_self'] != true)
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: SafeArea(
+                      bottom: false,
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: GestureDetector(
+                          onTap: _showProfileMenu,
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.42),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.more_horiz_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
     );
@@ -790,7 +969,7 @@ class _ActionRow extends StatelessWidget {
         Expanded(
           child: _ActionButton(
             label: following ? 'Following' : 'Follow',
-            filled: following,
+            filled: !following,
             loading: followBusy,
             onTap: onFollow,
           ),
@@ -1224,8 +1403,15 @@ class _RecentTrackItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final title = (track['title'] ?? 'Unknown track').toString();
     final artist = (track['artist'] ?? '').toString();
+    final album = (track['album'] ?? '').toString();
     final coverUrl = (track['cover_url'] ?? '').toString();
     final playedAt = (track['played_at'] ?? '').toString();
+    final playCount = (track['play_count'] as num?)?.toInt() ?? 1;
+    final subtitleParts = <String>[
+      if (artist.isNotEmpty) artist,
+      if (album.isNotEmpty) 'Album · $album',
+      if (playCount > 1) '$playCount plays',
+    ];
 
     return GestureDetector(
       onTap: () => Navigator.push(
@@ -1277,7 +1463,7 @@ class _RecentTrackItem extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    artist,
+                    subtitleParts.join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.outfit(
@@ -1762,14 +1948,11 @@ class _UserProfileCollectionScreenState
       final recentTracks = ((data['recent_tracks'] as List?) ?? const [])
           .whereType<Map>()
           .map((item) => Map<String, dynamic>.from(item))
-          .toList()
-        ..sort((a, b) => (b['played_at']?.toString() ?? '').compareTo(
-              a['played_at']?.toString() ?? '',
-            ));
+          .toList();
       if (!mounted) return;
       setState(() {
         _playlists = playlists;
-        _recentTracks = recentTracks;
+        _recentTracks = _condenseRecentTracks(recentTracks);
         _loading = false;
       });
     } catch (_) {
@@ -1861,4 +2044,43 @@ String _relTime(String iso) {
   } catch (_) {
     return '';
   }
+}
+
+List<Map<String, dynamic>> _condenseRecentTracks(
+  List<Map<String, dynamic>> tracks,
+) {
+  final sorted = [...tracks]
+    ..sort((a, b) => (b['played_at']?.toString() ?? '').compareTo(
+          a['played_at']?.toString() ?? '',
+        ));
+  final grouped = <String, Map<String, dynamic>>{};
+  final ordered = <Map<String, dynamic>>[];
+
+  for (final raw in sorted) {
+    final track = Map<String, dynamic>.from(raw);
+    final key = [
+      (track['spotify_id'] ?? '').toString(),
+      (track['title'] ?? '').toString().trim().toLowerCase(),
+      (track['artist'] ?? '').toString().trim().toLowerCase(),
+      (track['album'] ?? '').toString().trim().toLowerCase(),
+    ].join('|');
+
+    final existing = grouped[key];
+    if (existing == null) {
+      track['play_count'] = 1;
+      grouped[key] = track;
+      ordered.add(track);
+      continue;
+    }
+
+    existing['play_count'] =
+        ((existing['play_count'] as num?)?.toInt() ?? 1) + 1;
+    final currentPlayedAt = (track['played_at'] ?? '').toString();
+    final savedPlayedAt = (existing['played_at'] ?? '').toString();
+    if (currentPlayedAt.compareTo(savedPlayedAt) > 0) {
+      existing['played_at'] = currentPlayedAt;
+    }
+  }
+
+  return ordered;
 }

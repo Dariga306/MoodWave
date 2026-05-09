@@ -317,6 +317,45 @@ async def block_user(
     return {"message": "User blocked"}
 
 
+@router.delete(
+    "/users/{user_id}/block",
+    summary="Unblock user",
+    description="Removes an existing block relationship and refreshes caches for both sides.",
+)
+async def unblock_user(
+    user_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot unblock yourself")
+
+    target = await db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    block = await db.scalar(
+        select(Block).where(
+            Block.blocker_id == current_user.id,
+            Block.blocked_id == user_id,
+        )
+    )
+    if not block:
+        raise HTTPException(status_code=404, detail="Block not found")
+
+    await db.delete(block)
+    await db.commit()
+
+    await cache_svc.invalidate_match_candidates(
+        request.app.state.redis, [current_user.id, user_id]
+    )
+    await cache_svc.invalidate_search_results_for_users(
+        request.app.state.redis, [current_user.id, user_id]
+    )
+    return {"message": "User unblocked"}
+
+
 @router.post(
     "/users/{user_id}/report",
     summary="Report user",

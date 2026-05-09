@@ -27,7 +27,7 @@ from app.models.music import (
     PlaylistVisibility,
     TrackCache,
 )
-from app.models.social import ArtistFollow, Friend, FriendStatus, Match, UserFollow
+from app.models.social import ArtistFollow, Block, Friend, FriendStatus, Match, UserFollow
 from app.models.user import User, UserGenre, UserMood, TasteVector
 from app.schemas.auth import (
     ChangePasswordRequest,
@@ -1174,6 +1174,28 @@ async def get_user_summary(
             is not None
         )
 
+    blocked_by_me = False
+    blocked_me = False
+    if not is_self:
+        blocked_by_me = (
+            await db.scalar(
+                select(Block.id).where(
+                    Block.blocker_id == current_user.id,
+                    Block.blocked_id == user.id,
+                )
+            )
+            is not None
+        )
+        blocked_me = (
+            await db.scalar(
+                select(Block.id).where(
+                    Block.blocker_id == user.id,
+                    Block.blocked_id == current_user.id,
+                )
+            )
+            is not None
+        )
+
     friendship = None
     if not is_self:
         friendship = await db.scalar(
@@ -1296,8 +1318,10 @@ async def get_user_summary(
                 "spotify_id": history.spotify_track_id,
                 "title": track.title if track and track.title else "Unknown track",
                 "artist": track.artist if track and track.artist else "",
+                "album": track.album if track and track.album else "",
                 "cover_url": track.cover_url if track else None,
                 "preview_url": track.preview_url if track else None,
+                "duration_ms": track.duration_ms if track else None,
                 "played_at": history.created_at.isoformat(),
                 "action": history.action.value,
             }
@@ -1318,6 +1342,8 @@ async def get_user_summary(
             "is_self": is_self,
             "is_following": is_following,
             "is_followed_by": is_followed_by,
+            "blocked_by_me": blocked_by_me,
+            "blocked_me": blocked_me,
             "is_friend": is_friend and not is_self,
             "friend_request_status": friend_request_status,
             "can_message": not is_self,

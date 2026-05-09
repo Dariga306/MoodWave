@@ -322,10 +322,12 @@ async def get_listening_history(
             "spotify_id": track.spotify_id,
             "title": track.title,
             "artist": track.artist,
+            "album": track.album,
             "cover_url": track.cover_url,
             "preview_url": track.preview_url or None,
             "duration_ms": track.duration_ms,
             "played_at": history.created_at.isoformat() + "Z",
+            "action": history.action.value,
         })
 
     return [{"date": label, "tracks": tracks} for label, tracks in grouped.items()]
@@ -364,6 +366,7 @@ async def get_recent_tracks(
             "spotify_id": track.spotify_id,
             "title": track.title,
             "artist": track.artist,
+            "album": track.album,
             "cover_url": track.cover_url,
             "preview_url": track.preview_url or None,
             "duration_ms": track.duration_ms,
