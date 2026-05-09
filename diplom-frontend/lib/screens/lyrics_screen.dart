@@ -127,12 +127,12 @@ class _LyricsScreenState extends State<LyricsScreen> {
   }
 
   // Extrapolates current position using wall-clock time since last update.
-  // Capped at 500 ms so a paused player doesn't drift.
+  // Capped at 1500 ms to stay responsive while avoiding running far ahead.
   int get _interpolatedPositionMs {
     if (_syncedLines.isEmpty) return _currentPositionMs;
     final elapsed =
         DateTime.now().difference(_lastPositionReceivedAt).inMilliseconds;
-    return _lastReceivedPositionMs + elapsed.clamp(0, 500);
+    return _lastReceivedPositionMs + elapsed.clamp(0, 1500);
   }
 
   @override
@@ -563,7 +563,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
                                     : FontWeight.w400,
                                 color: isActive
                                     ? Colors.white
-                                    : Colors.white.withOpacity(0.28),
+                                    : Colors.white.withOpacity(0.5),
                                 height: 1.7,
                               ),
                               child: Text(

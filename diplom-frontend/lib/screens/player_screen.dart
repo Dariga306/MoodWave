@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -269,49 +268,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_currentLyricIdx < 0 || _currentLyricIdx >= _lrcLines.length) {
       return null;
     }
-    if (_shouldHideLeadingLyricLine || !_isCurrentLyricReadyForPreview) {
-      return null;
-    }
-    final idx = _currentLyricIdx;
-    if (idx < _lrcLines.length) return _lrcLines[idx].text;
-    return null;
-  }
-
-  bool get _shouldHideLeadingLyricLine {
-    if (_currentLyricIdx != 0 || _lrcLines.length < 2) {
-      return false;
-    }
-
-    final firstLine = _lrcLines[0].time;
-    final secondLine = _lrcLines[1].time;
-    final introGap = secondLine - firstLine;
-    if (introGap < const Duration(seconds: 5)) {
-      return false;
-    }
-
-    final guardSeconds = math.min(
-      8,
-      math.max(3, (introGap.inMilliseconds * 0.55 / 1000).round()),
-    );
-    final guardedStart = firstLine + Duration(seconds: guardSeconds);
-    return _position < guardedStart;
-  }
-
-  bool get _isCurrentLyricReadyForPreview {
-    if (_currentLyricIdx < 0 || _currentLyricIdx >= _lrcLines.length) {
-      return false;
-    }
-
-    final currentLine = _lrcLines[_currentLyricIdx].time;
-    final nextGap = _currentLyricIdx + 1 < _lrcLines.length
-        ? _lrcLines[_currentLyricIdx + 1].time - currentLine
-        : const Duration(seconds: 3);
-
-    final delayMs = _currentLyricIdx == 0
-        ? (nextGap.inMilliseconds * 0.28).round().clamp(1200, 4500)
-        : (nextGap.inMilliseconds * 0.18).round().clamp(250, 1500);
-
-    return _position >= currentLine + Duration(milliseconds: delayMs);
+    return _lrcLines[_currentLyricIdx].text;
   }
 
   @override
@@ -1029,37 +986,62 @@ class _PlayerScreenState extends State<PlayerScreen>
         ),
       );
 
-  Widget _topBar() => Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          GestureDetector(
-            onTap: () => Navigator.of(context).maybePop(),
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppColors.glass,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: const Icon(
-                Icons.arrow_back_rounded,
-                size: 18,
-                color: Colors.white,
-              ),
+  Widget _topBar() {
+    final contextName = (_track['queue_context'] ?? '').toString().trim();
+    final albumLabel = _album.trim();
+    final label = contextName.isNotEmpty
+        ? contextName
+        : albumLabel.isNotEmpty
+            ? albumLabel
+            : null;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        GestureDetector(
+          onTap: () => Navigator.of(context).maybePop(),
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.glass,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Icon(
+              Icons.arrow_back_rounded,
+              size: 18,
+              color: Colors.white,
             ),
           ),
-          Text(
-            'Now Playing',
-            style: GoogleFonts.outfit(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppColors.text3,
+        ),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Now Playing',
+              style: GoogleFonts.outfit(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text,
+                letterSpacing: 0.2,
+              ),
             ),
-          ),
-          const SizedBox(width: 40),
-        ],
-      );
+            if (label != null)
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.outfit(
+                  fontSize: 11,
+                  color: AppColors.purpleLight.withOpacity(0.8),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(width: 40),
+      ],
+    );
+  }
 
   Widget _coverArtBox() {
     return AnimatedBuilder(

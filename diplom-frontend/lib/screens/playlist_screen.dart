@@ -940,7 +940,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                       (context, i) {
                         final track =
                             Map<String, dynamic>.from(tracks[i] as Map)
-                              ..['queue'] = tracks;
+                              ..['queue'] = tracks
+                              ..['queue_context'] = title;
                         final trackTitle =
                             track['title']?.toString() ?? 'Unknown';
                         final artist = track['artist']?.toString() ?? '';

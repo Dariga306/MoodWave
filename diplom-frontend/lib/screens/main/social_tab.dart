@@ -1,11 +1,15 @@
+import 'dart:async';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
-import '../../widgets/common_widgets.dart';
 import '../chat_screen.dart';
-import '../extra_screens.dart';
+import '../group_chat_setup_screen.dart';
 import '../social_activity_screen.dart';
 
 class SocialTab extends StatefulWidget {
@@ -17,12 +21,14 @@ class SocialTab extends StatefulWidget {
 class _SocialTabState extends State<SocialTab>
     with SingleTickerProviderStateMixin {
   late final TabController _tab;
+  int _liveActivityCount = 0;
 
   @override
   void initState() {
     super.initState();
     _tab = TabController(length: 2, vsync: this);
     _tab.addListener(() => setState(() {}));
+    _loadActivityBadge();
   }
 
   @override
@@ -71,47 +77,26 @@ class _SocialTabState extends State<SocialTab>
             children: [
               Row(
                 children: [
-                  const Spacer(),
-                  GestureDetector(
+                  _headerActionButton(
+                    icon: Icons.headphones_rounded,
+                    iconSize: 20,
+                    badgeText:
+                        _liveActivityCount > 0 ? '$_liveActivityCount' : null,
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (_) => const SocialActivityScreen(),
                       ),
                     ),
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.border),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.purple.withOpacity(0.14),
-                            blurRadius: 18,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
-                      ),
-                      child: Container(
-                        margin: const EdgeInsets.all(1.5),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              AppColors.purple.withOpacity(0.16),
-                              AppColors.pink.withOpacity(0.08),
-                            ],
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.groups_rounded,
-                          size: 20,
-                          color: AppColors.purpleLight,
-                        ),
+                  ),
+                  const Spacer(),
+                  _headerActionButton(
+                    icon: Icons.edit_rounded,
+                    iconSize: 20,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const _NewMessageScreen(),
                       ),
                     ),
                   ),
@@ -183,6 +168,183 @@ class _SocialTabState extends State<SocialTab>
           ),
         ),
       ),
+    );
+  }
+
+  Widget _headerActionButton({
+    required IconData icon,
+    required double iconSize,
+    String? badgeText,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.glass,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Icon(
+              icon,
+              size: iconSize,
+              color: AppColors.purpleLight,
+            ),
+          ),
+          if (badgeText != null)
+            Positioned(
+              top: -4,
+              right: -4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  gradient: AppColors.gradMixed,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: AppColors.bg, width: 1.5),
+                ),
+                child: Text(
+                  badgeText,
+                  style: GoogleFonts.outfit(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _loadActivityBadge() async {
+    try {
+      final data = await ApiService().getFriendsActivity();
+      final live = (data['live'] as List?) ?? const [];
+      if (!mounted) return;
+      setState(() => _liveActivityCount = live.length);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _liveActivityCount = 0);
+    }
+  }
+}
+
+class _RecommendationSection extends StatelessWidget {
+  final String title;
+  final List<Map<String, dynamic>> users;
+  final int? openingUserId;
+  final void Function(Map<String, dynamic>) onTap;
+
+  const _RecommendationSection({
+    required this.title,
+    required this.users,
+    required this.openingUserId,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (users.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: Text(
+            title,
+            style: GoogleFonts.outfit(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: AppColors.text,
+            ),
+          ),
+        ),
+        ...users.map((u) {
+          final name =
+              (u['display_name'] ?? u['username'] ?? 'User').toString();
+          final username = (u['username'] ?? '').toString();
+          final avatarUrl = (u['avatar_url'] ?? '').toString();
+          final userId = (u['id'] as num?)?.toInt();
+          final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
+          final opening = userId != null && openingUserId == userId;
+          return ListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+            leading: Container(
+              width: 46,
+              height: 46,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: AppColors.gradMixed,
+              ),
+              child: avatarUrl.isNotEmpty
+                  ? ClipOval(
+                      child: CachedNetworkImage(
+                        imageUrl: avatarUrl,
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) => Center(
+                          child: Text(
+                            initial,
+                            style: GoogleFonts.outfit(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                  : Center(
+                      child: Text(
+                        initial,
+                        style: GoogleFonts.outfit(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+            ),
+            title: Text(
+              name,
+              style: GoogleFonts.outfit(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppColors.text,
+              ),
+            ),
+            subtitle: username.isNotEmpty
+                ? Text(
+                    '@$username',
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      color: AppColors.text3,
+                    ),
+                  )
+                : null,
+            trailing: opening
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.purpleLight,
+                    ),
+                  )
+                : const Icon(
+                    Icons.chevron_right_rounded,
+                    color: AppColors.text3,
+                  ),
+            onTap: () => onTap(u),
+          );
+        }),
+      ],
     );
   }
 }
@@ -979,6 +1141,7 @@ class _ChatsViewState extends State<_ChatsView>
   bool get wantKeepAlive => true;
 
   List<dynamic> _chats = [];
+  Map<int, Map<String, dynamic>> _liveActivityByUser = {};
   bool _loading = true;
 
   @override
@@ -990,14 +1153,32 @@ class _ChatsViewState extends State<_ChatsView>
   Future<void> _load() async {
     try {
       final data = await ApiService().getChats();
+      Map<int, Map<String, dynamic>> liveMap = {};
+      try {
+        final activity = await ApiService().getFriendsActivity();
+        final live = (activity['live'] as List?) ?? const [];
+        for (final item in live.whereType<Map>()) {
+          final row = Map<String, dynamic>.from(item);
+          final id = (row['id'] as num?)?.toInt();
+          if (id != null) {
+            liveMap[id] = row;
+          }
+        }
+      } catch (_) {}
+
       if (!mounted) return;
       setState(() {
         _chats = data;
+        _liveActivityByUser = liveMap;
         _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() {
+        _chats = [];
+        _liveActivityByUser = {};
+        _loading = false;
+      });
     }
   }
 
@@ -1051,8 +1232,16 @@ class _ChatsViewState extends State<_ChatsView>
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         itemCount: _chats.length,
-        itemBuilder: (_, i) =>
-            _ChatItem(chat: _chats[i] as Map<String, dynamic>),
+        itemBuilder: (_, i) {
+          final chat = Map<String, dynamic>.from(_chats[i] as Map);
+          final partner =
+              (chat['partner'] as Map<String, dynamic>?) ?? const {};
+          final partnerId = (partner['id'] as num?)?.toInt();
+          return _ChatItem(
+            chat: chat,
+            activity: partnerId == null ? null : _liveActivityByUser[partnerId],
+          );
+        },
       ),
     );
   }
@@ -1060,12 +1249,31 @@ class _ChatsViewState extends State<_ChatsView>
 
 class _ChatItem extends StatelessWidget {
   final Map<String, dynamic> chat;
-  const _ChatItem({required this.chat});
+  final Map<String, dynamic>? activity;
+  const _ChatItem({required this.chat, this.activity});
+
+  static String _cleanPreview(String? raw, String? type, String? timeStr) {
+    if (raw == null || raw.isEmpty) {
+      return timeStr != null ? 'Tap to start 🎵' : 'New match!';
+    }
+    if (type == 'track') return raw;
+    final t = raw.trim();
+    if (t.startsWith('💬') || t.contains('создал') || t.contains('group chat') || t.contains('created a group')) {
+      return '💬 Group invite';
+    }
+    if (t.contains('Listening room') || t.contains('MW-') || t.contains('Invite code')) {
+      return '🎵 Room invite';
+    }
+    return raw;
+  }
 
   @override
   Widget build(BuildContext context) {
     final matchId = chat['match_id'] as int?;
     final chatId = chat['chat_id'] as int?;
+    final groupChatId = chat['group_chat_id'] as int?;
+    final chatKind = (chat['chat_kind'] ?? 'direct').toString();
+    final memberCount = (chat['member_count'] as num?)?.toInt() ?? 0;
     final partner =
         (chat['partner'] as Map<String, dynamic>?) ?? {'display_name': 'User'};
     final name = partner['display_name'] ??
@@ -1074,15 +1282,17 @@ class _ChatItem extends StatelessWidget {
         'User';
     final city = (partner['city'] as String?) ?? '';
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
-    final similarity = chat['similarity_pct'] ?? 0;
     final preview = chat['last_message_preview'] as String?;
     final previewType = chat['last_message_type'] as String?;
     final timeStr =
         chat['last_message_at'] as String? ?? chat['created_at'] as String?;
+    final nowPlaying =
+        (activity?['now_playing'] as Map?)?.cast<String, dynamic>() ?? {};
+    final isLiveNow = nowPlaying.isNotEmpty;
+    final liveTitle = (nowPlaying['title'] ?? '').toString().trim();
+    final liveArtist = (nowPlaying['artist'] ?? '').toString().trim();
 
-    final previewText = preview != null && preview.isNotEmpty
-        ? preview
-        : (timeStr != null ? 'Tap to start chatting 🎵' : 'New match!');
+    final previewText = _ChatItem._cleanPreview(preview, previewType, timeStr);
     final isTrackPreview = previewType == 'track';
 
     return GestureDetector(
@@ -1093,6 +1303,7 @@ class _ChatItem extends StatelessWidget {
               builder: (_) => ChatScreen(
                   matchId: matchId,
                   chatId: chatId,
+                  groupChatId: groupChatId,
                   partnerName: name,
                   partnerId: partner['id'] as int? ?? 0,
                   partnerAvatarUrl: (partner['avatar_url'] ?? '').toString()))),
@@ -1138,6 +1349,36 @@ class _ChatItem extends StatelessWidget {
                               fontWeight: FontWeight.w700,
                               color: Colors.white))),
             ),
+            if (isLiveNow)
+              Transform.translate(
+                offset: const Offset(-14, 16),
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: AppColors.purple.withOpacity(0.45),
+                      width: 1.2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.purple.withOpacity(0.22),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: const Center(
+                    child: Icon(
+                      Icons.graphic_eq_rounded,
+                      size: 12,
+                      color: AppColors.purpleLight,
+                    ),
+                  ),
+                ),
+              ),
             const SizedBox(width: 12),
             // Name + preview
             Expanded(
@@ -1149,21 +1390,71 @@ class _ChatItem extends StatelessWidget {
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
                             color: AppColors.text)),
-                    if (city.isNotEmpty)
+                    if (chatKind == 'group')
+                      Text(
+                        memberCount > 0 ? '$memberCount members' : 'Group chat',
+                        style: GoogleFonts.outfit(
+                            fontSize: 11, color: AppColors.text3),
+                      )
+                    else if (city.isNotEmpty)
                       Text(city,
                           style: GoogleFonts.outfit(
                               fontSize: 11, color: AppColors.text3)),
                     const SizedBox(height: 3),
-                    Text(
-                      isTrackPreview ? previewText : previewText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.outfit(
-                          fontSize: 13,
-                          color: isTrackPreview
-                              ? AppColors.purpleLight
-                              : AppColors.text3),
-                    ),
+                    if (isLiveNow)
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.graphic_eq_rounded,
+                            size: 12,
+                            color: AppColors.purpleLight,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              [
+                                if (liveTitle.isNotEmpty) liveTitle,
+                                if (liveArtist.isNotEmpty) liveArtist,
+                              ].join(' • ').isNotEmpty
+                                  ? [
+                                      if (liveTitle.isNotEmpty) liveTitle,
+                                      if (liveArtist.isNotEmpty) liveArtist,
+                                    ].join(' • ')
+                                  : 'Listening now',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.outfit(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.purpleLight,
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      Text(
+                        isTrackPreview ? previewText : previewText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                            fontSize: 13,
+                            color: isTrackPreview
+                                ? AppColors.purpleLight
+                                : AppColors.text3),
+                      ),
+                    if (isLiveNow) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        previewText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          fontSize: 12,
+                          color: AppColors.text3,
+                        ),
+                      ),
+                    ],
                   ]),
             ),
             // Time
@@ -1194,338 +1485,302 @@ class _ChatItem extends StatelessWidget {
   }
 }
 
-// ─── Activity View ────────────────────────────────────────────────────────────
+// ─── New Message Screen ───────────────────────────────────────────────────────
 
-class _ActivityView extends StatefulWidget {
-  const _ActivityView();
+class _NewMessageScreen extends StatefulWidget {
+  const _NewMessageScreen();
+
   @override
-  State<_ActivityView> createState() => _ActivityViewState();
+  State<_NewMessageScreen> createState() => _NewMessageScreenState();
 }
 
-class _ActivityViewState extends State<_ActivityView>
-    with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
-
-  List<dynamic> _live = [];
-  List<dynamic> _recent = [];
+class _NewMessageScreenState extends State<_NewMessageScreen> {
+  final _searchCtrl = TextEditingController();
+  List<Map<String, dynamic>> _users = [];
+  List<Map<String, dynamic>> _filtered = [];
+  List<Map<String, dynamic>> _recommended = [];
   bool _loading = true;
+  int? _openingUserId;
+  Timer? _searchDebounce;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _searchCtrl.addListener(_filter);
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
     try {
-      final data = await ApiService().getFriendsActivity();
+      final me = context.read<AuthProvider>().user;
+      final myId = (me?['id'] as num?)?.toInt() ?? 0;
+      final following = await ApiService().getUserFollowing(myId, limit: 100);
+      final recommended = await _buildRecommendations(myId, following);
       if (!mounted) return;
       setState(() {
-        _live = (data['live'] as List?) ?? [];
-        _recent = (data['recent'] as List?) ?? [];
+        _users = following;
+        _filtered = following;
+        _recommended = recommended;
         _loading = false;
       });
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    if (_loading) {
-      return const Center(
-          child: CircularProgressIndicator(
-              strokeWidth: 2, color: AppColors.purpleLight));
+  Future<List<Map<String, dynamic>>> _buildRecommendations(
+    int myId,
+    List<Map<String, dynamic>> following,
+  ) async {
+    final seen = <int>{myId};
+    final recommendations = <Map<String, dynamic>>[];
+
+    void addUser(Map<String, dynamic> user) {
+      final id = (user['id'] as num?)?.toInt();
+      if (id == null || seen.contains(id)) return;
+      seen.add(id);
+      recommendations.add(user);
     }
-    if (_live.isEmpty && _recent.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(36),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                shape: BoxShape.circle,
-                border: Border.all(color: AppColors.border),
-              ),
-              child: const Center(
-                  child: Text('🎧', style: TextStyle(fontSize: 34))),
-            ),
-            const SizedBox(height: 20),
-            Text('No activity yet',
-                style: GoogleFonts.outfit(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.text)),
-            const SizedBox(height: 8),
-            Text('Match and add friends to see\nwhat they listen to',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.outfit(
-                    fontSize: 14, color: AppColors.text2, height: 1.5)),
-          ]),
+
+    for (final user in following) {
+      final id = (user['id'] as num?)?.toInt();
+      if (id != null) seen.add(id);
+    }
+
+    try {
+      final history = await ApiService().getSearchHistory(limit: 12);
+      for (final item in history.where((entry) =>
+          entry['result_type']?.toString().toLowerCase() == 'profile')) {
+        final id = int.tryParse((item['result_id'] ?? '').toString());
+        if (id == null || seen.contains(id)) continue;
+        try {
+          final summary = await ApiService().getUserProfileSummary(
+            id,
+            playlistLimit: 0,
+            tracksLimit: 0,
+          );
+          addUser({
+            'id': id,
+            'display_name':
+                (summary['display_name'] ?? summary['username'] ?? 'User')
+                    .toString(),
+            'username': (summary['username'] ?? '').toString(),
+            'avatar_url': (summary['avatar_url'] ?? '').toString(),
+          });
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    for (final followed in following.take(8)) {
+      final followedId = (followed['id'] as num?)?.toInt();
+      if (followedId == null) continue;
+      try {
+        final secondDegree =
+            await ApiService().getUserFollowing(followedId, limit: 10);
+        for (final user in secondDegree) {
+          addUser(user);
+          if (recommendations.length >= 12) break;
+        }
+      } catch (_) {}
+      if (recommendations.length >= 12) break;
+    }
+
+    return recommendations;
+  }
+
+  void _filter() {
+    final q = _searchCtrl.text.trim().toLowerCase();
+    _searchDebounce?.cancel();
+    if (q.isEmpty) {
+      setState(() => _filtered = _users);
+      return;
+    }
+    setState(() => _filtered = []);
+    _searchDebounce = Timer(const Duration(milliseconds: 240), () async {
+      final remote = await ApiService().searchUsers(q, limit: 24);
+      if (!mounted || _searchCtrl.text.trim().toLowerCase() != q) return;
+      setState(() {
+        _filtered = remote;
+      });
+    });
+  }
+
+  Future<void> _openChat(Map<String, dynamic> user) async {
+    final userId = (user['id'] as num?)?.toInt();
+    if (userId == null || _openingUserId != null) return;
+    setState(() => _openingUserId = userId);
+    try {
+      final result = await ApiService().startDirectChat(userId);
+      if (!mounted) return;
+      final chatId = result['chat_id'] as int?;
+      final partnerId = (result['partner']?['id'] as num?)?.toInt() ?? userId;
+      final partnerName = result['partner']?['display_name']?.toString() ??
+          result['partner']?['username']?.toString() ??
+          (user['display_name'] ?? user['username'] ?? 'User').toString();
+      final avatarUrl = result['partner']?['avatar_url']?.toString();
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            chatId: chatId,
+            partnerName: partnerName,
+            partnerId: partnerId,
+            partnerAvatarUrl: avatarUrl,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _openingUserId = null);
+      String msg = 'Could not open chat';
+      if (e.toString().contains('403') || e.toString().contains('private')) {
+        msg = 'Profile is private — match first to message them';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: AppColors.surface,
+          behavior: SnackBarBehavior.floating,
         ),
       );
     }
-
-    return RefreshIndicator(
-      onRefresh: _load,
-      color: AppColors.purpleLight,
-      backgroundColor: AppColors.surface,
-      child: ListView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.only(bottom: 32),
-        children: [
-          if (_live.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
-              child: Row(children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                      color: Color(0xFFec4899), shape: BoxShape.circle),
-                ),
-                const SizedBox(width: 6),
-                Text('Live Now',
-                    style: GoogleFonts.outfit(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.text)),
-                const SizedBox(width: 6),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppColors.pink.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(100),
-                  ),
-                  child: Text('${_live.length}',
-                      style: GoogleFonts.outfit(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.pink)),
-                ),
-              ]),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                children: _live
-                    .map((f) => _LiveCard(friend: f as Map<String, dynamic>))
-                    .toList(),
-              ),
-            ),
-          ],
-          if (_recent.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Recently Listened',
-                      style: GoogleFonts.outfit(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.text)),
-                  GestureDetector(
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const RecentHistoryScreen())),
-                    child: Text('All →',
-                        style: GoogleFonts.outfit(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: AppColors.purpleLight)),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                children: _recent
-                    .map((f) => _RecentItem(friend: f as Map<String, dynamic>))
-                    .toList(),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
   }
-}
-
-class _LiveCard extends StatelessWidget {
-  final Map<String, dynamic> friend;
-  const _LiveCard({required this.friend});
 
   @override
   Widget build(BuildContext context) {
-    final name = friend['display_name'] ?? friend['username'] ?? 'User';
-    final nowPlaying = friend['now_playing'] as Map<String, dynamic>?;
-    final track = nowPlaying != null
-        ? '${nowPlaying['artist'] ?? ''} — ${nowPlaying['title'] ?? ''}'
-        : 'Listening now';
-    final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(colors: [
-            AppColors.purpleDark.withOpacity(0.1),
-            AppColors.pink.withOpacity(0.06),
-          ]),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppColors.purple.withOpacity(0.18)),
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        backgroundColor: AppColors.bg,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.text),
+        title: Text('New Message',
+            style: GoogleFonts.outfit(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: AppColors.text)),
+      ),
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: TextField(
+              controller: _searchCtrl,
+              autofocus: true,
+              style: GoogleFonts.outfit(color: AppColors.text, fontSize: 15),
+              decoration: InputDecoration(
+                hintText: 'Search people...',
+                hintStyle: GoogleFonts.outfit(color: AppColors.text3),
+                prefixIcon:
+                    const Icon(Icons.search_rounded, color: AppColors.text3),
+                border: InputBorder.none,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+              ),
+            ),
+          ),
         ),
-        child: Row(children: [
-          Stack(children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                gradient: AppColors.gradMixed,
-                shape: BoxShape.circle,
-                border:
-                    Border.all(color: Colors.white.withOpacity(0.1), width: 2),
-                boxShadow: [
-                  BoxShadow(
-                      color: AppColors.purpleDark.withOpacity(0.35),
-                      blurRadius: 12)
-                ],
-              ),
+        if (_loading)
+          const Expanded(
               child: Center(
-                  child: Text(initial,
-                      style: GoogleFonts.outfit(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white))),
-            ),
-            Positioned(
-              bottom: -2,
-              right: -2,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppColors.pink,
-                  borderRadius: BorderRadius.circular(100),
-                ),
-                child: Text('LIVE',
-                    style: GoogleFonts.outfit(
-                        fontSize: 8,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        letterSpacing: 0.5)),
-              ),
-            ),
-          ]),
-          const SizedBox(width: 14),
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.purpleLight)))
+        else if (_filtered.isEmpty &&
+            _recommended.isEmpty &&
+            _searchCtrl.text.trim().isNotEmpty)
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              child: Center(
+                  child: Text('No people found',
+                      style: GoogleFonts.outfit(
+                          fontSize: 14, color: AppColors.text3))))
+        else
+          Expanded(
+            child: ListView(
               children: [
-                Text('$name is listening',
-                    style: GoogleFonts.outfit(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.text)),
-                const SizedBox(height: 2),
-                Text(track,
-                    style: GoogleFonts.outfit(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.purpleLight),
-                    overflow: TextOverflow.ellipsis),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                  child: GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const GroupChatSetupScreen(),
+                      ),
+                    ),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              gradient: AppColors.gradMixed,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Icon(
+                              Icons.groups_rounded,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Group chat',
+                              style: GoogleFonts.outfit(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.text,
+                              ),
+                            ),
+                          ),
+                          const Icon(
+                            Icons.chevron_right_rounded,
+                            color: AppColors.text3,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                if (_searchCtrl.text.trim().isEmpty && _recommended.isNotEmpty)
+                  _RecommendationSection(
+                    title: 'Recommendations',
+                    users: _recommended,
+                    openingUserId: _openingUserId,
+                    onTap: _openChat,
+                  ),
+                _RecommendationSection(
+                  title: _searchCtrl.text.trim().isEmpty
+                      ? 'People you follow'
+                      : 'Results',
+                  users: _filtered,
+                  openingUserId: _openingUserId,
+                  onTap: _openChat,
+                ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          AnimatedMusicBars(
-              color1: AppColors.purpleLight,
-              color2: AppColors.pink,
-              maxHeight: 22),
-        ]),
-      ),
-    );
-  }
-}
-
-class _RecentItem extends StatelessWidget {
-  final Map<String, dynamic> friend;
-  const _RecentItem({required this.friend});
-
-  @override
-  Widget build(BuildContext context) {
-    final name = friend['display_name'] ?? friend['username'] ?? 'User';
-    final nowPlaying = friend['now_playing'] as Map<String, dynamic>?;
-    final trackStr = nowPlaying != null
-        ? '${nowPlaying['artist'] ?? ''} — ${nowPlaying['title'] ?? ''}'
-        : 'No recent activity';
-    final playedAt = nowPlaying?['played_at'] as String?;
-    final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
-
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: Color(0x0AFFFFFF)))),
-      child: Row(children: [
-        Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            gradient: AppColors.gradPurple,
-            shape: BoxShape.circle,
-            border: Border.all(color: AppColors.border, width: 1.5),
-          ),
-          child: Center(
-              child: Text(initial,
-                  style: GoogleFonts.outfit(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white))),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(name,
-                style: GoogleFonts.outfit(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.text)),
-            Text(trackStr,
-                style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2),
-                overflow: TextOverflow.ellipsis),
-          ]),
-        ),
-        if (playedAt != null) ...[
-          const SizedBox(width: 8),
-          Text(_relTime(playedAt),
-              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
-        ],
       ]),
     );
-  }
-
-  String _relTime(String iso) {
-    try {
-      final dt = DateTime.parse(iso).toLocal();
-      final diff = DateTime.now().difference(dt);
-      if (diff.inMinutes < 1) return 'now';
-      if (diff.inMinutes < 60) return '${diff.inMinutes}m';
-      if (diff.inHours < 24) return '${diff.inHours}h';
-      return '${diff.inDays}d';
-    } catch (_) {
-      return '';
-    }
   }
 }

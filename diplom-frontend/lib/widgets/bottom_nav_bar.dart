@@ -6,8 +6,9 @@ import '../theme/app_colors.dart';
 class BottomNavBar extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
+  final int socialBadge;
 
-  const BottomNavBar({super.key, required this.currentIndex, required this.onTap});
+  const BottomNavBar({super.key, required this.currentIndex, required this.onTap, this.socialBadge = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +28,7 @@ class BottomNavBar extends StatelessWidget {
               children: [
                 _NavItem(icon: Icons.home_rounded,    label: 'Home',    active: currentIndex == 0, onTap: () => onTap(0)),
                 _NavItem(icon: Icons.search_rounded,  label: 'Search',  active: currentIndex == 1, onTap: () => onTap(1)),
-                _NavItem(icon: Icons.people_rounded,  label: 'Social',  active: currentIndex == 2, onTap: () => onTap(2)),
+                _NavItem(icon: Icons.people_rounded,  label: 'Social',  active: currentIndex == 2, onTap: () => onTap(2), badge: socialBadge),
                 _NavItem(icon: Icons.library_music_rounded, label: 'Library', active: currentIndex == 3, onTap: () => onTap(3)),
               ],
             ),
@@ -43,8 +44,9 @@ class _NavItem extends StatelessWidget {
   final String label;
   final bool active;
   final VoidCallback onTap;
+  final int badge;
 
-  const _NavItem({required this.icon, required this.label, required this.active, required this.onTap});
+  const _NavItem({required this.icon, required this.label, required this.active, required this.onTap, this.badge = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +58,37 @@ class _NavItem extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 22, color: active ? AppColors.purpleLight : AppColors.text3),
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(icon, size: 22, color: active ? AppColors.purpleLight : AppColors.text3),
+                if (badge > 0)
+                  Positioned(
+                    top: -5,
+                    right: -9,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF7c3aed), Color(0xFFec4899)],
+                        ),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: const Color(0xEB08080F), width: 1.5),
+                      ),
+                      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                      child: Text(
+                        badge > 9 ? '9+' : '$badge',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             const SizedBox(height: 4),
             Text(label,
                 style: GoogleFonts.outfit(

@@ -5,11 +5,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db, require_verified_user
-from app.models.chat import Chat
+from app.dependencies import get_current_user, get_db
+from app.models.chat import Chat, GroupChat, GroupChatMember, GroupChatRole
 from app.models.social import Match
 from app.models.user import User
 from app.services import firebase as firebase_svc
@@ -70,6 +70,12 @@ class ReactRequest(BaseModel):
     emoji: str = Field(min_length=1, max_length=8)
 
 
+class CreateGroupChatRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    member_ids: list[int] = Field(default_factory=list)
+    avatar_url: Optional[str] = None
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -128,6 +134,39 @@ async def _get_chat_by_id(chat_id: int, current_user: User, db: AsyncSession) ->
     if current_user.id not in {chat.user_a_id, chat.user_b_id}:
         raise HTTPException(status_code=403, detail="Access denied")
     return chat
+
+
+async def _get_group_chat_by_id(
+    group_chat_id: int,
+    current_user: User,
+    db: AsyncSession,
+) -> GroupChat:
+    group = await db.get(GroupChat, group_chat_id)
+    if not group or not group.is_active:
+        raise HTTPException(status_code=404, detail="Group chat not found")
+    member = await db.scalar(
+        select(GroupChatMember).where(
+            GroupChatMember.group_chat_id == group_chat_id,
+            GroupChatMember.user_id == current_user.id,
+        )
+    )
+    if not member:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return group
+
+
+async def _group_members_with_users(
+    group_chat_id: int,
+    db: AsyncSession,
+) -> list[tuple[GroupChatMember, User]]:
+    return (
+        await db.execute(
+            select(GroupChatMember, User)
+            .join(User, User.id == GroupChatMember.user_id)
+            .where(GroupChatMember.group_chat_id == group_chat_id)
+            .order_by(GroupChatMember.joined_at.asc())
+        )
+    ).all()
 
 
 async def _get_or_create_direct_chat(
@@ -269,7 +308,7 @@ async def get_messages(
     match_id: int,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     match = await _get_match(match_id, current_user, db)
     chat = await db.scalar(select(Chat).where(Chat.match_id == match.id))
@@ -287,7 +326,7 @@ async def get_thread_messages(
     chat_id: int,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     chat = await _get_chat_by_id(chat_id, current_user, db)
     return {"messages": await _messages_for_chat(chat, limit=limit)}
@@ -305,7 +344,7 @@ async def get_thread_messages(
 )
 async def list_chats(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     rows = (
         await db.execute(
@@ -343,6 +382,7 @@ async def list_chats(
                 "chat_id": chat.id,
                 "match_id": match.id if match else None,
                 "chat_kind": "match" if match else "direct",
+                "group_chat_id": None,
                 "firebase_chat_id": chat.firebase_chat_id,
                 "similarity_pct": match.similarity_pct if match else 0,
                 "created_at": chat.created_at.isoformat(),
@@ -359,6 +399,82 @@ async def list_chats(
                 },
             }
         )
+
+    group_rows = (
+        await db.execute(
+            select(GroupChat)
+            .join(
+                GroupChatMember,
+                GroupChatMember.group_chat_id == GroupChat.id,
+            )
+            .where(
+                GroupChatMember.user_id == current_user.id,
+                GroupChat.is_active == True,
+            )
+            .order_by(func.coalesce(GroupChat.last_message_at, GroupChat.created_at).desc())
+        )
+    ).scalars().all()
+
+    for group in group_rows:
+        members = await _group_members_with_users(group.id, db)
+        visible_members = [
+            user
+            for _, user in members
+            if user.id != current_user.id
+            and not await users_are_blocked(db, current_user.id, user.id)
+        ]
+        member_payloads = [
+            {
+                "id": user.id,
+                "username": user.username,
+                "display_name": user.display_name,
+                "first_name": user.first_name,
+                "avatar_url": user.avatar_url,
+                "city": user.city,
+            }
+            for user in visible_members
+        ]
+        last_message_preview: Optional[str] = None
+        last_message_type: Optional[str] = None
+        if group.firebase_chat_id:
+            try:
+                last_msg = firebase_service.get_last_message(group.firebase_chat_id)
+                if last_msg:
+                    last_message_preview, last_message_type = _preview_for_message(last_msg)
+            except Exception:
+                pass
+
+        response.append(
+            {
+                "chat_id": None,
+                "match_id": None,
+                "chat_kind": "group",
+                "group_chat_id": group.id,
+                "firebase_chat_id": group.firebase_chat_id,
+                "similarity_pct": 0,
+                "created_at": group.created_at.isoformat(),
+                "last_message_at": group.last_message_at.isoformat()
+                if group.last_message_at
+                else None,
+                "last_message_preview": last_message_preview,
+                "last_message_type": last_message_type,
+                "partner": {
+                    "id": group.id,
+                    "username": "",
+                    "display_name": group.title,
+                    "first_name": group.title,
+                    "avatar_url": group.avatar_url,
+                    "city": "",
+                },
+                "members": member_payloads,
+                "member_count": len(members),
+            }
+        )
+
+    response.sort(
+        key=lambda item: item.get("last_message_at") or item.get("created_at") or "",
+        reverse=True,
+    )
     return response
 
 
@@ -370,7 +486,7 @@ async def list_chats(
 async def start_direct_chat(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     chat, partner = await _get_or_create_direct_chat(user_id, current_user, db)
     return {
@@ -389,6 +505,438 @@ async def start_direct_chat(
     }
 
 
+async def _send_group_payload(
+    *,
+    group: GroupChat,
+    current_user: User,
+    payload: dict,
+    db: AsyncSession,
+) -> dict[str, str]:
+    sent_at = _now_iso()
+    message_id = firebase_service.write_message(
+        group.firebase_chat_id or "",
+        {
+            **payload,
+            "sender_id": current_user.id,
+            "sender_name": _sender_name(current_user),
+            "sender_avatar_url": current_user.avatar_url,
+            "sent_at": sent_at,
+        },
+    )
+    if not message_id:
+        raise HTTPException(status_code=503, detail="Unable to send message")
+    group.last_message_at = datetime.utcnow()
+    await db.commit()
+    return {"message_id": message_id, "sent_at": sent_at}
+
+
+@router.post(
+    "/groups",
+    summary="Create group chat",
+    description="Creates a regular group chat with selected members.",
+)
+async def create_group_chat(
+    body: CreateGroupChatRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required")
+
+    member_ids = {member_id for member_id in body.member_ids if member_id != current_user.id}
+    valid_members: list[User] = []
+    for member_id in member_ids:
+        user = await db.get(User, member_id)
+        if not user:
+            continue
+        if await users_are_blocked(db, current_user.id, member_id):
+            continue
+        valid_members.append(user)
+
+    firebase_chat_id = f"group_{current_user.id}_{int(datetime.utcnow().timestamp())}"
+    group = GroupChat(
+        owner_id=current_user.id,
+        title=title,
+        avatar_url=body.avatar_url,
+        firebase_chat_id=firebase_chat_id,
+        is_active=True,
+    )
+    db.add(group)
+    await db.flush()
+
+    db.add(
+        GroupChatMember(
+            group_chat_id=group.id,
+            user_id=current_user.id,
+            role=GroupChatRole.owner,
+        )
+    )
+    for user in valid_members:
+        db.add(
+            GroupChatMember(
+                group_chat_id=group.id,
+                user_id=user.id,
+                role=GroupChatRole.member,
+            )
+        )
+    await db.commit()
+    await db.refresh(group)
+    firebase_service.create_group_chat_node(
+        firebase_chat_id,
+        [current_user.id, *[user.id for user in valid_members]],
+    )
+
+    return {
+        "group_chat_id": group.id,
+        "chat_kind": "group",
+        "title": group.title,
+        "avatar_url": group.avatar_url,
+        "firebase_chat_id": group.firebase_chat_id,
+        "member_count": 1 + len(valid_members),
+        "members": [
+            {
+                "id": current_user.id,
+                "username": current_user.username,
+                "display_name": current_user.display_name,
+                "first_name": current_user.first_name,
+                "avatar_url": current_user.avatar_url,
+            },
+            *[
+                {
+                    "id": user.id,
+                    "username": user.username,
+                    "display_name": user.display_name,
+                    "first_name": user.first_name,
+                    "avatar_url": user.avatar_url,
+                }
+                for user in valid_members
+            ],
+        ],
+    }
+
+
+@router.get(
+    "/groups/{group_chat_id}",
+    summary="Get group chat details",
+)
+async def get_group_chat_details(
+    group_chat_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await _get_group_chat_by_id(group_chat_id, current_user, db)
+    members = await _group_members_with_users(group.id, db)
+    return {
+        "group_chat_id": group.id,
+        "title": group.title,
+        "avatar_url": group.avatar_url,
+        "firebase_chat_id": group.firebase_chat_id,
+        "member_count": len(members),
+        "members": [
+            {
+                "id": user.id,
+                "username": user.username,
+                "display_name": user.display_name,
+                "first_name": user.first_name,
+                "avatar_url": user.avatar_url,
+                "role": member.role.value,
+            }
+            for member, user in members
+        ],
+    }
+
+
+@router.delete(
+    "/groups/{group_chat_id}/leave",
+    summary="Leave group chat",
+)
+async def leave_group_chat(
+    group_chat_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await db.get(GroupChat, group_chat_id)
+    if not group or not group.is_active:
+        raise HTTPException(status_code=404, detail="Group not found")
+    member = await db.scalar(
+        select(GroupChatMember).where(
+            GroupChatMember.group_chat_id == group_chat_id,
+            GroupChatMember.user_id == current_user.id,
+        )
+    )
+    if not member:
+        raise HTTPException(status_code=404, detail="Not a member")
+    if group.owner_id == current_user.id:
+        next_member = await db.scalar(
+            select(GroupChatMember).where(
+                GroupChatMember.group_chat_id == group_chat_id,
+                GroupChatMember.user_id != current_user.id,
+            ).order_by(GroupChatMember.joined_at.asc())
+        )
+        if next_member:
+            group.owner_id = next_member.user_id
+            next_member.role = GroupChatRole.owner
+        else:
+            group.is_active = False
+    await db.delete(member)
+    await db.commit()
+    return {"ok": True}
+
+
+class TransferOwnerRequest(BaseModel):
+    new_owner_id: int
+
+
+@router.delete(
+    "/groups/{group_chat_id}/members/{user_id}",
+    summary="Remove member from group chat (owner only)",
+)
+async def remove_group_member(
+    group_chat_id: int,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await db.get(GroupChat, group_chat_id)
+    if not group or not group.is_active:
+        raise HTTPException(status_code=404, detail="Group not found")
+    if group.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can remove members")
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Use leave endpoint to leave")
+    member = await db.scalar(
+        select(GroupChatMember).where(
+            GroupChatMember.group_chat_id == group_chat_id,
+            GroupChatMember.user_id == user_id,
+        )
+    )
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+    await db.delete(member)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post(
+    "/groups/{group_chat_id}/transfer-owner",
+    summary="Transfer group chat ownership",
+)
+async def transfer_group_owner(
+    group_chat_id: int,
+    body: TransferOwnerRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await db.get(GroupChat, group_chat_id)
+    if not group or not group.is_active:
+        raise HTTPException(status_code=404, detail="Group not found")
+    if group.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can transfer ownership")
+    new_member = await db.scalar(
+        select(GroupChatMember).where(
+            GroupChatMember.group_chat_id == group_chat_id,
+            GroupChatMember.user_id == body.new_owner_id,
+        )
+    )
+    if not new_member:
+        raise HTTPException(status_code=404, detail="New owner is not a member")
+    old_member = await db.scalar(
+        select(GroupChatMember).where(
+            GroupChatMember.group_chat_id == group_chat_id,
+            GroupChatMember.user_id == current_user.id,
+        )
+    )
+    if old_member:
+        old_member.role = GroupChatRole.member
+    new_member.role = GroupChatRole.owner
+    group.owner_id = body.new_owner_id
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get(
+    "/groups/{group_chat_id}/messages",
+    summary="Get group chat messages",
+)
+async def get_group_chat_messages(
+    group_chat_id: int,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await _get_group_chat_by_id(group_chat_id, current_user, db)
+    return {"messages": await _messages_for_chat(group, limit=limit)}
+
+
+@router.post(
+    "/groups/{group_chat_id}/send-text",
+    summary="Send text in group chat",
+)
+async def send_text_to_group(
+    group_chat_id: int,
+    body: SendTextRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await _get_group_chat_by_id(group_chat_id, current_user, db)
+    return await _send_group_payload(
+        group=group,
+        current_user=current_user,
+        db=db,
+        payload={
+            "type": "text",
+            "text": body.text,
+        },
+    )
+
+
+@router.post(
+    "/groups/{group_chat_id}/send-track",
+    summary="Send track in group chat",
+)
+async def send_track_to_group(
+    group_chat_id: int,
+    body: SendTrackRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await _get_group_chat_by_id(group_chat_id, current_user, db)
+    return await _send_group_payload(
+        group=group,
+        current_user=current_user,
+        db=db,
+        payload={
+            "type": "track",
+            "spotify_track_id": body.track_id,
+            "track_title": body.title,
+            "track_artist": body.artist,
+            "track_cover_url": body.cover_url,
+            "track_preview_url": body.preview_url,
+            "phrase": body.phrase,
+            "phrase_emoji": body.phrase_emoji,
+            "note": body.note,
+        },
+    )
+
+
+@router.post(
+    "/groups/{group_chat_id}/send-album",
+    summary="Send album in group chat",
+)
+async def send_album_to_group(
+    group_chat_id: int,
+    body: SendAlbumRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await _get_group_chat_by_id(group_chat_id, current_user, db)
+    return await _send_group_payload(
+        group=group,
+        current_user=current_user,
+        db=db,
+        payload={
+            "type": "album",
+            "album_id": body.album_id,
+            "album_title": body.title,
+            "album_artist": body.artist,
+            "album_cover_url": body.cover_url,
+            "note": body.note,
+        },
+    )
+
+
+@router.post(
+    "/groups/{group_chat_id}/send-playlist",
+    summary="Send playlist in group chat",
+)
+async def send_playlist_to_group(
+    group_chat_id: int,
+    body: SendPlaylistRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await _get_group_chat_by_id(group_chat_id, current_user, db)
+    return await _send_group_payload(
+        group=group,
+        current_user=current_user,
+        db=db,
+        payload={
+            "type": "playlist",
+            "playlist_id": body.playlist_id,
+            "playlist_title": body.title,
+            "playlist_cover_url": body.cover_url,
+            "track_count": body.track_count,
+            "note": body.note,
+        },
+    )
+
+
+@router.post(
+    "/groups/{group_chat_id}/send-image",
+    summary="Send image in group chat",
+)
+async def send_image_to_group(
+    group_chat_id: int,
+    body: SendImageRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await _get_group_chat_by_id(group_chat_id, current_user, db)
+    return await _send_group_payload(
+        group=group,
+        current_user=current_user,
+        db=db,
+        payload={
+            "type": "image",
+            "image_data_url": body.image_data_url,
+            "caption": body.caption,
+        },
+    )
+
+
+@router.post(
+    "/groups/{group_chat_id}/react",
+    summary="React in group chat",
+)
+async def react_to_group_message(
+    group_chat_id: int,
+    body: ReactRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await _get_group_chat_by_id(group_chat_id, current_user, db)
+    ok = firebase_service.update_reaction(
+        group.firebase_chat_id or "",
+        body.message_id or "",
+        body.emoji,
+        current_user.id,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"ok": True}
+
+
+@router.delete(
+    "/groups/{group_chat_id}/messages/{message_id}",
+    summary="Delete group chat message",
+)
+async def delete_group_message(
+    group_chat_id: int,
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await _get_group_chat_by_id(group_chat_id, current_user, db)
+    msg = firebase_service.get_message(group.firebase_chat_id or "", message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if int(msg.get("sender_id") or 0) != current_user.id:
+        raise HTTPException(status_code=403, detail="Can only delete your own messages")
+    await firebase_service.delete_message(group.firebase_chat_id or "", message_id)
+    return {"ok": True}
+
+
 @router.post(
     "/{match_id}/send-track",
     summary="Send track in chat",
@@ -398,7 +946,7 @@ async def send_track(
     match_id: int,
     body: SendTrackRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     if body.phrase and body.phrase not in VALID_TRACK_PHRASES:
         raise HTTPException(status_code=400, detail="Invalid track phrase")
@@ -442,7 +990,7 @@ async def send_track_to_thread(
     chat_id: int,
     body: SendTrackRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     if body.phrase and body.phrase not in VALID_TRACK_PHRASES:
         raise HTTPException(status_code=400, detail="Invalid track phrase")
@@ -486,7 +1034,7 @@ async def send_album(
     match_id: int,
     body: SendAlbumRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     match = await _get_match(match_id, current_user, db)
     partner = await _get_partner(match, current_user, db)
@@ -521,7 +1069,7 @@ async def send_album_to_thread(
     chat_id: int,
     body: SendAlbumRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     chat = await _get_chat_by_id(chat_id, current_user, db)
     partner = await db.get(User, _chat_partner_id(chat, current_user.id))
@@ -557,7 +1105,7 @@ async def send_playlist(
     match_id: int,
     body: SendPlaylistRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     match = await _get_match(match_id, current_user, db)
     partner = await _get_partner(match, current_user, db)
@@ -592,7 +1140,7 @@ async def send_playlist_to_thread(
     chat_id: int,
     body: SendPlaylistRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     chat = await _get_chat_by_id(chat_id, current_user, db)
     partner = await db.get(User, _chat_partner_id(chat, current_user.id))
@@ -628,7 +1176,7 @@ async def send_image(
     match_id: int,
     body: SendImageRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     match = await _get_match(match_id, current_user, db)
     partner = await _get_partner(match, current_user, db)
@@ -660,7 +1208,7 @@ async def send_image_to_thread(
     chat_id: int,
     body: SendImageRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     chat = await _get_chat_by_id(chat_id, current_user, db)
     partner = await db.get(User, _chat_partner_id(chat, current_user.id))
@@ -693,7 +1241,7 @@ async def send_text(
     match_id: int,
     body: SendTextRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     if len(body.text) > 100:
         raise HTTPException(status_code=400, detail="Text too long")
@@ -738,7 +1286,7 @@ async def send_text_to_thread(
     chat_id: int,
     body: SendTextRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     if len(body.text) > 100:
         raise HTTPException(status_code=400, detail="Text too long")
@@ -784,7 +1332,7 @@ async def react(
     match_id: int,
     body: ReactRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     if body.emoji not in VALID_REACTION_EMOJIS:
         raise HTTPException(status_code=400, detail="Invalid reaction emoji")
@@ -823,7 +1371,7 @@ async def react_to_thread(
     chat_id: int,
     body: ReactRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     if body.emoji not in VALID_REACTION_EMOJIS:
         raise HTTPException(status_code=400, detail="Invalid reaction emoji")
@@ -850,3 +1398,42 @@ async def react_to_thread(
                 data={"event": "track_reaction", "chat_id": chat.id, "message_id": body.message_id},
             )
     return {"message": "reaction added"}
+
+
+@router.delete(
+    "/{match_id}/messages/{message_id}",
+    status_code=200,
+    summary="Delete a chat message",
+)
+async def delete_match_message(
+    match_id: int,
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    match = await _get_match(match_id, current_user, db)
+    chat = await _get_or_create_chat(match, db)
+    msg = firebase_service.get_message(chat.firebase_chat_id or "", message_id)
+    if msg and str(msg.get("sender_id", "")) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Cannot delete another user's message")
+    await firebase_service.delete_message(chat.firebase_chat_id or "", message_id)
+    return {"ok": True}
+
+
+@router.delete(
+    "/thread/{chat_id}/messages/{message_id}",
+    status_code=200,
+    summary="Delete a direct chat message",
+)
+async def delete_thread_message(
+    chat_id: int,
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    chat = await _get_chat_by_id(chat_id, current_user, db)
+    msg = firebase_service.get_message(chat.firebase_chat_id or "", message_id)
+    if msg and str(msg.get("sender_id", "")) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Cannot delete another user's message")
+    await firebase_service.delete_message(chat.firebase_chat_id or "", message_id)
+    return {"ok": True}

@@ -2,7 +2,6 @@
 __pycache__/
 *.pyc
 *.pyo
-.env
 *.egg-info/
 dist/
 build/
@@ -10,16 +9,26 @@ build/
 venv/
 
 # Secrets
-moodwave-backend/.env
-moodwave-backend/firebase-credentials.json
-moodwave-backend/.env.local
+.env
+.env.local
+firebase-credentials.json
+
+# Logs
+*.log
+uvicorn*.log
+
+# Redis
+dump.rdb
+
+# Runtime data
+tmp/
+uploads/audio/
 
 # Flutter
 diplom-frontend/.dart_tool/
 diplom-frontend/build/
 diplom-frontend/.flutter-plugins
 diplom-frontend/.flutter-plugins-dependencies
-diplom-frontend/pubspec.lockд
 
 # IDE
 .idea/
@@ -29,6 +38,3 @@ diplom-frontend/pubspec.lockд
 # OS
 .DS_Store
 Thumbs.db
-
-# Docker
-*.log".claude/" 

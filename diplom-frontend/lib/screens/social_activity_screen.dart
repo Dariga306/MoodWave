@@ -68,22 +68,22 @@ class _SocialActivityScreenState extends State<SocialActivityScreen> {
                           children: [
                             if (_live.isNotEmpty) ...[
                               Text(
-                                'Friends Activity',
+                                'Listening Now',
                                 style: GoogleFonts.outfit(
-                                  fontSize: 26,
+                                  fontSize: 24,
                                   fontWeight: FontWeight.w800,
                                   color: AppColors.text,
                                 ),
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'See who is listening right now',
+                                'Your friends are live right now',
                                 style: GoogleFonts.outfit(
-                                  fontSize: 14,
+                                  fontSize: 13,
                                   color: AppColors.text2,
                                 ),
                               ),
-                              const SizedBox(height: 18),
+                              const SizedBox(height: 14),
                               ..._live.map(
                                 (item) => _LiveFriendCard(
                                   friend:
@@ -98,7 +98,7 @@ class _SocialActivityScreenState extends State<SocialActivityScreen> {
                                     MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
-                                    'Recently Listened',
+                                    'Recently Played',
                                     style: GoogleFonts.outfit(
                                       fontSize: 20,
                                       fontWeight: FontWeight.w800,
@@ -143,14 +143,14 @@ class _SocialActivityScreenState extends State<SocialActivityScreen> {
 }
 
 class _ActivityHeader extends StatelessWidget {
-  const _ActivityHeader({super.key});
+  const _ActivityHeader();
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       bottom: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
         child: Row(
           children: [
             GestureDetector(
@@ -159,7 +159,7 @@ class _ActivityHeader extends StatelessWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: AppColors.surface,
+                  color: AppColors.glass,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: AppColors.border),
                 ),
@@ -168,6 +168,34 @@ class _ActivityHeader extends StatelessWidget {
                   size: 18,
                   color: AppColors.text,
                 ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ShaderMask(
+                    shaderCallback: (b) => const LinearGradient(
+                      colors: [AppColors.purpleLight, AppColors.pink],
+                    ).createShader(b),
+                    child: Text(
+                      'Activity',
+                      style: GoogleFonts.outfit(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    'What your friends are listening to',
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      color: AppColors.text3,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -203,7 +231,7 @@ class _EmptyActivity extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             Text(
-              'No activity yet',
+              'Nobody\'s listening right now',
               style: GoogleFonts.outfit(
                 fontSize: 21,
                 fontWeight: FontWeight.w800,
@@ -212,7 +240,7 @@ class _EmptyActivity extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Add friends and listen together to\nsee live music activity here',
+              'Add friends and listen together —\ntheir activity will show here',
               textAlign: TextAlign.center,
               style: GoogleFonts.outfit(
                 fontSize: 14,
@@ -247,84 +275,178 @@ class _EmptyActivity extends StatelessWidget {
   }
 }
 
-class _LiveFriendCard extends StatelessWidget {
+// Gradient palettes cycling per card index
+const _kCardGradients = [
+  [Color(0xFF4c1d95), Color(0xFF7c3aed)],
+  [Color(0xFF9d174d), Color(0xFFec4899)],
+  [Color(0xFF1e3a8a), Color(0xFF3b82f6)],
+  [Color(0xFF065f46), Color(0xFF10b981)],
+  [Color(0xFF92400e), Color(0xFFf59e0b)],
+];
+
+class _LiveFriendCard extends StatefulWidget {
   final Map<String, dynamic> friend;
   const _LiveFriendCard({required this.friend});
 
   @override
+  State<_LiveFriendCard> createState() => _LiveFriendCardState();
+}
+
+class _LiveFriendCardState extends State<_LiveFriendCard>
+    with TickerProviderStateMixin {
+  late final List<AnimationController> _barCtrls;
+  late final List<Animation<double>> _barAnims;
+
+  static int _cardIndex = 0;
+  late final int _myIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _myIndex = _cardIndex++;
+    final speeds = [650, 850, 550, 750];
+    _barCtrls = speeds
+        .map((ms) => AnimationController(
+              vsync: this,
+              duration: Duration(milliseconds: ms),
+            )..repeat(reverse: true))
+        .toList();
+    _barAnims = [
+      Tween<double>(begin: 0.2, end: 1.0).animate(
+          CurvedAnimation(parent: _barCtrls[0], curve: Curves.easeInOut)),
+      Tween<double>(begin: 0.5, end: 1.0).animate(
+          CurvedAnimation(parent: _barCtrls[1], curve: Curves.easeInOut)),
+      Tween<double>(begin: 0.15, end: 0.85).animate(
+          CurvedAnimation(parent: _barCtrls[2], curve: Curves.easeInOut)),
+      Tween<double>(begin: 0.35, end: 0.95).animate(
+          CurvedAnimation(parent: _barCtrls[3], curve: Curves.easeInOut)),
+    ];
+  }
+
+  @override
+  void dispose() {
+    for (final c in _barCtrls) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final now = (friend['now_playing'] as Map?)?.cast<String, dynamic>() ?? {};
+    final now =
+        (widget.friend['now_playing'] as Map?)?.cast<String, dynamic>() ?? {};
     final track = (now['title'] ?? 'Listening now').toString();
     final artist = (now['artist'] ?? '').toString();
+    final colors = _kCardGradients[_myIndex % _kCardGradients.length];
 
     return GestureDetector(
-      onTap: () => _openProfile(context, friend),
+      onTap: () => _openProfile(context, widget.friend),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
             colors: [
-              AppColors.purpleDark.withOpacity(0.18),
-              AppColors.blue.withOpacity(0.12),
+              colors[0].withOpacity(0.55),
+              colors[1].withOpacity(0.40),
             ],
           ),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: AppColors.purple.withOpacity(0.22)),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: colors[1].withOpacity(0.35)),
         ),
         child: Row(
           children: [
-            _FriendAvatar(friend: friend, size: 54),
-            const SizedBox(width: 14),
+            // Avatar with LIVE badge
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                _FriendAvatar(friend: widget.friend, size: 48),
+                Positioned(
+                  bottom: -2,
+                  left: -2,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [colors[0], colors[1]],
+                      ),
+                      borderRadius: BorderRadius.circular(6),
+                      border:
+                          Border.all(color: AppColors.bg, width: 1.5),
+                    ),
+                    child: Text(
+                      'LIVE',
+                      style: GoogleFonts.outfit(
+                        fontSize: 8,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 12),
+            // Track info
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${_friendName(friend)} is listening',
+                    _friendName(widget.friend),
                     style: GoogleFonts.outfit(
-                      fontSize: 15,
+                      fontSize: 14,
                       fontWeight: FontWeight.w800,
                       color: AppColors.text,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    [if (artist.isNotEmpty) artist, track].join(' — '),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.outfit(
-                      fontSize: 14,
-                      color: AppColors.purpleLight,
+                  if (artist.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.outfit(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white.withOpacity(0.85),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
+                  ],
+                  const SizedBox(height: 2),
                   Text(
-                    _subtitle(friend),
+                    track,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.outfit(
-                      fontSize: 12,
-                      color: AppColors.text3,
+                      fontSize: 11,
+                      color: Colors.white.withOpacity(0.6),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppColors.pink.withOpacity(0.16),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                'LIVE',
-                style: GoogleFonts.outfit(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.pink,
-                ),
+            const SizedBox(width: 10),
+            // Animated music bars
+            AnimatedBuilder(
+              animation: Listenable.merge(_barCtrls),
+              builder: (_, __) => Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: List.generate(4, (i) {
+                  return Container(
+                    width: 3,
+                    height: 28 * _barAnims[i].value,
+                    margin: const EdgeInsets.only(right: 2),
+                    decoration: BoxDecoration(
+                      color: colors[1].withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  );
+                }),
               ),
             ),
           ],
@@ -449,13 +571,6 @@ class _FriendAvatar extends StatelessWidget {
 
 String _friendName(Map<String, dynamic> friend) {
   return (friend['display_name'] ?? friend['username'] ?? 'User').toString();
-}
-
-String _subtitle(Map<String, dynamic> friend) {
-  final city = (friend['city'] ?? '').toString();
-  return city.isNotEmpty
-      ? city
-      : '@${(friend['username'] ?? 'user').toString()}';
 }
 
 String _relTime(String? iso) {

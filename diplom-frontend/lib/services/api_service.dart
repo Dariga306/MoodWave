@@ -799,6 +799,30 @@ class ApiService {
     }
   }
 
+  Future<List<Map<String, dynamic>>> searchUsers(
+    String query, {
+    int limit = 20,
+  }) async {
+    final q = query.trim();
+    if (q.length < 2) return [];
+    try {
+      final resp = await _dio.get(
+        '/users/search',
+        queryParameters: {
+          'q': q,
+          'limit': limit,
+        },
+      );
+      final raw = (resp.data as Map<String, dynamic>)['users'] as List? ?? [];
+      return raw
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<void> saveSearchHistory({
     required String query,
     required String resultType,
@@ -1164,6 +1188,28 @@ class ApiService {
 
   Future<void> sendJoinRequest(int roomId) async {
     await _dio.post('/rooms/$roomId/join-request');
+  }
+
+  Future<List<dynamic>> getRoomMessages(int roomId, {int limit = 50}) async {
+    final resp = await _dio.get('/rooms/$roomId/messages', queryParameters: {'limit': limit});
+    return (resp.data['messages'] as List?) ?? [];
+  }
+
+  Future<void> sendRoomMessage(int roomId, String text) async {
+    await _dio.post('/rooms/$roomId/messages', data: {'text': text});
+  }
+
+  Future<List<dynamic>> getRoomQueue(int roomId) async {
+    final resp = await _dio.get('/rooms/$roomId/queue');
+    return (resp.data['queue'] as List?) ?? [];
+  }
+
+  Future<void> addToRoomQueue(int roomId, Map<String, dynamic> track) async {
+    await _dio.post('/rooms/$roomId/queue', data: track);
+  }
+
+  Future<void> removeFromRoomQueue(int roomId, int index) async {
+    await _dio.delete('/rooms/$roomId/queue/$index');
   }
 
   // Notifications
@@ -1580,6 +1626,152 @@ class ApiService {
   Future<Map<String, dynamic>> startDirectChat(int userId) async {
     final resp = await _dio.post('/chats/direct/$userId/start');
     return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<Map<String, dynamic>> createGroupChat({
+    required String title,
+    required List<int> memberIds,
+    String? avatarUrl,
+  }) async {
+    final resp = await _dio.post('/chats/groups', data: {
+      'title': title,
+      'member_ids': memberIds,
+      if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatar_url': avatarUrl,
+    });
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<Map<String, dynamic>> getGroupChatDetails(int groupChatId) async {
+    final resp = await _dio.get('/chats/groups/$groupChatId');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<List<dynamic>> getGroupChatMessages(int groupChatId,
+      {int limit = 50}) async {
+    final resp = await _dio.get(
+      '/chats/groups/$groupChatId/messages',
+      queryParameters: {'limit': limit},
+    );
+    return resp.data['messages'] ?? [];
+  }
+
+  Future<void> sendGroupTextMessage(int groupChatId, String text) async {
+    await _dio
+        .post('/chats/groups/$groupChatId/send-text', data: {'text': text});
+  }
+
+  Future<void> sendTrackInGroupChat(
+    int groupChatId, {
+    required String trackId,
+    required String title,
+    required String artist,
+    String? coverUrl,
+    String? previewUrl,
+    String? phrase,
+    String? phraseEmoji,
+    String? note,
+  }) async {
+    await _dio.post('/chats/groups/$groupChatId/send-track', data: {
+      'track_id': trackId,
+      'title': title,
+      'artist': artist,
+      if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+      if (previewUrl != null && previewUrl.isNotEmpty)
+        'preview_url': previewUrl,
+      if (phrase != null && phrase.isNotEmpty) 'phrase': phrase,
+      if (phraseEmoji != null && phraseEmoji.isNotEmpty)
+        'phrase_emoji': phraseEmoji,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+  }
+
+  Future<void> sendAlbumInGroupChat(
+    int groupChatId, {
+    required String albumId,
+    required String title,
+    required String artist,
+    String? coverUrl,
+    String? note,
+  }) async {
+    await _dio.post('/chats/groups/$groupChatId/send-album', data: {
+      'album_id': albumId,
+      'title': title,
+      'artist': artist,
+      if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+  }
+
+  Future<void> sendPlaylistInGroupChat(
+    int groupChatId, {
+    required int playlistId,
+    required String title,
+    String? coverUrl,
+    int trackCount = 0,
+    String? note,
+  }) async {
+    await _dio.post('/chats/groups/$groupChatId/send-playlist', data: {
+      'playlist_id': playlistId,
+      'title': title,
+      if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+      'track_count': trackCount,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+  }
+
+  Future<void> sendImageInGroupChat(
+    int groupChatId, {
+    required String imageDataUrl,
+    String? caption,
+  }) async {
+    await _dio.post('/chats/groups/$groupChatId/send-image', data: {
+      'image_data_url': imageDataUrl,
+      if (caption != null && caption.isNotEmpty) 'caption': caption,
+    });
+  }
+
+  Future<void> reactToGroupMessage(
+      int groupChatId, String messageId, String emoji) async {
+    await _dio.post('/chats/groups/$groupChatId/react', data: {
+      'message_id': messageId,
+      'emoji': emoji,
+    });
+  }
+
+  Future<void> deleteMessage({
+    int? matchId,
+    int? chatId,
+    int? groupChatId,
+    required String messageId,
+  }) async {
+    if (groupChatId != null) {
+      await _dio.delete('/chats/groups/$groupChatId/messages/$messageId');
+    } else if (chatId != null) {
+      await _dio.delete('/chats/thread/$chatId/messages/$messageId');
+    } else if (matchId != null) {
+      await _dio.delete('/chats/$matchId/messages/$messageId');
+    }
+  }
+
+  Future<void> leaveGroupChat(int groupChatId) async {
+    await _dio.delete('/chats/groups/$groupChatId/leave');
+  }
+
+  Future<void> removeGroupChatMember(int groupChatId, int userId) async {
+    await _dio.delete('/chats/groups/$groupChatId/members/$userId');
+  }
+
+  Future<void> transferGroupChatOwner(int groupChatId, int newOwnerId) async {
+    await _dio.post('/chats/groups/$groupChatId/transfer-owner', data: {'new_owner_id': newOwnerId});
+  }
+
+  Future<Map<String, dynamic>?> getUserNowPlaying(int userId) async {
+    try {
+      final resp = await _dio.get('/users/$userId/now-playing');
+      return Map<String, dynamic>.from(resp.data as Map);
+    } catch (_) {
+      return null;
+    }
   }
 
   // ─── Progress heartbeat ───────────────────────────────────────────────────

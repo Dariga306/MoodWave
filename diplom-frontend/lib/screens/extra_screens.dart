@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -21,12 +23,23 @@ class ListeningPartyScreen extends StatefulWidget {
 }
 
 class _ListeningPartyScreenState extends State<ListeningPartyScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late AnimationController _blinkCtrl;
+  late TabController _tabCtrl;
+
   Map<String, dynamic> _room = {};
   bool _loading = true;
   bool _joining = false;
   bool _joinRequested = false;
+
+  List<dynamic> _messages = [];
+  final _msgCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+  bool _sendingMsg = false;
+  int _lastMsgCount = 0;
+
+  List<dynamic> _queue = [];
+  Timer? _refreshTimer;
 
   @override
   void initState() {
@@ -34,32 +47,94 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
     _blinkCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1200))
       ..repeat(reverse: true);
+    _tabCtrl = TabController(length: 3, vsync: this);
+    _tabCtrl.addListener(_onTabChanged);
     _room = Map<String, dynamic>.from(widget.room);
     _loadRoom();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _tick());
   }
 
   @override
   void dispose() {
     _blinkCtrl.dispose();
+    _tabCtrl.dispose();
+    _msgCtrl.dispose();
+    _scrollCtrl.dispose();
+    _refreshTimer?.cancel();
     super.dispose();
   }
 
-  Future<void> _loadRoom() async {
+  void _onTabChanged() {
+    if (_tabCtrl.indexIsChanging) return;
+    if (_tabCtrl.index == 1 && _messages.isEmpty) _loadMessages();
+    if (_tabCtrl.index == 2) _loadQueue();
+  }
+
+  void _tick() {
+    _loadRoom(silent: true);
+    final idx = _tabCtrl.index;
+    if (idx == 1) _loadMessages(silent: true);
+    if (idx == 2) _loadQueue();
+  }
+
+  Future<void> _loadRoom({bool silent = false}) async {
     final roomId = _room['room_id'] as int?;
     if (roomId == null) {
-      setState(() => _loading = false);
+      if (!silent) setState(() => _loading = false);
       return;
     }
     try {
       final details = await ApiService().getRoomDetails(roomId);
-      if (mounted)
-        setState(() {
-          _room = details;
-          _loading = false;
-        });
+      if (!mounted) return;
+      setState(() {
+        _room = details;
+        _loading = false;
+      });
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (!mounted) return;
+      if (!silent) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _loadMessages({bool silent = false}) async {
+    final roomId = _room['room_id'] as int?;
+    if (roomId == null) return;
+    try {
+      final msgs = await ApiService().getRoomMessages(roomId);
+      if (!mounted) return;
+      setState(() => _messages = msgs);
+      if (msgs.length > _lastMsgCount) {
+        _lastMsgCount = msgs.length;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollCtrl.hasClients) {
+            _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadQueue() async {
+    final roomId = _room['room_id'] as int?;
+    if (roomId == null) return;
+    try {
+      final q = await ApiService().getRoomQueue(roomId);
+      if (mounted) setState(() => _queue = q);
+    } catch (_) {}
+  }
+
+  Future<void> _sendMessage() async {
+    final text = _msgCtrl.text.trim();
+    if (text.isEmpty || _sendingMsg) return;
+    final roomId = _room['room_id'] as int?;
+    if (roomId == null) return;
+    _msgCtrl.clear();
+    setState(() => _sendingMsg = true);
+    try {
+      await ApiService().sendRoomMessage(roomId, text);
+      await _loadMessages();
+    } catch (_) {}
+    if (mounted) setState(() => _sendingMsg = false);
   }
 
   Future<void> _sendJoinRequest() async {
@@ -75,8 +150,7 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Join request sent! Waiting for host approval.',
-              style: GoogleFonts.outfit(fontSize: 13)),
+          content: Text('Join request sent!', style: GoogleFonts.outfit(fontSize: 13)),
           backgroundColor: AppColors.surface,
           duration: const Duration(seconds: 3),
         ),
@@ -102,394 +176,453 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
     return '${v ~/ 60000}:${((v % 60000) ~/ 1000).toString().padLeft(2, '0')}';
   }
 
+  String _fmtTime(String? iso) {
+    if (iso == null || iso.isEmpty) return '';
+    try {
+      final normalized = iso.endsWith('Z') || iso.contains('+') ? iso : '${iso}Z';
+      final dt = DateTime.parse(normalized).toLocal();
+      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return '';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        backgroundColor: AppColors.bg,
+        body: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight)),
+      );
+    }
+
     final name = (_room['name'] ?? 'Live Room').toString();
     final host = (_room['host'] as Map?)?.cast<String, dynamic>() ?? {};
-    final hostName =
-        (host['first_name'] ?? host['username'] ?? 'Host').toString();
-    final hostAvatar = host['avatar_url']?.toString();
-    final participantCount = _room['participant_count'] ?? 0;
+    final hostName = (host['first_name'] ?? host['username'] ?? 'Host').toString();
+    final myUser = context.read<AuthProvider>().user;
+    final myId = (myUser?['id'] as num?)?.toInt() ?? 0;
     final track = (_room['current_track'] as Map?)?.cast<String, dynamic>();
     final trackTitle = track?['track_title']?.toString() ?? '';
     final trackArtist = track?['track_artist']?.toString() ?? '';
     final trackCover = track?['track_cover_url']?.toString();
-    final positionMs = (track?['position_ms'] as num?)?.toInt() ?? 0;
     final isPlaying = track?['is_playing'] == true;
 
     return Scaffold(
       backgroundColor: AppColors.bg,
-      body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: AppColors.purpleLight))
-          : SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // ── Header ────────────────────────────────────────
-                  SafeArea(
-                    bottom: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                      child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            GestureDetector(
-                              onTap: () => Navigator.of(context).pop(),
-                              child: Container(
-                                width: 40,
-                                height: 40,
-                                decoration: BoxDecoration(
-                                    color: AppColors.glass,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border:
-                                        Border.all(color: AppColors.border)),
-                                child: const Icon(Icons.arrow_back_rounded,
-                                    size: 18, color: Colors.white),
-                              ),
-                            ),
-                            Expanded(
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 12),
-                                child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      AnimatedBuilder(
-                                        animation: _blinkCtrl,
-                                        builder: (_, __) => Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 10, vertical: 4),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFFef4444)
-                                                .withOpacity(0.1),
-                                            borderRadius:
-                                                BorderRadius.circular(100),
-                                            border: Border.all(
-                                                color: const Color(0xFFef4444)
-                                                    .withOpacity(0.25)),
-                                          ),
-                                          child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Opacity(
-                                                  opacity: 0.3 +
-                                                      0.7 * _blinkCtrl.value,
-                                                  child: Container(
-                                                      width: 7,
-                                                      height: 7,
-                                                      decoration:
-                                                          const BoxDecoration(
-                                                              color: Color(
-                                                                  0xFFef4444),
-                                                              shape: BoxShape
-                                                                  .circle)),
-                                                ),
-                                                const SizedBox(width: 6),
-                                                Text('LIVE PARTY',
-                                                    style: GoogleFonts.outfit(
-                                                        fontSize: 12,
-                                                        fontWeight:
-                                                            FontWeight.w700,
-                                                        color: const Color(
-                                                            0xFFf87171))),
-                                              ]),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(name,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: GoogleFonts.outfit(
-                                              fontSize: 20,
-                                              fontWeight: FontWeight.w800,
-                                              color: AppColors.text,
-                                              letterSpacing: -0.4)),
-                                      Text('Hosted by $hostName',
-                                          style: GoogleFonts.outfit(
-                                              fontSize: 12,
-                                              color: AppColors.text2)),
-                                    ]),
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: _loadRoom,
-                              child: Container(
-                                width: 40,
-                                height: 40,
-                                decoration: BoxDecoration(
-                                    color: AppColors.glass,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border:
-                                        Border.all(color: AppColors.border)),
-                                child: const Icon(Icons.refresh_rounded,
-                                    size: 18, color: AppColors.text2),
-                              ),
-                            ),
-                          ]),
-                    ),
-                  ),
+      body: Column(
+        children: [
+          _buildHeader(name, hostName),
+          _buildCover(trackCover, trackTitle, isPlaying),
+          _buildTabBar(),
+          Expanded(
+            child: TabBarView(
+              controller: _tabCtrl,
+              physics: const NeverScrollableScrollPhysics(),
+              children: [
+                _buildNowPlaying(track, trackTitle, trackArtist, trackCover, host, hostName),
+                _buildChat(myId),
+                _buildQueue(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-                  // ── Cover / visualiser ────────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                    child: Container(
-                      height: 200,
-                      decoration: BoxDecoration(
-                          gradient: AppColors.gradMixed,
-                          borderRadius: BorderRadius.circular(24)),
-                      child: Stack(children: [
-                        if (trackCover != null)
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(24),
-                            child: CachedNetworkImage(
-                              imageUrl: trackCover,
-                              fit: BoxFit.cover,
-                              width: double.infinity,
-                              height: double.infinity,
-                              color: Colors.black.withOpacity(0.35),
-                              colorBlendMode: BlendMode.darken,
-                              errorWidget: (_, __, ___) => const SizedBox(),
-                            ),
-                          )
-                        else
-                          Container(
-                            decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(24)),
-                          ),
-                        if (isPlaying)
-                          Positioned(
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            child: SizedBox(
-                              height: 40,
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: List.generate(
-                                    8,
-                                    (i) => AnimatedMusicBars(
-                                        color1: AppColors.purpleLight,
-                                        color2: AppColors.pink,
-                                        barCount: 1,
-                                        barWidth: 4,
-                                        maxHeight: 30)),
-                              ),
-                            ),
-                          ),
-                        if (!isPlaying && trackTitle.isEmpty)
-                          Center(
-                            child: Text('🎙',
-                                style: const TextStyle(fontSize: 64)),
-                          ),
-                      ]),
+  Widget _buildHeader(String name, String hostName) {
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+        child: Row(children: [
+          GestureDetector(
+            onTap: () => Navigator.of(context).pop(),
+            child: Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                  color: AppColors.glass,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border)),
+              child: const Icon(Icons.arrow_back_rounded, size: 18, color: Colors.white),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              AnimatedBuilder(
+                animation: _blinkCtrl,
+                builder: (_, __) => Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFef4444).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(100),
+                    border: Border.all(color: const Color(0xFFef4444).withOpacity(0.25)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Opacity(
+                      opacity: 0.3 + 0.7 * _blinkCtrl.value,
+                      child: Container(width: 7, height: 7,
+                          decoration: const BoxDecoration(color: Color(0xFFef4444), shape: BoxShape.circle)),
                     ),
-                  ),
+                    const SizedBox(width: 6),
+                    Text('LIVE PARTY', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w700, color: const Color(0xFFf87171))),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.text)),
+              Text('Hosted by $hostName',
+                  style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text2)),
+            ]),
+          ),
+          GestureDetector(
+            onTap: () => _loadRoom(silent: true),
+            child: Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                  color: AppColors.glass,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border)),
+              child: const Icon(Icons.refresh_rounded, size: 18, color: AppColors.text2),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
 
-                  // ── Now playing ───────────────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                    child: Row(children: [
-                      Container(
-                        width: 52,
-                        height: 52,
-                        decoration: BoxDecoration(
-                            gradient: AppColors.gradMixed,
-                            borderRadius: BorderRadius.circular(13)),
-                        child: trackCover != null
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(13),
-                                child: CachedNetworkImage(
-                                    imageUrl: trackCover,
-                                    fit: BoxFit.cover,
-                                    errorWidget: (_, __, ___) => const Center(
-                                        child: Text('🎵',
-                                            style: TextStyle(fontSize: 24)))))
-                            : const Center(
-                                child:
-                                    Text('🎵', style: TextStyle(fontSize: 24))),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                  trackTitle.isNotEmpty
-                                      ? trackTitle
-                                      : 'No track playing',
-                                  style: GoogleFonts.outfit(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppColors.text)),
-                              if (trackArtist.isNotEmpty)
-                                Text(trackArtist,
-                                    style: GoogleFonts.outfit(
-                                        fontSize: 13, color: AppColors.text2)),
-                              if (positionMs > 0) ...[
-                                const SizedBox(height: 6),
-                                Container(
-                                  height: 3,
-                                  decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(100)),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(_fmtMs(positionMs),
-                                    style: GoogleFonts.outfit(
-                                        fontSize: 11, color: AppColors.text3)),
-                              ],
-                            ]),
-                      ),
-                      if (isPlaying)
-                        const Icon(Icons.graphic_eq_rounded,
-                            color: AppColors.purpleLight, size: 22),
-                    ]),
-                  ),
-
-                  // ── Participants ──────────────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: AppColors.border)),
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                                'LISTENING TOGETHER · $participantCount ${participantCount == 1 ? 'PERSON' : 'PEOPLE'}',
-                                style: GoogleFonts.outfit(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.text2,
-                                    letterSpacing: 0.04)),
-                            const SizedBox(height: 12),
-                            Row(children: [
-                              // Host avatar
-                              Container(
-                                width: 36,
-                                height: 36,
-                                decoration: BoxDecoration(
-                                    gradient: AppColors.gradMixed,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                        color: AppColors.bg, width: 2)),
-                                child: hostAvatar != null
-                                    ? ClipOval(
-                                        child: CachedNetworkImage(
-                                            imageUrl: hostAvatar,
-                                            fit: BoxFit.cover,
-                                            errorWidget: (_, __, ___) => Center(
-                                                child: Text(
-                                                    hostName[0].toUpperCase(),
-                                                    style: GoogleFonts.outfit(
-                                                        fontSize: 13,
-                                                        fontWeight:
-                                                            FontWeight.w700,
-                                                        color: Colors.white)))))
-                                    : Center(
-                                        child: Text(hostName[0].toUpperCase(),
-                                            style: GoogleFonts.outfit(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w700,
-                                                color: Colors.white))),
-                              ),
-                              if (participantCount > 1) ...[
-                                const SizedBox(width: 6),
-                                Text(
-                                    '+${participantCount - 1} listener${participantCount - 1 == 1 ? '' : 's'}',
-                                    style: GoogleFonts.outfit(
-                                        fontSize: 13, color: AppColors.text2)),
-                              ],
-                            ]),
-                            const SizedBox(height: 8),
-                            Text('All listening in sync 🎵',
-                                style: GoogleFonts.outfit(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.text)),
-                          ]),
-                    ),
-                  ),
-
-                  // ── Join button ───────────────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                    child: GestureDetector(
-                      onTap: (_joining || _joinRequested)
-                          ? null
-                          : _sendJoinRequest,
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          gradient: (_joinRequested || _joining)
-                              ? null
-                              : AppColors.gradPurple,
-                          color: (_joinRequested || _joining)
-                              ? AppColors.surface
-                              : null,
-                          borderRadius: BorderRadius.circular(16),
-                          border: (_joinRequested || _joining)
-                              ? Border.all(color: AppColors.border)
-                              : null,
-                          boxShadow: (_joinRequested || _joining)
-                              ? null
-                              : [
-                                  BoxShadow(
-                                      color:
-                                          AppColors.purpleDark.withOpacity(0.4),
-                                      blurRadius: 20,
-                                      offset: const Offset(0, 4))
-                                ],
-                        ),
-                        child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              if (_joining)
-                                const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: AppColors.purpleLight))
-                              else
-                                Icon(
-                                    _joinRequested
-                                        ? Icons.hourglass_empty_rounded
-                                        : Icons.headphones_rounded,
-                                    size: 18,
-                                    color: _joinRequested
-                                        ? AppColors.text2
-                                        : Colors.white),
-                              const SizedBox(width: 10),
-                              Text(
-                                  _joinRequested
-                                      ? 'Request sent — waiting for host'
-                                      : _joining
-                                          ? 'Sending request…'
-                                          : 'Request to Join',
-                                  style: GoogleFonts.outfit(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                      color: _joinRequested
-                                          ? AppColors.text2
-                                          : Colors.white)),
-                            ]),
-                      ),
-                    ),
-                  ),
-                ],
+  Widget _buildCover(String? coverUrl, String trackTitle, bool isPlaying) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+      child: Container(
+        height: 130,
+        decoration: BoxDecoration(gradient: AppColors.gradMixed, borderRadius: BorderRadius.circular(20)),
+        child: Stack(children: [
+          if (coverUrl != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: CachedNetworkImage(
+                imageUrl: coverUrl, fit: BoxFit.cover,
+                width: double.infinity, height: double.infinity,
+                color: Colors.black.withOpacity(0.3),
+                colorBlendMode: BlendMode.darken,
+                errorWidget: (_, __, ___) => const SizedBox(),
+              ),
+            )
+          else
+            Container(decoration: BoxDecoration(color: Colors.black.withOpacity(0.2), borderRadius: BorderRadius.circular(20))),
+          if (isPlaying)
+            Positioned(
+              bottom: 0, left: 0, right: 0,
+              child: SizedBox(
+                height: 36,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: List.generate(8, (i) => AnimatedMusicBars(
+                      color1: AppColors.purpleLight, color2: AppColors.pink, barCount: 1, barWidth: 4, maxHeight: 26)),
+                ),
               ),
             ),
+          if (!isPlaying && trackTitle.isEmpty)
+            const Center(child: Text('🎙', style: TextStyle(fontSize: 44))),
+        ]),
+      ),
     );
+  }
+
+  Widget _buildTabBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      height: 42,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: TabBar(
+        controller: _tabCtrl,
+        labelStyle: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w700),
+        unselectedLabelStyle: GoogleFonts.outfit(fontSize: 13),
+        labelColor: Colors.white,
+        unselectedLabelColor: AppColors.text3,
+        indicator: BoxDecoration(
+          gradient: const LinearGradient(colors: [Color(0xFF7c3aed), Color(0xFFec4899)]),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        indicatorSize: TabBarIndicatorSize.tab,
+        dividerColor: Colors.transparent,
+        tabs: const [Tab(text: 'Now Playing'), Tab(text: 'Chat'), Tab(text: 'Queue')],
+      ),
+    );
+  }
+
+  Widget _buildNowPlaying(Map<String, dynamic>? track, String trackTitle, String trackArtist,
+      String? trackCover, Map<String, dynamic> host, String hostName) {
+    final participantCount = _room['participant_count'] ?? 0;
+    final positionMs = (track?['position_ms'] as num?)?.toInt() ?? 0;
+    final hostAvatar = host['avatar_url']?.toString();
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      physics: const BouncingScrollPhysics(),
+      child: Column(children: [
+        Row(children: [
+          Container(
+            width: 52, height: 52,
+            decoration: BoxDecoration(gradient: AppColors.gradMixed, borderRadius: BorderRadius.circular(13)),
+            child: trackCover != null
+                ? ClipRRect(borderRadius: BorderRadius.circular(13),
+                    child: CachedNetworkImage(imageUrl: trackCover, fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) => const Center(child: Text('🎵', style: TextStyle(fontSize: 24)))))
+                : const Center(child: Text('🎵', style: TextStyle(fontSize: 24))),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(trackTitle.isNotEmpty ? trackTitle : 'No track playing',
+                style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text)),
+            if (trackArtist.isNotEmpty)
+              Text(trackArtist, style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2)),
+            if (positionMs > 0) ...[
+              const SizedBox(height: 4),
+              Text(_fmtMs(positionMs), style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
+            ],
+          ])),
+        ]),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+              color: AppColors.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: AppColors.border)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('LISTENING TOGETHER · $participantCount ${participantCount == 1 ? 'PERSON' : 'PEOPLE'}',
+                style: GoogleFonts.outfit(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.text2, letterSpacing: 0.04)),
+            const SizedBox(height: 12),
+            Row(children: [
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(gradient: AppColors.gradMixed, shape: BoxShape.circle, border: Border.all(color: AppColors.bg, width: 2)),
+                child: hostAvatar != null
+                    ? ClipOval(child: CachedNetworkImage(imageUrl: hostAvatar, fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) => Center(child: Text(hostName[0].toUpperCase(),
+                            style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)))))
+                    : Center(child: Text(hostName[0].toUpperCase(),
+                        style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white))),
+              ),
+              if (participantCount > 1) ...[
+                const SizedBox(width: 6),
+                Text('+${participantCount - 1} listener${participantCount - 1 == 1 ? '' : 's'}',
+                    style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2)),
+              ],
+            ]),
+            const SizedBox(height: 8),
+            Text('All listening in sync 🎵', style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text)),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        GestureDetector(
+          onTap: (_joining || _joinRequested) ? null : _sendJoinRequest,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: (_joinRequested || _joining) ? null : AppColors.gradPurple,
+              color: (_joinRequested || _joining) ? AppColors.surface : null,
+              borderRadius: BorderRadius.circular(16),
+              border: (_joinRequested || _joining) ? Border.all(color: AppColors.border) : null,
+              boxShadow: (_joinRequested || _joining) ? null : [BoxShadow(color: AppColors.purpleDark.withOpacity(0.4), blurRadius: 20, offset: const Offset(0, 4))],
+            ),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              if (_joining)
+                const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight))
+              else
+                Icon(_joinRequested ? Icons.hourglass_empty_rounded : Icons.headphones_rounded,
+                    size: 18, color: _joinRequested ? AppColors.text2 : Colors.white),
+              const SizedBox(width: 10),
+              Text(
+                _joinRequested ? 'Request sent — waiting for host' : _joining ? 'Sending request…' : 'Request to Join',
+                style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: _joinRequested ? AppColors.text2 : Colors.white),
+              ),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildChat(int myId) {
+    return Column(children: [
+      Expanded(
+        child: _messages.isEmpty
+            ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Text('💬', style: TextStyle(fontSize: 40)),
+                const SizedBox(height: 12),
+                Text('Нет сообщений', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text)),
+                const SizedBox(height: 6),
+                Text('Начни разговор с участниками', style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2)),
+              ]))
+            : ListView.builder(
+                controller: _scrollCtrl,
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                itemCount: _messages.length,
+                itemBuilder: (_, i) {
+                  final msg = Map<String, dynamic>.from(_messages[i] as Map);
+                  final senderId = (msg['sender_id'] as num?)?.toInt() ?? -1;
+                  final isMe = senderId == myId;
+                  final senderName = (msg['display_name'] ?? 'User').toString();
+                  final text = (msg['text'] ?? '').toString();
+                  final time = _fmtTime(msg['sent_at']?.toString());
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        if (!isMe) ...[
+                          Container(
+                            width: 28, height: 28,
+                            decoration: const BoxDecoration(
+                                gradient: LinearGradient(colors: [Color(0xFF7c3aed), Color(0xFFec4899)]),
+                                shape: BoxShape.circle),
+                            child: Center(child: Text(senderName.isNotEmpty ? senderName[0].toUpperCase() : '?',
+                                style: GoogleFonts.outfit(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white))),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Flexible(
+                          child: Column(
+                            crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                            children: [
+                              if (!isMe)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 3, left: 2),
+                                  child: Text(senderName, style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
+                                ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                                decoration: BoxDecoration(
+                                  gradient: isMe ? const LinearGradient(colors: [Color(0xFF7c3aed), Color(0xFFec4899)]) : null,
+                                  color: isMe ? null : AppColors.surface,
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: const Radius.circular(16),
+                                    topRight: const Radius.circular(16),
+                                    bottomLeft: Radius.circular(isMe ? 16 : 4),
+                                    bottomRight: Radius.circular(isMe ? 4 : 16),
+                                  ),
+                                  border: isMe ? null : Border.all(color: AppColors.border),
+                                ),
+                                child: Text(text, style: GoogleFonts.outfit(fontSize: 14, color: isMe ? Colors.white : AppColors.text)),
+                              ),
+                              if (time.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 3, left: 2, right: 2),
+                                  child: Text(time, style: GoogleFonts.outfit(fontSize: 10, color: AppColors.text3)),
+                                ),
+                            ],
+                          ),
+                        ),
+                        if (isMe) const SizedBox(width: 4),
+                      ],
+                    ),
+                  );
+                },
+              ),
+      ),
+      Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        decoration: const BoxDecoration(
+          color: AppColors.bg,
+          border: Border(top: BorderSide(color: Color(0x15FFFFFF))),
+        ),
+        child: Row(children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                  color: AppColors.surface, borderRadius: BorderRadius.circular(24), border: Border.all(color: AppColors.border)),
+              child: TextField(
+                controller: _msgCtrl,
+                style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text),
+                maxLines: 1,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (_) => _sendMessage(),
+                decoration: InputDecoration(
+                  hintText: 'Написать...',
+                  hintStyle: GoogleFonts.outfit(fontSize: 14, color: AppColors.text3),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: _sendMessage,
+            child: Container(
+              width: 42, height: 42,
+              decoration: const BoxDecoration(
+                  gradient: LinearGradient(colors: [Color(0xFF7c3aed), Color(0xFFec4899)]),
+                  shape: BoxShape.circle),
+              child: _sendingMsg
+                  ? const Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)))
+                  : const Icon(Icons.send_rounded, size: 18, color: Colors.white),
+            ),
+          ),
+        ]),
+      ),
+    ]);
+  }
+
+  Widget _buildQueue() {
+    return _queue.isEmpty
+        ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('🎵', style: TextStyle(fontSize: 40)),
+            const SizedBox(height: 12),
+            Text('Очередь пуста', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text)),
+            const SizedBox(height: 6),
+            Text('Хост добавит треки в очередь', style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2)),
+          ]))
+        : ListView.builder(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            itemCount: _queue.length,
+            physics: const BouncingScrollPhysics(),
+            itemBuilder: (_, i) {
+              final t = Map<String, dynamic>.from(_queue[i] as Map);
+              final title = (t['title'] ?? 'Unknown').toString();
+              final artist = (t['artist'] ?? '').toString();
+              final coverUrl = t['cover_url']?.toString();
+              final addedBy = (t['added_by'] ?? '').toString();
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                    color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
+                child: Row(children: [
+                  Container(
+                    width: 44, height: 44,
+                    decoration: BoxDecoration(gradient: AppColors.gradMixed, borderRadius: BorderRadius.circular(10)),
+                    child: coverUrl != null
+                        ? ClipRRect(borderRadius: BorderRadius.circular(10),
+                            child: CachedNetworkImage(imageUrl: coverUrl, fit: BoxFit.cover,
+                                errorWidget: (_, __, ___) => const Center(child: Text('🎵', style: TextStyle(fontSize: 20)))))
+                        : const Center(child: Text('🎵', style: TextStyle(fontSize: 20))),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(title, style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.text)),
+                    if (artist.isNotEmpty)
+                      Text(artist, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text2)),
+                    if (addedBy.isNotEmpty)
+                      Text('Added by $addedBy', style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
+                  ])),
+                  Text('${i + 1}', style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.text3)),
+                ]),
+              );
+            },
+          );
   }
 }
 

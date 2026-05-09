@@ -80,3 +80,11 @@ async def send_push_notification(
 
 async def get_last_message(firebase_chat_id: str) -> Optional[dict]:
     return firebase_service.get_last_message(firebase_chat_id)
+
+
+def write_room_message(room_id: int, message: dict) -> Optional[str]:
+    return firebase_service.write_room_message(room_id, message)
+
+
+def get_room_messages(room_id: int, limit: int = 50) -> list[dict]:
+    return firebase_service.get_room_messages(room_id, limit=limit)

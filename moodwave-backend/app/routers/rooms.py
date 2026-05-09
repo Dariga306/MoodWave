@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db, require_verified_user
@@ -41,6 +41,18 @@ class JoinApprovalRequest(BaseModel):
 
 class JoinDeclineRequest(BaseModel):
     user_id: int
+
+
+class RoomMessageRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=500)
+
+
+class QueueTrackRequest(BaseModel):
+    track_id: str
+    title: str
+    artist: str
+    cover_url: str | None = None
+    duration_ms: int | None = None
 
 
 def _invite_code(room_id: int) -> str:
@@ -82,6 +94,16 @@ async def _connected_participant_count(db: AsyncSession, room_id: int) -> int:
         )
         or 0
     )
+
+
+async def _participant_user_ids(db: AsyncSession, room_id: int) -> list[int]:
+    rows = await db.scalars(
+        select(RoomParticipant.user_id).where(
+            RoomParticipant.room_id == room_id,
+            RoomParticipant.left_at.is_(None),
+        )
+    )
+    return [int(user_id) for user_id in rows.all()]
 
 
 async def _load_room_state(redis, room_id: int) -> dict[str, Any]:
@@ -129,7 +151,7 @@ def _build_state(event: str, payload: dict[str, Any], room: ListeningRoom, host_
 async def create_room(
     body: CreateRoomRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(get_current_user),
 ):
     if body.max_guests > 20:
         raise HTTPException(status_code=400, detail="max_guests must be <= 20")
@@ -179,7 +201,7 @@ async def create_room(
 @router.get(
     "/rooms/active",
     summary="List active rooms",
-    description="Returns active public listening rooms with host information, participant counts, and current track state.",
+    description="Returns active listening rooms visible to the current user with host information, participant counts, participants, and current track state.",
 )
 async def list_active_rooms(
     limit: int = Query(default=20, ge=1, le=50),
@@ -191,7 +213,18 @@ async def list_active_rooms(
         await db.execute(
             select(ListeningRoom, User)
             .join(User, User.id == ListeningRoom.host_id)
-            .where(ListeningRoom.is_active == True, ListeningRoom.is_public == True)
+            .where(
+                ListeningRoom.is_active == True,
+                or_(
+                    ListeningRoom.is_public == True,
+                    ListeningRoom.id.in_(
+                        select(RoomParticipant.room_id).where(
+                            RoomParticipant.user_id == current_user.id,
+                            RoomParticipant.left_at.is_(None),
+                        )
+                    ),
+                ),
+            )
             .order_by(ListeningRoom.created_at.desc())
             .limit(limit)
         )
@@ -200,11 +233,14 @@ async def list_active_rooms(
     rooms: list[dict[str, Any]] = []
     for room, host in rows:
         participant_count = await _connected_participant_count(db, room.id)
+        participant_user_ids = await _participant_user_ids(db, room.id)
         current_track = await _load_room_state(request.app.state.redis, room.id)
         rooms.append(
             {
                 "room_id": room.id,
                 "name": room.title,
+                "is_public": room.is_public,
+                "is_active": room.is_active,
                 "host": {
                     "id": host.id,
                     "username": host.username,
@@ -212,6 +248,7 @@ async def list_active_rooms(
                     "avatar_url": host.avatar_url,
                 },
                 "participant_count": participant_count,
+                "participant_user_ids": participant_user_ids,
                 "current_track": {
                     "track_spotify_id": current_track.get("track_spotify_id"),
                     "track_title": current_track.get("track_title"),
@@ -428,6 +465,107 @@ async def join_decline(
         data={"event": "join_declined", "room_id": room_id},
     )
     return {"message": "declined"}
+
+
+@router.post("/rooms/{room_id}/messages", status_code=201, summary="Send room chat message")
+async def send_room_message(
+    room_id: int,
+    body: RoomMessageRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    room = await db.get(ListeningRoom, room_id)
+    if not room or not room.is_active:
+        raise HTTPException(status_code=404, detail="Room not found")
+    message = {
+        "sender_id": current_user.id,
+        "display_name": _display_name(current_user),
+        "avatar_url": current_user.avatar_url or "",
+        "text": body.text.strip(),
+        "sent_at": datetime.utcnow().isoformat() + "Z",
+        "type": "text",
+    }
+    firebase_svc.write_room_message(room_id, message)
+    return {"ok": True}
+
+
+@router.get("/rooms/{room_id}/messages", summary="Get room chat messages")
+async def get_room_messages(
+    room_id: int,
+    limit: int = Query(default=50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    room = await db.get(ListeningRoom, room_id)
+    if not room or not room.is_active:
+        raise HTTPException(status_code=404, detail="Room not found")
+    messages = firebase_svc.get_room_messages(room_id, limit=limit)
+    return {"messages": messages}
+
+
+QUEUE_TTL = 3600
+
+
+@router.get("/rooms/{room_id}/queue", summary="Get room track queue")
+async def get_room_queue(
+    room_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    room = await db.get(ListeningRoom, room_id)
+    if not room or not room.is_active:
+        raise HTTPException(status_code=404, detail="Room not found")
+    raw = await request.app.state.redis.get(f"room:{room_id}:queue")
+    queue = json.loads(raw) if raw else []
+    return {"queue": queue}
+
+
+@router.post("/rooms/{room_id}/queue", status_code=201, summary="Add track to room queue")
+async def add_to_room_queue(
+    room_id: int,
+    body: QueueTrackRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    room = await db.get(ListeningRoom, room_id)
+    if not room or not room.is_active:
+        raise HTTPException(status_code=404, detail="Room not found")
+    raw = await request.app.state.redis.get(f"room:{room_id}:queue")
+    queue = json.loads(raw) if raw else []
+    queue.append({
+        "track_id": body.track_id,
+        "title": body.title,
+        "artist": body.artist,
+        "cover_url": body.cover_url,
+        "duration_ms": body.duration_ms,
+        "added_by": _display_name(current_user),
+        "added_at": datetime.utcnow().isoformat() + "Z",
+    })
+    await request.app.state.redis.setex(f"room:{room_id}:queue", QUEUE_TTL, json.dumps(queue))
+    return {"ok": True, "queue_length": len(queue)}
+
+
+@router.delete("/rooms/{room_id}/queue/{track_index}", summary="Remove track from queue (host only)")
+async def remove_from_room_queue(
+    room_id: int,
+    track_index: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    room = await db.get(ListeningRoom, room_id)
+    if not room or not room.is_active:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if room.host_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only host can remove from queue")
+    raw = await request.app.state.redis.get(f"room:{room_id}:queue")
+    queue = json.loads(raw) if raw else []
+    if 0 <= track_index < len(queue):
+        queue.pop(track_index)
+    await request.app.state.redis.setex(f"room:{room_id}:queue", QUEUE_TTL, json.dumps(queue))
+    return {"ok": True}
 
 
 @router.post(

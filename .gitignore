@@ -42,6 +42,12 @@ admin-panel/dist/
 Thumbs.db
 desktop.ini
 
+# ── Runtime / generated data ─────────────────────────────────────────
+moodwave-backend/dump.rdb
+moodwave-backend/tmp/
+moodwave-backend/uploads/audio/
+moodwave-backend/uvicorn*.log
+
 # ── Dev tools ────────────────────────────────────────────────────────
 .claude/
 .codex-logs/

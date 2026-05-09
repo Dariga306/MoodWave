@@ -187,18 +187,44 @@ def get_last_message(firebase_chat_id: str) -> dict[str, Any] | None:
     return messages[-1] if messages else None
 
 
-def create_chat_node(firebase_chat_id: str, user_a_id: int, user_b_id: int) -> bool:
+async def delete_message(firebase_chat_id: str, message_key: str) -> bool:
     if not init_firebase():
         payload = _read_fallback_store()
         chat = _fallback_chat(payload, firebase_chat_id)
-        chat["members"] = {str(user_a_id): True, str(user_b_id): True}
+        messages = chat.setdefault("messages", {})
+        if message_key in messages:
+            messages.pop(message_key, None)
+            _write_fallback_store(payload)
+        return True
+    try:
+        db.reference(f"chats/{firebase_chat_id}/messages/{message_key}").delete()
+        return True
+    except Exception as e:
+        logger.warning("Firebase delete_message failed: %s", e)
+        payload = _read_fallback_store()
+        chat = _fallback_chat(payload, firebase_chat_id)
+        chat.setdefault("messages", {}).pop(message_key, None)
+        _write_fallback_store(payload)
+        return True
+
+
+def create_chat_node(firebase_chat_id: str, user_a_id: int, user_b_id: int) -> bool:
+    return create_group_chat_node(firebase_chat_id, [user_a_id, user_b_id])
+
+
+def create_group_chat_node(firebase_chat_id: str, member_ids: list[int]) -> bool:
+    members = {str(member_id): True for member_id in member_ids}
+    if not init_firebase():
+        payload = _read_fallback_store()
+        chat = _fallback_chat(payload, firebase_chat_id)
+        chat["members"] = members
         chat.setdefault("created_at", _now_iso())
         _write_fallback_store(payload)
         return True
     try:
         db.reference(f"chats/{firebase_chat_id}").update(
             {
-                "members": {str(user_a_id): True, str(user_b_id): True},
+                "members": members,
                 "created_at": _now_iso(),
             }
         )
@@ -207,10 +233,89 @@ def create_chat_node(firebase_chat_id: str, user_a_id: int, user_b_id: int) -> b
         logger.warning("Firebase create_chat_node failed: %s", e)
         payload = _read_fallback_store()
         chat = _fallback_chat(payload, firebase_chat_id)
-        chat["members"] = {str(user_a_id): True, str(user_b_id): True}
+        chat["members"] = members
         chat.setdefault("created_at", _now_iso())
         _write_fallback_store(payload)
         return True
+
+
+_ROOMS_FALLBACK = Path(__file__).resolve().parents[2] / "tmp" / "rooms_fallback.json"
+
+
+def _read_rooms_fallback() -> dict[str, Any]:
+    try:
+        if not _ROOMS_FALLBACK.exists():
+            return {"rooms": {}}
+        return json.loads(_ROOMS_FALLBACK.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("Rooms fallback read failed: %s", e)
+        return {"rooms": {}}
+
+
+def _write_rooms_fallback(payload: dict[str, Any]) -> None:
+    try:
+        _ROOMS_FALLBACK.parent.mkdir(parents=True, exist_ok=True)
+        _ROOMS_FALLBACK.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.warning("Rooms fallback write failed: %s", e)
+
+
+def write_room_message(room_id: int, message: dict[str, Any]) -> str | None:
+    if not init_firebase():
+        payload = _read_rooms_fallback()
+        room = payload.setdefault("rooms", {}).setdefault(str(room_id), {"messages": {}})
+        key = uuid4().hex
+        room.setdefault("messages", {})[key] = dict(message)
+        _write_rooms_fallback(payload)
+        return key
+    try:
+        ref = db.reference(f"rooms/{room_id}/messages")
+        new_ref = ref.push(message)
+        return new_ref.key
+    except Exception as e:
+        logger.warning("Firebase write_room_message failed: %s", e)
+        payload = _read_rooms_fallback()
+        room = payload.setdefault("rooms", {}).setdefault(str(room_id), {"messages": {}})
+        key = uuid4().hex
+        room.setdefault("messages", {})[key] = dict(message)
+        _write_rooms_fallback(payload)
+        return key
+
+
+def get_room_messages(room_id: int, limit: int = 50) -> list[dict[str, Any]]:
+    if not init_firebase():
+        payload = _read_rooms_fallback()
+        room = payload.get("rooms", {}).get(str(room_id), {"messages": {}})
+        messages = [
+            {**item, "message_id": key}
+            for key, item in room.get("messages", {}).items()
+            if isinstance(item, dict)
+        ]
+        messages.sort(key=lambda item: item.get("sent_at", ""))
+        return messages[-limit:]
+    try:
+        data = (
+            db.reference(f"rooms/{room_id}/messages")
+            .order_by_key()
+            .limit_to_last(limit)
+            .get()
+        )
+        if not data:
+            return []
+        messages: list[dict[str, Any]] = []
+        for key, payload in data.items():
+            if not isinstance(payload, dict):
+                continue
+            payload["message_id"] = key
+            messages.append(payload)
+        messages.sort(key=lambda item: item.get("sent_at", ""))
+        return messages
+    except Exception as e:
+        logger.warning("Firebase get_room_messages failed: %s", e)
+        return []
 
 
 def send_fcm_push(token: str | None, title: str, body: str, data: dict[str, Any] | None = None) -> bool:

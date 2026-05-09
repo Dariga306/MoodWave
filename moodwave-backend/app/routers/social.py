@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
 
 from app.dependencies import get_current_user, get_db
+from app.models.music import ListeningHistory, TrackCache
 from app.models.social import ArtistFollow, Block, Friend, FriendStatus, Match, Report, UserFollow
 from app.models.user import User
 from app.services import cache as cache_svc
@@ -93,6 +94,50 @@ async def _friend_rows(db: AsyncSession, current_user_id: int):
     ).all()
 
 
+async def _following_rows(db: AsyncSession, current_user_id: int):
+    return (
+        await db.execute(
+            select(User)
+            .join(UserFollow, UserFollow.following_id == User.id)
+            .where(UserFollow.follower_id == current_user_id)
+            .order_by(UserFollow.created_at.desc())
+        )
+    ).scalars().all()
+
+
+async def _latest_play_snapshot(db: AsyncSession, user_id: int) -> dict | None:
+    row = (
+        await db.execute(
+            select(ListeningHistory, TrackCache)
+            .join(
+                TrackCache,
+                TrackCache.spotify_id == ListeningHistory.spotify_track_id,
+                isouter=True,
+            )
+            .where(ListeningHistory.user_id == user_id)
+            .order_by(ListeningHistory.created_at.desc())
+            .limit(1)
+        )
+    ).first()
+    if not row:
+        return None
+
+    history, track = row
+    title = track.title if track else ""
+    artist = track.artist if track else ""
+    if not title and not artist:
+        return None
+
+    return {
+        "track_id": history.spotify_track_id,
+        "title": title,
+        "artist": artist,
+        "played_at": history.created_at.isoformat() + "Z"
+        if history.created_at
+        else None,
+    }
+
+
 async def _friendship_between_users(db: AsyncSession, user_a_id: int, user_b_id: int) -> Friend | None:
     return await db.scalar(
         select(Friend).where(
@@ -134,20 +179,29 @@ async def friends_activity(
 ):
     redis = request.app.state.redis
     rows = await _friend_rows(db, current_user.id)
+    following_rows = await _following_rows(db, current_user.id)
     live: list[dict] = []
     recent: list[dict] = []
+    seen_ids: set[int] = set()
 
     now_utc = datetime.utcnow()
 
-    for _friendship, user in rows:
+    async def append_activity_user(user: User):
         if await users_are_blocked(db, current_user.id, user.id):
-            continue
+            return
 
         now_playing = None
         if user.show_activity:
-            now_playing = _normalize_now_playing(await redis.get(f"now_playing:{user.id}"))
+            try:
+                now_playing = _normalize_now_playing(
+                    await redis.get(f"now_playing:{user.id}")
+                )
+            except Exception:
+                now_playing = None
+            now_playing = now_playing or await _latest_play_snapshot(db, user.id)
 
         friend_data = {**_friend_payload(user), "now_playing": now_playing}
+        seen_ids.add(user.id)
 
         if now_playing and now_playing.get("played_at"):
             try:
@@ -165,6 +219,35 @@ async def friends_activity(
                 recent.append(friend_data)
         else:
             recent.append(friend_data)
+
+    for _friendship, user in rows:
+        await append_activity_user(user)
+
+    for user in following_rows:
+        if user.id in seen_ids:
+            continue
+        await append_activity_user(user)
+
+    # Also include matched users (mutual likes) so activity is populated
+    # even without explicit friends/follows
+    match_rows = (
+        await db.execute(
+            select(User)
+            .join(
+                Match,
+                or_(
+                    and_(Match.user_a_id == current_user.id, User.id == Match.user_b_id),
+                    and_(Match.user_b_id == current_user.id, User.id == Match.user_a_id),
+                ),
+            )
+            .order_by(Match.created_at.desc())
+        )
+    ).scalars().all()
+
+    for user in match_rows:
+        if user.id in seen_ids:
+            continue
+        await append_activity_user(user)
 
     return {"live": live, "recent": recent}
 
@@ -692,3 +775,28 @@ async def get_user_following_artists(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return await _followed_artist_profiles(db, user_id)
+
+
+@router.get(
+    "/users/{user_id:int}/now-playing",
+    summary="Get user now-playing status",
+)
+async def get_user_now_playing(
+    user_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    now_playing = None
+    if user.show_activity:
+        try:
+            redis = request.app.state.redis
+            now_playing = _normalize_now_playing(await redis.get(f"now_playing:{user_id}"))
+        except Exception:
+            pass
+        if not now_playing:
+            now_playing = await _latest_play_snapshot(db, user_id)
+    return {"now_playing": now_playing}

@@ -13,6 +13,7 @@ import '../providers/auth_provider.dart';
 import '../providers/player_provider.dart';
 import 'album_screen.dart';
 import 'extra_screens.dart';
+import 'group_chat_setup_screen.dart';
 import 'player_screen.dart';
 import 'playlist_screen.dart';
 import 'user_profile_screen.dart';
@@ -46,6 +47,7 @@ String _formatChatTime(String? raw) {
 class ChatScreen extends StatefulWidget {
   final int? matchId;
   final int? chatId;
+  final int? groupChatId;
   final String partnerName;
   final int partnerId;
   final String? partnerAvatarUrl;
@@ -54,10 +56,11 @@ class ChatScreen extends StatefulWidget {
     super.key,
     this.matchId,
     this.chatId,
+    this.groupChatId,
     required this.partnerName,
     required this.partnerId,
     this.partnerAvatarUrl,
-  }) : assert(matchId != null || chatId != null);
+  }) : assert(matchId != null || chatId != null || groupChatId != null);
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -65,34 +68,109 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   static const _mutedChatsKey = 'muted_chat_threads_v1';
+  static const _deletedMsgsKey = 'deleted_msgs_for_me_v1';
+  final Set<String> _deletedForMe = {};
   final _textCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   List<GlobalKey> _messageKeys = [];
   List<dynamic> _messages = [];
   bool _sending = false;
   Timer? _pollTimer;
+  Timer? _statusTimer;
+  Timer? _searchHighlightTimer;
   int _lastCount = 0;
   bool _chatMuted = false;
+  int? _highlightedMessageIndex;
+  String _highlightedQuery = '';
+  Map<String, dynamic>? _partnerNowPlaying;
+  List<Map<String, dynamic>> _groupMembers = [];
+  int _groupOwnerId = 0;
 
-  bool get _usesDirectThread => widget.matchId == null && widget.chatId != null;
-  String get _conversationStorageKey =>
-      _usesDirectThread ? 'thread:${widget.chatId}' : 'match:${widget.matchId}';
+  bool get _isGroupChat => widget.groupChatId != null;
+  bool get _usesDirectThread =>
+      !_isGroupChat && widget.matchId == null && widget.chatId != null;
+  String get _conversationStorageKey => _isGroupChat
+      ? 'group:${widget.groupChatId}'
+      : _usesDirectThread
+          ? 'thread:${widget.chatId}'
+          : 'match:${widget.matchId}';
 
   @override
   void initState() {
     super.initState();
     _loadMuteState();
+    _loadDeletedForMe();
     _loadMessages();
     _pollTimer =
         Timer.periodic(const Duration(seconds: 4), (_) => _loadMessages());
+    if (!_isGroupChat && widget.partnerId > 0) {
+      _loadPartnerStatus();
+      _statusTimer = Timer.periodic(
+          const Duration(seconds: 15), (_) => _loadPartnerStatus());
+    }
+    if (_isGroupChat) _loadGroupDetails();
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _statusTimer?.cancel();
+    _searchHighlightTimer?.cancel();
     _textCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadPartnerStatus() async {
+    try {
+      final data = await ApiService().getUserNowPlaying(widget.partnerId);
+      if (!mounted) return;
+      setState(() {
+        _partnerNowPlaying =
+            (data?['now_playing'] as Map?)?.cast<String, dynamic>();
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _loadGroupDetails() async {
+    try {
+      final data =
+          await ApiService().getGroupChatDetails(widget.groupChatId!);
+      if (!mounted) return;
+      final members = (data['members'] as List?)
+              ?.map((m) => Map<String, dynamic>.from(m as Map))
+              .toList() ??
+          [];
+      int ownerId = 0;
+      for (final m in members) {
+        if (m['role'] == 'owner') {
+          ownerId = (m['id'] as num?)?.toInt() ?? 0;
+          break;
+        }
+      }
+      setState(() {
+        _groupMembers = members;
+        _groupOwnerId = ownerId;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _loadDeletedForMe() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ids = prefs.getStringList(_deletedMsgsKey) ?? [];
+    if (!mounted) return;
+    setState(() => _deletedForMe.addAll(ids));
+  }
+
+  Future<void> _deleteForMe(String messageId) async {
+    _deletedForMe.add(messageId);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_deletedMsgsKey, _deletedForMe.toList());
+    if (!mounted) return;
+    setState(() {
+      _messages =
+          _messages.where((m) => (m as Map)['message_id'] != messageId).toList();
+    });
   }
 
   Future<void> _loadMuteState() async {
@@ -129,13 +207,18 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _loadMessages() async {
     try {
-      final msgs = _usesDirectThread
-          ? await ApiService().getDirectChatMessages(widget.chatId!)
-          : await ApiService().getChatMessages(widget.matchId!);
+      final msgs = _isGroupChat
+          ? await ApiService().getGroupChatMessages(widget.groupChatId!)
+          : _usesDirectThread
+              ? await ApiService().getDirectChatMessages(widget.chatId!)
+              : await ApiService().getChatMessages(widget.matchId!);
       if (!mounted) return;
-      final needsScroll = msgs.length != _lastCount;
+      final filtered = msgs
+          .where((m) => !_deletedForMe.contains((m as Map)['message_id']))
+          .toList();
+      final needsScroll = filtered.length != _lastCount;
       setState(() {
-        _messages = msgs;
+        _messages = filtered;
         _messageKeys = List<GlobalKey>.generate(
           msgs.length,
           (_) => GlobalKey(),
@@ -164,7 +247,9 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() => _sending = true);
     _textCtrl.clear();
     try {
-      if (_usesDirectThread) {
+      if (_isGroupChat) {
+        await ApiService().sendGroupTextMessage(widget.groupChatId!, text);
+      } else if (_usesDirectThread) {
         await ApiService().sendDirectTextMessage(widget.chatId!, text);
       } else {
         await ApiService().sendTextMessage(widget.matchId!, text);
@@ -212,7 +297,19 @@ class _ChatScreenState extends State<ChatScreen> {
     if (trackId.isEmpty) {
       throw Exception('Track could not be resolved');
     }
-    if (_usesDirectThread) {
+    if (_isGroupChat) {
+      await ApiService().sendTrackInGroupChat(
+        widget.groupChatId!,
+        trackId: trackId,
+        title: title,
+        artist: artist,
+        coverUrl: coverUrl,
+        previewUrl: previewUrl,
+        phrase: phrase,
+        phraseEmoji: phraseEmoji,
+        note: note,
+      );
+    } else if (_usesDirectThread) {
       await ApiService().sendTrackInDirectChat(
         widget.chatId!,
         trackId: trackId,
@@ -291,7 +388,16 @@ class _ChatScreenState extends State<ChatScreen> {
           Navigator.pop(context);
           setState(() => _sending = true);
           try {
-            if (_usesDirectThread) {
+            if (_isGroupChat) {
+              await ApiService().sendAlbumInGroupChat(
+                widget.groupChatId!,
+                albumId: album['id']?.toString() ?? '',
+                title: album['title']?.toString() ?? '',
+                artist: album['artist']?.toString() ?? '',
+                coverUrl: album['cover_xl']?.toString(),
+                note: note,
+              );
+            } else if (_usesDirectThread) {
               await ApiService().sendAlbumInDirectChat(
                 widget.chatId!,
                 albumId: album['id']?.toString() ?? '',
@@ -332,7 +438,16 @@ class _ChatScreenState extends State<ChatScreen> {
           try {
             final playlistId = (playlist['id'] as num?)?.toInt() ?? 0;
             final trackCount = (playlist['track_count'] as num?)?.toInt() ?? 0;
-            if (_usesDirectThread) {
+            if (_isGroupChat) {
+              await ApiService().sendPlaylistInGroupChat(
+                widget.groupChatId!,
+                playlistId: playlistId,
+                title: playlist['title']?.toString() ?? '',
+                coverUrl: playlist['cover_url']?.toString(),
+                trackCount: trackCount,
+                note: note,
+              );
+            } else if (_usesDirectThread) {
               await ApiService().sendPlaylistInDirectChat(
                 widget.chatId!,
                 playlistId: playlistId,
@@ -390,7 +505,13 @@ class _ChatScreenState extends State<ChatScreen> {
     if (confirmed != true || !mounted) return;
     setState(() => _sending = true);
     try {
-      if (_usesDirectThread) {
+      if (_isGroupChat) {
+        await ApiService().sendImageInGroupChat(
+          widget.groupChatId!,
+          imageDataUrl: dataUrl,
+          caption: caption.isEmpty ? null : caption,
+        );
+      } else if (_usesDirectThread) {
         await ApiService().sendImageInDirectChat(
           widget.chatId!,
           imageDataUrl: dataUrl,
@@ -437,6 +558,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _openPartnerProfile() {
+    if (_isGroupChat || widget.partnerId <= 0) return;
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -453,6 +575,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _openConversationMenu() {
+    final myId =
+        (context.read<AuthProvider>().user?['id'] as num?)?.toInt() ?? 0;
+    final amIOwner = _isGroupChat && _groupOwnerId == myId;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -467,17 +592,37 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _menuTile(
-              icon: Icons.group_add_rounded,
-              label: 'Create listening group',
-              onTap: () {
-                Navigator.pop(context);
-                _createListeningGroup();
-              },
-            ),
+            if (!_isGroupChat) ...[
+              _menuTile(
+                icon: Icons.groups_rounded,
+                label: 'Create group',
+                onTap: () {
+                  Navigator.pop(context);
+                  _createGroupChat();
+                },
+              ),
+              _menuTile(
+                icon: Icons.headphones_rounded,
+                label: 'Listening room',
+                onTap: () {
+                  Navigator.pop(context);
+                  _createListeningGroup();
+                },
+              ),
+            ],
+            if (_isGroupChat)
+              _menuTile(
+                icon: Icons.people_rounded,
+                label: 'Members',
+                trailing: '${_groupMembers.length}',
+                onTap: () {
+                  Navigator.pop(context);
+                  _openMembersSheet(myId, amIOwner);
+                },
+              ),
             _menuTile(
               icon: Icons.folder_shared_rounded,
-              label: 'Shared',
+              label: 'Shared media',
               onTap: () {
                 Navigator.pop(context);
                 _openSharedContent();
@@ -501,19 +646,15 @@ class _ChatScreenState extends State<ChatScreen> {
                 _toggleMuteConversation();
               },
             ),
-            _menuTile(
-              icon: Icons.graphic_eq_rounded,
-              label: 'Browse live groups',
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const BrowseRoomsScreen(),
-                  ),
-                );
-              },
-            ),
+            if (_isGroupChat)
+              _menuTile(
+                icon: Icons.exit_to_app_rounded,
+                label: 'Leave group',
+                onTap: () {
+                  Navigator.pop(context);
+                  _leaveGroupChat();
+                },
+              ),
           ],
         ),
       ),
@@ -523,10 +664,27 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _createListeningGroup() async {
     try {
       final room = await ApiService().createListeningRoom(
-        name: '${widget.partnerName} Listening Group',
+        name: '${widget.partnerName} Listening Room',
         isPublic: false,
         maxGuests: 8,
       );
+      if (!mounted) return;
+      final inviteCode = room['invite_code']?.toString() ?? '';
+      if (_isGroupChat) {
+        await ApiService().sendGroupTextMessage(
+          widget.groupChatId!,
+          '🎵 Listening room created! Invite code: $inviteCode',
+        );
+      } else if (_usesDirectThread) {
+        await ApiService().sendDirectTextMessage(
+          widget.chatId!,
+          '🎵 Listening room created! Invite code: $inviteCode',
+        );
+      } else {
+        await ApiService().sendTextMessage(widget.matchId!,
+            '🎵 Listening room created! Invite code: $inviteCode');
+      }
+      await _loadMessages();
       if (!mounted) return;
       Navigator.push(
         context,
@@ -536,20 +694,61 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      _showSendError(e, fallback: 'Could not create listening group');
+      _showSendError(e, fallback: 'Could not create listening room');
     }
   }
 
+  Future<void> _createGroupChat() async {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GroupChatSetupScreen(
+          initialUsers: widget.partnerId > 0
+              ? [
+                  {
+                    'id': widget.partnerId,
+                    'display_name': widget.partnerName,
+                    'username': '',
+                    'avatar_url': widget.partnerAvatarUrl ?? '',
+                  }
+                ]
+              : const [],
+          sourceMatchId: widget.matchId,
+          sourceChatId: widget.chatId,
+        ),
+      ),
+    );
+  }
+
   void _openSharedContent() {
+    final myId =
+        (context.read<AuthProvider>().user?['id'] as num?)?.toInt() ?? 0;
+    final allMessages = _messages
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        .toList();
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => _SharedContentScreen(
-          messages: _messages
-              .whereType<Map>()
-              .map((m) => Map<String, dynamic>.from(m))
-              .toList(),
+          messages: allMessages,
           partnerName: widget.partnerName,
+          partnerId: widget.partnerId,
+          currentUserId: myId,
+          onJumpToMessage: (index) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (index < _messageKeys.length) {
+                final key = _messageKeys[index];
+                final ctx = key.currentContext;
+                if (ctx != null) {
+                  Scrollable.ensureVisible(ctx,
+                      alignment: 0.5,
+                      duration: const Duration(milliseconds: 400),
+                      curve: Curves.easeOutCubic);
+                }
+              }
+            });
+          },
         ),
       ),
     );
@@ -559,6 +758,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final candidates = _messages
         .asMap()
         .entries
+        .where((entry) => (entry.value as Map)['type']?.toString() == 'text')
         .map((entry) => _ChatSearchResult(
               index: entry.key,
               text: _searchableMessageText(
@@ -576,12 +776,143 @@ class _ChatScreenState extends State<ChatScreen> {
         builder: (_) => _ChatSearchScreen(
           partnerName: widget.partnerName,
           results: candidates,
-          onJumpToMessage: (index) {
+          onJumpToMessage: (index, query) {
             Navigator.of(context).pop();
-            _jumpToMessage(index);
+            _jumpToMessage(index, query: query);
           },
           typeIconBuilder: _messageTypeIcon,
         ),
+      ),
+    );
+  }
+
+  void _showDeleteMenu(String messageId) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.visibility_off_rounded,
+                color: AppColors.text2),
+            title: Text('Delete for me',
+                style: GoogleFonts.outfit(
+                    fontSize: 15, color: AppColors.text)),
+            subtitle: Text('Only visible to you',
+                style: GoogleFonts.outfit(
+                    fontSize: 12, color: AppColors.text3)),
+            onTap: () {
+              Navigator.pop(context);
+              _deleteForMe(messageId);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_rounded,
+                color: Color(0xFFef4444)),
+            title: Text('Delete for everyone',
+                style: GoogleFonts.outfit(
+                    fontSize: 15, color: const Color(0xFFef4444))),
+            subtitle: Text('Removed for all participants',
+                style: GoogleFonts.outfit(
+                    fontSize: 12, color: AppColors.text3)),
+            onTap: () async {
+              Navigator.pop(context);
+              try {
+                await ApiService().deleteMessage(
+                  matchId: widget.matchId,
+                  chatId: widget.chatId,
+                  groupChatId: widget.groupChatId,
+                  messageId: messageId,
+                );
+                _loadMessages();
+              } catch (_) {}
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.close_rounded, color: AppColors.text3),
+            title: Text('Cancel',
+                style:
+                    GoogleFonts.outfit(fontSize: 15, color: AppColors.text2)),
+            onTap: () => Navigator.pop(context),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _leaveGroupChat() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Leave group?',
+            style: GoogleFonts.outfit(
+                fontWeight: FontWeight.w700, color: AppColors.text)),
+        content: Text(
+            'You will leave this conversation. You can only come back with an invite.',
+            style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel',
+                style: GoogleFonts.outfit(color: AppColors.text3)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Leave',
+                style: GoogleFonts.outfit(color: const Color(0xFFef4444))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await ApiService().leaveGroupChat(widget.groupChatId!);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not leave group')),
+      );
+    }
+  }
+
+  void _openMembersSheet(int myId, bool amIOwner) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _GroupMembersSheet(
+        members: _groupMembers,
+        ownerId: _groupOwnerId,
+        currentUserId: myId,
+        amIOwner: amIOwner,
+        groupChatId: widget.groupChatId!,
+        onMemberRemoved: () {
+          _loadGroupDetails();
+        },
+        onOwnerTransferred: (newOwnerId) {
+          setState(() {
+            _groupOwnerId = newOwnerId;
+            for (final m in _groupMembers) {
+              if ((m['id'] as num?)?.toInt() == newOwnerId) {
+                m['role'] = 'owner';
+              } else if ((m['id'] as num?)?.toInt() == myId) {
+                m['role'] = 'member';
+              }
+            }
+          });
+        },
       ),
     );
   }
@@ -615,8 +946,13 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _jumpToMessage(int index) {
+  void _jumpToMessage(int index, {String query = ''}) {
     if (index < 0 || index >= _messageKeys.length) return;
+    _searchHighlightTimer?.cancel();
+    setState(() {
+      _highlightedMessageIndex = index;
+      _highlightedQuery = query.trim();
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final targetContext = _messageKeys[index].currentContext;
       if (targetContext != null) {
@@ -627,6 +963,13 @@ class _ChatScreenState extends State<ChatScreen> {
           alignment: 0.2,
         );
       }
+    });
+    _searchHighlightTimer = Timer(const Duration(seconds: 6), () {
+      if (!mounted) return;
+      setState(() {
+        _highlightedMessageIndex = null;
+        _highlightedQuery = '';
+      });
     });
   }
 
@@ -710,45 +1053,114 @@ class _ChatScreenState extends State<ChatScreen> {
                     final msg = _messages[i] as Map<String, dynamic>;
                     final isMe = msg['sender_id'] == myId;
                     final type = msg['type'] ?? 'text';
+                    final messageId = msg['message_id'] as String?;
+                    final senderName = _isGroupChat && !isMe
+                        ? (msg['sender_name']?.toString().trim().isNotEmpty ??
+                                false)
+                            ? msg['sender_name'].toString()
+                            : widget.partnerName
+                        : widget.partnerName;
+                    final bubbleInitial = senderName.isNotEmpty
+                        ? senderName[0].toUpperCase()
+                        : initial;
+                    final bubbleAvatarUrl = _isGroupChat && !isMe
+                        ? (msg['sender_avatar_url'] ?? '').toString()
+                        : partnerAvatarUrl;
+                    Widget child = switch (type) {
+                      'track' => _TrackMessage(
+                          msg: msg,
+                          isMe: isMe,
+                          partnerInitial: bubbleInitial,
+                          partnerAvatarUrl: bubbleAvatarUrl,
+                          matchId: widget.matchId,
+                          chatId: widget.chatId,
+                          groupChatId: widget.groupChatId,
+                          useGroupChat: _isGroupChat,
+                          useDirectThread: _usesDirectThread,
+                          onReacted: _loadMessages,
+                          onDelete: (isMe && messageId != null)
+                              ? () => _showDeleteMenu(messageId)
+                              : null,
+                        ),
+                      'album' => _AlbumMessage(
+                          msg: msg,
+                          isMe: isMe,
+                          partnerInitial: bubbleInitial,
+                          partnerAvatarUrl: bubbleAvatarUrl,
+                        ),
+                      'playlist' => _PlaylistMessage(
+                          msg: msg,
+                          isMe: isMe,
+                          partnerInitial: bubbleInitial,
+                          partnerAvatarUrl: bubbleAvatarUrl,
+                        ),
+                      'image' => _ImageMessage(
+                          msg: msg,
+                          isMe: isMe,
+                          partnerInitial: bubbleInitial,
+                          partnerAvatarUrl: bubbleAvatarUrl,
+                        ),
+                      _ => _TextMessage(
+                          msg: msg,
+                          isMe: isMe,
+                          partnerInitial: bubbleInitial,
+                          partnerAvatarUrl: bubbleAvatarUrl,
+                          highlighted: i == _highlightedMessageIndex,
+                          highlightQuery: i == _highlightedMessageIndex
+                              ? _highlightedQuery
+                              : '',
+                        ),
+                    };
+                    // Non-track messages: wrap with delete-on-long-press
+                    if (isMe && messageId != null && type != 'track') {
+                      child = GestureDetector(
+                        onLongPress: () => _showDeleteMenu(messageId),
+                        child: child,
+                      );
+                    }
+                    // Admin badge for group chats
+                    final senderId =
+                        (msg['sender_id'] as num?)?.toInt();
+                    final isOwnerMsg = _isGroupChat &&
+                        _groupOwnerId > 0 &&
+                        senderId == _groupOwnerId;
+                    if (isOwnerMsg) {
+                      final badge = Container(
+                        margin: EdgeInsets.only(
+                          bottom: 3,
+                          left: isMe ? 0 : 44,
+                          right: isMe ? 8 : 0,
+                        ),
+                        alignment:
+                            isMe ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.purpleDark.withOpacity(0.35),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                                color: AppColors.purpleLight.withOpacity(0.3)),
+                          ),
+                          child: Text(
+                            '👑 Admin',
+                            style: GoogleFonts.outfit(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.purpleLight,
+                            ),
+                          ),
+                        ),
+                      );
+                      child = Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [badge, child],
+                      );
+                    }
                     return Padding(
                       key: i < _messageKeys.length ? _messageKeys[i] : null,
                       padding: const EdgeInsets.only(bottom: 10),
-                      child: switch (type) {
-                        'track' => _TrackMessage(
-                            msg: msg,
-                            isMe: isMe,
-                            partnerInitial: initial,
-                            partnerAvatarUrl: partnerAvatarUrl,
-                            matchId: widget.matchId,
-                            chatId: widget.chatId,
-                            useDirectThread: _usesDirectThread,
-                            onReacted: _loadMessages,
-                          ),
-                        'album' => _AlbumMessage(
-                            msg: msg,
-                            isMe: isMe,
-                            partnerInitial: initial,
-                            partnerAvatarUrl: partnerAvatarUrl,
-                          ),
-                        'playlist' => _PlaylistMessage(
-                            msg: msg,
-                            isMe: isMe,
-                            partnerInitial: initial,
-                            partnerAvatarUrl: partnerAvatarUrl,
-                          ),
-                        'image' => _ImageMessage(
-                            msg: msg,
-                            isMe: isMe,
-                            partnerInitial: initial,
-                            partnerAvatarUrl: partnerAvatarUrl,
-                          ),
-                        _ => _TextMessage(
-                            msg: msg,
-                            isMe: isMe,
-                            partnerInitial: initial,
-                            partnerAvatarUrl: partnerAvatarUrl,
-                          ),
-                      },
+                      child: child,
                     );
                   },
                 ),
@@ -811,19 +1223,16 @@ class _ChatScreenState extends State<ChatScreen> {
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
                               color: AppColors.text)),
-                      Row(children: [
-                        Container(
-                          width: 6,
-                          height: 6,
-                          decoration: const BoxDecoration(
-                              color: AppColors.purpleLight,
-                              shape: BoxShape.circle),
-                        ),
-                        const SizedBox(width: 5),
-                        Text('Music match',
-                            style: GoogleFonts.outfit(
-                                fontSize: 12, color: AppColors.purpleLight)),
-                      ]),
+                      if (_isGroupChat)
+                        Text(
+                          _groupMembers.isNotEmpty
+                              ? 'Group · ${_groupMembers.length} members'
+                              : 'Group chat',
+                          style: GoogleFonts.outfit(
+                              fontSize: 12, color: AppColors.purpleLight),
+                        )
+                      else
+                        _buildPartnerStatus(),
                     ]),
               ),
             ),
@@ -845,6 +1254,43 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildPartnerStatus() {
+    final np = _partnerNowPlaying;
+    if (np != null) {
+      final artist = np['artist']?.toString() ?? '';
+      final title = np['title']?.toString() ?? '';
+      final label = artist.isNotEmpty
+          ? 'Now listening to $artist'
+          : title.isNotEmpty
+              ? 'Now listening to $title'
+              : 'online';
+      return Row(children: [
+        const Icon(Icons.music_note_rounded, size: 11, color: AppColors.pink),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.outfit(fontSize: 12, color: AppColors.pink),
+          ),
+        ),
+      ]);
+    }
+    return Row(children: [
+      Container(
+        width: 6,
+        height: 6,
+        decoration: const BoxDecoration(
+            color: AppColors.purpleLight, shape: BoxShape.circle),
+      ),
+      const SizedBox(width: 5),
+      Text('online',
+          style:
+              GoogleFonts.outfit(fontSize: 12, color: AppColors.purpleLight)),
+    ]);
   }
 
   Widget _buildEmpty() {
@@ -991,17 +1437,287 @@ class _TextMessage extends StatelessWidget {
   final bool isMe;
   final String partnerInitial;
   final String partnerAvatarUrl;
+  final bool highlighted;
+  final String highlightQuery;
   const _TextMessage(
       {required this.msg,
       required this.isMe,
       required this.partnerInitial,
-      required this.partnerAvatarUrl});
+      required this.partnerAvatarUrl,
+      this.highlighted = false,
+      this.highlightQuery = ''});
+
+  Map<String, String>? _inviteCard(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return null;
+    // New format: 💬 Name создал(а) группу «Title»! Присоединяйся с кодом: 42
+    final groupMatch = RegExp(
+      r'^(?:💬\s*)?(.+?)(?:\s+создал[аи]?\s+группу\s+«.+?»!?\s+Присоединяйся с кодом:|'
+      r'\s+created a group chat!?\s*Join with code:|'
+      r'\s+Join with code:)\s*(\d+)$',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(trimmed);
+    if (groupMatch != null) {
+      final author = (groupMatch.group(1) ?? '').trim();
+      return {
+        'kind': 'group',
+        'title': author.isNotEmpty
+            ? '$author invites to group'
+            : 'Group invite',
+        'code': (groupMatch.group(2) ?? '').trim(),
+      };
+    }
+    final roomMatch = RegExp(
+      r'^(?:🎵\s*)?Listening room created!\s*Invite code:\s*(.+)$',
+      caseSensitive: false,
+    ).firstMatch(trimmed);
+    if (roomMatch != null) {
+      return {
+        'kind': 'room',
+        'title': 'Listening room invite',
+        'code': (roomMatch.group(1) ?? '').trim(),
+      };
+    }
+    return null;
+  }
+
+  InlineSpan _buildHighlightedText(String text, TextStyle baseStyle) {
+    final query = highlightQuery.trim();
+    if (!highlighted || query.isEmpty) {
+      return TextSpan(text: text, style: baseStyle);
+    }
+    final lower = text.toLowerCase();
+    final q = query.toLowerCase();
+    final matches = <int>[];
+    var start = 0;
+    while (start < lower.length) {
+      final idx = lower.indexOf(q, start);
+      if (idx < 0) break;
+      matches.add(idx);
+      start = idx + q.length;
+    }
+    if (matches.isEmpty) {
+      return TextSpan(text: text, style: baseStyle);
+    }
+    final children = <InlineSpan>[];
+    var cursor = 0;
+    for (final idx in matches) {
+      if (idx > cursor) {
+        children.add(TextSpan(text: text.substring(cursor, idx)));
+      }
+      children.add(
+        TextSpan(
+          text: text.substring(idx, idx + q.length),
+          style: baseStyle.copyWith(
+            color: AppColors.purpleLight,
+            fontWeight: FontWeight.w800,
+            backgroundColor: AppColors.purpleLight.withOpacity(0.18),
+          ),
+        ),
+      );
+      cursor = idx + q.length;
+    }
+    if (cursor < text.length) {
+      children.add(TextSpan(text: text.substring(cursor)));
+    }
+    return TextSpan(
+      style: baseStyle,
+      children: children,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final text = msg['text'] ?? '';
     final sentAt = msg['sent_at'] as String? ?? '';
     final timeStr = _formatChatTime(sentAt);
+    final inviteCard = _inviteCard(text.toString());
+
+    if (inviteCard != null) {
+      final isGroup = inviteCard['kind'] == 'group';
+      final code = inviteCard['code'] ?? '';
+
+      Future<void> handleTap() async {
+        if (isGroup) {
+          final groupChatId = int.tryParse(code);
+          if (groupChatId == null) return;
+          if (!context.mounted) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ChatScreen(
+                groupChatId: groupChatId,
+                partnerName: inviteCard['title'] ?? 'Group',
+                partnerId: 0,
+              ),
+            ),
+          );
+          return;
+        }
+        if (!code.toUpperCase().startsWith('MW-')) return;
+        final hex = code.substring(3);
+        final roomId = int.tryParse(hex, radix: 16);
+        if (roomId == null) return;
+        try {
+          final room = await ApiService().getRoomDetails(roomId);
+          if (!context.mounted) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ListeningPartyScreen(room: room),
+            ),
+          );
+        } catch (_) {}
+      }
+
+      final bubble = GestureDetector(
+        onTap: handleTap,
+        child: Container(
+          constraints:
+              BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.76),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            gradient: isGroup ? AppColors.primaryBtn : AppColors.gradPurple,
+            borderRadius: BorderRadius.circular(18),
+            border: highlighted
+                ? Border.all(
+                    color: AppColors.purpleLight.withOpacity(0.6),
+                    width: 1.4,
+                  )
+                : null,
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.purpleDark.withOpacity(0.22),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.14),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      isGroup ? Icons.groups_rounded : Icons.headphones_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          inviteCard['title'] ?? '',
+                          style: GoogleFonts.outfit(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            code,
+                            style: GoogleFonts.outfit(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(
+                    'Нажми чтобы войти →',
+                    style: GoogleFonts.outfit(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white.withOpacity(0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (isMe) {
+        return Align(
+          alignment: Alignment.centerRight,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              bubble,
+              if (timeStr.isNotEmpty) ...[
+                const SizedBox(height: 3),
+                Text(
+                  timeStr,
+                  style: GoogleFonts.outfit(
+                    fontSize: 10,
+                    color: AppColors.text3,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      }
+
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _Avatar(initial: partnerInitial, imageUrl: partnerAvatarUrl),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                bubble,
+                if (timeStr.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    timeStr,
+                    style: GoogleFonts.outfit(
+                      fontSize: 10,
+                      color: AppColors.text3,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      );
+    }
 
     if (isMe) {
       return Align(
@@ -1013,6 +1729,12 @@ class _TextMessage extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
               gradient: AppColors.gradPurple,
+              border: highlighted
+                  ? Border.all(
+                      color: AppColors.purpleLight.withOpacity(0.6),
+                      width: 1.4,
+                    )
+                  : null,
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(18),
                 topRight: Radius.circular(18),
@@ -1026,9 +1748,16 @@ class _TextMessage extends StatelessWidget {
                     offset: const Offset(0, 3))
               ],
             ),
-            child: Text(text,
-                style: GoogleFonts.outfit(
-                    fontSize: 14, height: 1.45, color: Colors.white)),
+            child: RichText(
+              text: _buildHighlightedText(
+                text,
+                GoogleFonts.outfit(
+                  fontSize: 14,
+                  height: 1.45,
+                  color: Colors.white,
+                ),
+              ),
+            ),
           ),
           if (timeStr.isNotEmpty) ...[
             const SizedBox(height: 3),
@@ -1048,18 +1777,31 @@ class _TextMessage extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: AppColors.surface2,
+              color: highlighted
+                  ? AppColors.purple.withOpacity(0.14)
+                  : AppColors.surface2,
+              border: Border.all(
+                color: highlighted
+                    ? AppColors.purpleLight.withOpacity(0.55)
+                    : AppColors.border,
+              ),
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(18),
                 topRight: Radius.circular(18),
                 bottomRight: Radius.circular(18),
                 bottomLeft: Radius.circular(4),
               ),
-              border: Border.all(color: AppColors.border),
             ),
-            child: Text(text,
-                style: GoogleFonts.outfit(
-                    fontSize: 14, height: 1.45, color: AppColors.text)),
+            child: RichText(
+              text: _buildHighlightedText(
+                text,
+                GoogleFonts.outfit(
+                  fontSize: 14,
+                  height: 1.45,
+                  color: AppColors.text,
+                ),
+              ),
+            ),
           ),
           if (timeStr.isNotEmpty) ...[
             const SizedBox(height: 3),
@@ -1082,8 +1824,11 @@ class _TrackMessage extends StatelessWidget {
   final String partnerAvatarUrl;
   final int? matchId;
   final int? chatId;
+  final int? groupChatId;
+  final bool useGroupChat;
   final bool useDirectThread;
   final VoidCallback onReacted;
+  final VoidCallback? onDelete;
   const _TrackMessage(
       {required this.msg,
       required this.isMe,
@@ -1091,8 +1836,11 @@ class _TrackMessage extends StatelessWidget {
       required this.partnerAvatarUrl,
       required this.matchId,
       required this.chatId,
+      required this.groupChatId,
+      required this.useGroupChat,
       required this.useDirectThread,
-      required this.onReacted});
+      required this.onReacted,
+      this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -1227,7 +1975,10 @@ class _TrackMessage extends StatelessWidget {
                       onTap: messageId != null
                           ? () async {
                               try {
-                                if (useDirectThread) {
+                                if (useGroupChat) {
+                                  await ApiService().reactToGroupMessage(
+                                      groupChatId!, messageId, emoji);
+                                } else if (useDirectThread) {
                                   await ApiService().reactToDirectMessage(
                                       chatId!, messageId, emoji);
                                 } else {
@@ -1331,7 +2082,10 @@ class _TrackMessage extends StatelessWidget {
                 onTap: () async {
                   Navigator.pop(context);
                   try {
-                    if (useDirectThread) {
+                    if (useGroupChat) {
+                      await ApiService()
+                          .reactToGroupMessage(groupChatId!, messageId, emoji);
+                    } else if (useDirectThread) {
                       await ApiService()
                           .reactToDirectMessage(chatId!, messageId, emoji);
                     } else {
@@ -1355,6 +2109,21 @@ class _TrackMessage extends StatelessWidget {
               );
             }).toList(),
           ),
+          if (isMe && onDelete != null) ...[
+            const SizedBox(height: 10),
+            const Divider(color: AppColors.border, height: 1),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded,
+                  color: Color(0xFFef4444), size: 20),
+              title: Text('Delete message',
+                  style: GoogleFonts.outfit(
+                      fontSize: 14, color: const Color(0xFFef4444))),
+              onTap: () {
+                Navigator.pop(context);
+                onDelete!();
+              },
+            ),
+          ],
         ]),
       ),
     );
@@ -1780,6 +2549,24 @@ class _ChatNowPlayingBar extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: provider.stop,
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: AppColors.glass,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      color: AppColors.text3,
+                      size: 16,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -1806,7 +2593,7 @@ class _ChatSearchResult {
 class _ChatSearchScreen extends StatefulWidget {
   final String partnerName;
   final List<_ChatSearchResult> results;
-  final void Function(int index) onJumpToMessage;
+  final void Function(int index, String query) onJumpToMessage;
   final IconData Function(String type) typeIconBuilder;
 
   const _ChatSearchScreen({
@@ -1864,6 +2651,54 @@ class _ChatSearchScreenState extends State<_ChatSearchScreen> {
     final prefix = start > 0 ? '…' : '';
     final suffix = end < text.length ? '…' : '';
     return '$prefix${text.substring(start, end)}$suffix';
+  }
+
+  InlineSpan _buildHighlightedSpan(String text, String query,
+      {required bool selected}) {
+    final normalized = query.trim().toLowerCase();
+    final baseStyle = GoogleFonts.outfit(
+      fontSize: 14,
+      color: AppColors.text,
+      height: 1.4,
+      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+    );
+    if (normalized.isEmpty) {
+      return TextSpan(text: text, style: baseStyle);
+    }
+    final lower = text.toLowerCase();
+    final matches = <int>[];
+    var start = 0;
+    while (start < lower.length) {
+      final idx = lower.indexOf(normalized, start);
+      if (idx < 0) break;
+      matches.add(idx);
+      start = idx + normalized.length;
+    }
+    if (matches.isEmpty) {
+      return TextSpan(text: text, style: baseStyle);
+    }
+    final children = <InlineSpan>[];
+    var cursor = 0;
+    for (final idx in matches) {
+      if (idx > cursor) {
+        children.add(TextSpan(text: text.substring(cursor, idx)));
+      }
+      children.add(
+        TextSpan(
+          text: text.substring(idx, idx + normalized.length),
+          style: baseStyle.copyWith(
+            color: AppColors.purpleLight,
+            fontWeight: FontWeight.w800,
+            backgroundColor: AppColors.purpleLight.withOpacity(0.15),
+          ),
+        ),
+      );
+      cursor = idx + normalized.length;
+    }
+    if (cursor < text.length) {
+      children.add(TextSpan(text: text.substring(cursor)));
+    }
+    return TextSpan(style: baseStyle, children: children);
   }
 
   @override
@@ -2017,7 +2852,8 @@ class _ChatSearchScreenState extends State<_ChatSearchScreen> {
                         final item = results[i];
                         final selected = i == _selectedIndex;
                         return GestureDetector(
-                          onTap: () => widget.onJumpToMessage(item.index),
+                          onTap: () =>
+                              widget.onJumpToMessage(item.index, query),
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 180),
                             padding: const EdgeInsets.all(14),
@@ -2064,17 +2900,13 @@ class _ChatSearchScreenState extends State<_ChatSearchScreen> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        _snippet(item.text, query),
+                                      RichText(
                                         maxLines: 3,
                                         overflow: TextOverflow.ellipsis,
-                                        style: GoogleFonts.outfit(
-                                          fontSize: 14,
-                                          color: AppColors.text,
-                                          height: 1.4,
-                                          fontWeight: selected
-                                              ? FontWeight.w700
-                                              : FontWeight.w500,
+                                        text: _buildHighlightedSpan(
+                                          _snippet(item.text, query),
+                                          query,
+                                          selected: selected,
                                         ),
                                       ),
                                       const SizedBox(height: 6),
@@ -2132,6 +2964,302 @@ class _SearchNavButton extends StatelessWidget {
           color: enabled ? AppColors.text : AppColors.text3,
           size: 22,
         ),
+      ),
+    );
+  }
+}
+
+// ─── Group Members Sheet ──────────────────────────────────────────────────────
+
+class _GroupMembersSheet extends StatefulWidget {
+  final List<Map<String, dynamic>> members;
+  final int ownerId;
+  final int currentUserId;
+  final bool amIOwner;
+  final int groupChatId;
+  final VoidCallback onMemberRemoved;
+  final void Function(int) onOwnerTransferred;
+
+  const _GroupMembersSheet({
+    required this.members,
+    required this.ownerId,
+    required this.currentUserId,
+    required this.amIOwner,
+    required this.groupChatId,
+    required this.onMemberRemoved,
+    required this.onOwnerTransferred,
+  });
+
+  @override
+  State<_GroupMembersSheet> createState() => _GroupMembersSheetState();
+}
+
+class _GroupMembersSheetState extends State<_GroupMembersSheet> {
+  late List<Map<String, dynamic>> _members;
+
+  @override
+  void initState() {
+    super.initState();
+    _members = List<Map<String, dynamic>>.from(widget.members);
+  }
+
+  Future<void> _remove(Map<String, dynamic> member) async {
+    final id = (member['id'] as num?)?.toInt() ?? 0;
+    final name = (member['display_name'] ?? member['username'] ?? 'user').toString();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Remove $name?',
+            style: GoogleFonts.outfit(
+                fontWeight: FontWeight.w700, color: AppColors.text)),
+        content: Text('They will be removed from the group.',
+            style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel',
+                style: GoogleFonts.outfit(color: AppColors.text3)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Remove',
+                style: GoogleFonts.outfit(color: const Color(0xFFef4444))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await ApiService().removeGroupChatMember(widget.groupChatId, id);
+      setState(() => _members.removeWhere(
+          (m) => (m['id'] as num?)?.toInt() == id));
+      widget.onMemberRemoved();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not remove member')));
+    }
+  }
+
+  Future<void> _transferOwner(Map<String, dynamic> member) async {
+    final id = (member['id'] as num?)?.toInt() ?? 0;
+    final name = (member['display_name'] ?? member['username'] ?? 'user').toString();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Transfer admin to $name?',
+            style: GoogleFonts.outfit(
+                fontWeight: FontWeight.w700, color: AppColors.text)),
+        content: Text(
+            'You will become a regular member. This cannot be undone without their approval.',
+            style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel',
+                style: GoogleFonts.outfit(color: AppColors.text3)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Transfer',
+                style: GoogleFonts.outfit(color: AppColors.purpleLight)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await ApiService().transferGroupChatOwner(widget.groupChatId, id);
+      setState(() {
+        for (final m in _members) {
+          if ((m['id'] as num?)?.toInt() == id) {
+            m['role'] = 'owner';
+          } else if ((m['id'] as num?)?.toInt() == widget.currentUserId) {
+            m['role'] = 'member';
+          }
+        }
+      });
+      widget.onOwnerTransferred(id);
+      if (mounted) Navigator.pop(context);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not transfer admin')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.6,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+            child: Row(
+              children: [
+                Text(
+                  'Members',
+                  style: GoogleFonts.outfit(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.text,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.purple.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '${_members.length}',
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.purpleLight,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Flexible(
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: _members.length,
+              itemBuilder: (_, i) {
+                final m = _members[i];
+                final uid = (m['id'] as num?)?.toInt() ?? 0;
+                final name = (m['display_name'] ?? m['username'] ?? 'User').toString();
+                final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
+                final avatarUrl = (m['avatar_url'] ?? '').toString();
+                final isOwner = m['role'] == 'owner';
+                final isMe = uid == widget.currentUserId;
+                return ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+                  leading: Container(
+                    width: 42,
+                    height: 42,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: AppColors.gradMixed,
+                    ),
+                    child: avatarUrl.isNotEmpty
+                        ? ClipOval(
+                            child: CachedNetworkImage(
+                              imageUrl: avatarUrl,
+                              fit: BoxFit.cover,
+                              errorWidget: (_, __, ___) => Center(
+                                child: Text(initial,
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white)),
+                              ),
+                            ),
+                          )
+                        : Center(
+                            child: Text(initial,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white)),
+                          ),
+                  ),
+                  title: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          isMe ? '$name (you)' : name,
+                          style: GoogleFonts.outfit(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.text,
+                          ),
+                        ),
+                      ),
+                      if (isOwner) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.purpleDark.withOpacity(0.35),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '👑 Admin',
+                            style: GoogleFonts.outfit(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.purpleLight,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  trailing: (widget.amIOwner && !isMe)
+                      ? PopupMenuButton<String>(
+                          color: AppColors.surface,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14)),
+                          icon: const Icon(Icons.more_vert_rounded,
+                              size: 18, color: AppColors.text3),
+                          onSelected: (v) {
+                            if (v == 'remove') _remove(m);
+                            if (v == 'transfer') _transferOwner(m);
+                          },
+                          itemBuilder: (_) => [
+                            PopupMenuItem(
+                              value: 'remove',
+                              child: Row(children: [
+                                const Icon(Icons.person_remove_rounded,
+                                    size: 16, color: Color(0xFFef4444)),
+                                const SizedBox(width: 8),
+                                Text('Remove',
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 13,
+                                        color: const Color(0xFFef4444))),
+                              ]),
+                            ),
+                            PopupMenuItem(
+                              value: 'transfer',
+                              child: Row(children: [
+                                const Icon(Icons.manage_accounts_rounded,
+                                    size: 16, color: AppColors.purpleLight),
+                                const SizedBox(width: 8),
+                                Text('Make Admin',
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 13,
+                                        color: AppColors.purpleLight)),
+                              ]),
+                            ),
+                          ],
+                        )
+                      : null,
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3244,10 +4372,16 @@ class _AvatarFallback extends StatelessWidget {
 class _SharedContentScreen extends StatefulWidget {
   final List<Map<String, dynamic>> messages;
   final String partnerName;
+  final int partnerId;
+  final int currentUserId;
+  final void Function(int index)? onJumpToMessage;
 
   const _SharedContentScreen({
     required this.messages,
     required this.partnerName,
+    required this.partnerId,
+    required this.currentUserId,
+    this.onJumpToMessage,
   });
 
   @override
@@ -3261,7 +4395,7 @@ class _SharedContentScreenState extends State<_SharedContentScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 5, vsync: this);
+    _tabCtrl = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -3277,9 +4411,19 @@ class _SharedContentScreenState extends State<_SharedContentScreen>
       .toList();
 
   List<Map<String, dynamic>> get _images => _byType('image');
-  List<Map<String, dynamic>> get _playlists => _byType('playlist');
-  List<Map<String, dynamic>> get _musicOnly => _byType('track');
-  List<Map<String, dynamic>> get _albumsOnly => _byType('album');
+
+  List<Map<String, dynamic>> get _media {
+    final tracks = _byType('track');
+    final albums = _byType('album');
+    final playlists = _byType('playlist');
+    final all = [...tracks, ...albums, ...playlists];
+    all.sort((a, b) {
+      final ta = a['sent_at']?.toString() ?? '';
+      final tb = b['sent_at']?.toString() ?? '';
+      return tb.compareTo(ta);
+    });
+    return all;
+  }
 
   List<Map<String, dynamic>> get _links {
     final regex = RegExp(r'https?://\S+');
@@ -3297,6 +4441,15 @@ class _SharedContentScreenState extends State<_SharedContentScreen>
         .toList()
         .reversed
         .toList();
+  }
+
+  void _jumpToMsg(Map<String, dynamic> m) {
+    if (widget.onJumpToMessage == null) return;
+    final idx = widget.messages.indexOf(m);
+    if (idx >= 0) {
+      Navigator.of(context).pop();
+      widget.onJumpToMessage!(idx);
+    }
   }
 
   @override
@@ -3340,156 +4493,309 @@ class _SharedContentScreenState extends State<_SharedContentScreen>
           tabs: const [
             Tab(text: 'Music'),
             Tab(text: 'Photos'),
-            Tab(text: 'Albums'),
-            Tab(text: 'Playlists'),
             Tab(text: 'Links'),
+            Tab(text: 'Groups'),
           ],
         ),
       ),
       body: TabBarView(
         controller: _tabCtrl,
         children: [
-          _MusicTab(items: _musicOnly),
-          _MediaTab(images: _images),
-          _AlbumTab(items: _albumsOnly),
-          _PlaylistTab(items: _playlists),
-          _LinksTab(links: _links),
+          _MusicContentTab(items: _media, onJump: _jumpToMsg),
+          _PhotoGridTab(images: _images, onJump: _jumpToMsg),
+          _LinksTab(links: _links, onJump: _jumpToMsg),
+          _SharedGroupsTab(
+            currentUserId: widget.currentUserId,
+            partnerId: widget.partnerId,
+          ),
         ],
       ),
     );
   }
 }
 
-class _MusicTab extends StatelessWidget {
+class _MusicContentTab extends StatefulWidget {
   final List<Map<String, dynamic>> items;
-  const _MusicTab({required this.items});
+  final void Function(Map<String, dynamic>)? onJump;
+  const _MusicContentTab({required this.items, this.onJump});
+
+  @override
+  State<_MusicContentTab> createState() => _MusicContentTabState();
+}
+
+class _MusicContentTabState extends State<_MusicContentTab> {
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<Map<String, dynamic>> get _filtered {
+    if (_query.isEmpty) return widget.items;
+    final q = _query.toLowerCase();
+    return widget.items.where((m) {
+      final type = m['type']?.toString() ?? '';
+      final title = (type == 'album'
+                  ? m['album_title']
+                  : type == 'playlist'
+                      ? m['playlist_title']
+                      : m['track_title'])
+              ?.toString()
+              .toLowerCase() ??
+          '';
+      final artist = (type == 'album'
+                  ? m['album_artist']
+                  : type == 'track'
+                      ? m['track_artist']
+                      : null)
+              ?.toString()
+              .toLowerCase() ??
+          '';
+      final note = (m['note'] ?? '').toString().toLowerCase();
+      return title.contains(q) || artist.contains(q) || note.contains(q);
+    }).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (items.isEmpty) {
-      return _SharedEmptyState(
-        icon: Icons.music_note_rounded,
-        label: 'No music shared yet',
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-      itemCount: items.length,
-      itemBuilder: (_, i) {
-        final m = items[i];
-        final title = (m['track_title'] ?? 'Unknown').toString();
-        final artist = (m['track_artist'] ?? '').toString();
-        final coverUrl = (m['track_cover_url'] ?? '').toString();
-        final note = (m['note'] ?? '').toString().trim();
-        final time = _formatChatTime(m['sent_at']?.toString());
+    final items = _filtered;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _query = v.trim()),
+              style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text),
+              decoration: InputDecoration(
+                hintText: 'Search music, albums, playlists...',
+                hintStyle:
+                    GoogleFonts.outfit(fontSize: 14, color: AppColors.text3),
+                prefixIcon: const Icon(Icons.search_rounded,
+                    color: AppColors.text3, size: 18),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : GestureDetector(
+                        onTap: () => setState(() {
+                          _searchCtrl.clear();
+                          _query = '';
+                        }),
+                        child: const Icon(Icons.close_rounded,
+                            color: AppColors.text3, size: 18),
+                      ),
+                border: InputBorder.none,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: items.isEmpty
+              ? _SharedEmptyState(
+                  icon: Icons.music_note_rounded,
+                  label: _query.isEmpty
+                      ? 'No media shared yet'
+                      : 'No results for "$_query"',
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+                  itemCount: items.length,
+                  itemBuilder: (_, i) {
+                    final m = items[i];
+                    final type = m['type']?.toString() ?? 'track';
+                    final time = _formatChatTime(m['sent_at']?.toString());
+                    final note = (m['note'] ?? '').toString().trim();
 
-        return _SharedCard(
-          icon: Icons.music_note_rounded,
-          title: title,
-          subtitle: artist,
-          tertiary: note.isNotEmpty ? note : null,
-          imageUrl: coverUrl,
-          time: time,
-          badge: 'Track',
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => PlayerScreen(track: m)),
-            );
-          },
-        );
-      },
+                    if (type == 'album') {
+                      final title = (m['album_title'] ?? 'Album').toString();
+                      final artist = (m['album_artist'] ?? '').toString();
+                      final coverUrl = (m['album_cover_url'] ?? '').toString();
+                      final albumId =
+                          int.tryParse((m['album_id'] ?? '').toString());
+                      return _SharedCard(
+                        icon: Icons.album_rounded,
+                        title: title,
+                        subtitle: artist,
+                        tertiary: note.isNotEmpty ? note : null,
+                        imageUrl: coverUrl,
+                        time: time,
+                        badge: 'Album',
+                        onJump: widget.onJump != null
+                            ? () => widget.onJump!(m)
+                            : null,
+                        onTap: albumId == null
+                            ? null
+                            : () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) =>
+                                        AlbumScreen(albumId: albumId))),
+                      );
+                    }
+
+                    if (type == 'playlist') {
+                      final title =
+                          (m['playlist_title'] ?? 'Playlist').toString();
+                      final coverUrl =
+                          (m['playlist_cover_url'] ?? '').toString();
+                      final playlistId = (m['playlist_id'] as num?)?.toInt();
+                      return _SharedCard(
+                        icon: Icons.queue_music_rounded,
+                        title: title,
+                        subtitle: 'Playlist',
+                        tertiary: note.isNotEmpty ? note : null,
+                        imageUrl: coverUrl,
+                        time: time,
+                        badge: 'Playlist',
+                        onJump: widget.onJump != null
+                            ? () => widget.onJump!(m)
+                            : null,
+                        onTap: playlistId == null
+                            ? null
+                            : () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => PlaylistScreen(
+                                        playlistId: playlistId))),
+                      );
+                    }
+
+                    // track
+                    final title = (m['track_title'] ?? 'Unknown').toString();
+                    final artist = (m['track_artist'] ?? '').toString();
+                    final coverUrl = (m['track_cover_url'] ?? '').toString();
+                    return _SharedCard(
+                      icon: Icons.music_note_rounded,
+                      title: title,
+                      subtitle: artist,
+                      tertiary: note.isNotEmpty ? note : null,
+                      imageUrl: coverUrl,
+                      time: time,
+                      badge: 'Track',
+                      onJump: widget.onJump != null
+                          ? () => widget.onJump!(m)
+                          : null,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => PlayerScreen(
+                            track: {
+                              'title': title,
+                              'artist': artist,
+                              'cover_url': coverUrl,
+                              'spotify_id':
+                                  (m['spotify_track_id'] ?? '').toString(),
+                              'preview_url':
+                                  (m['track_preview_url'] ?? '').toString(),
+                              if (note.isNotEmpty) 'queue_context': note,
+                            },
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }
 
-class _AlbumTab extends StatelessWidget {
-  final List<Map<String, dynamic>> items;
-  const _AlbumTab({required this.items});
+class _SharedGroupsTab extends StatefulWidget {
+  final int currentUserId;
+  final int partnerId;
+
+  const _SharedGroupsTab({
+    required this.currentUserId,
+    required this.partnerId,
+  });
 
   @override
-  Widget build(BuildContext context) {
-    if (items.isEmpty) {
-      return _SharedEmptyState(
-        icon: Icons.album_rounded,
-        label: 'No albums shared yet',
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-      itemCount: items.length,
-      itemBuilder: (_, i) {
-        final m = items[i];
-        final title = (m['album_title'] ?? 'Album').toString();
-        final artist = (m['album_artist'] ?? '').toString();
-        final coverUrl = (m['album_cover_url'] ?? '').toString();
-        final albumId = int.tryParse((m['album_id'] ?? '').toString());
-        final note = (m['note'] ?? '').toString().trim();
-        final time = _formatChatTime(m['sent_at']?.toString());
-        return _SharedCard(
-          icon: Icons.album_rounded,
-          title: title,
-          subtitle: artist,
-          tertiary: note.isNotEmpty ? note : null,
-          imageUrl: coverUrl,
-          time: time,
-          badge: 'Album',
-          onTap: albumId == null
-              ? null
-              : () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => AlbumScreen(albumId: albumId),
-                    ),
-                  );
-                },
-        );
-      },
-    );
-  }
+  State<_SharedGroupsTab> createState() => _SharedGroupsTabState();
 }
 
-class _PlaylistTab extends StatelessWidget {
-  final List<Map<String, dynamic>> items;
-  const _PlaylistTab({required this.items});
+class _SharedGroupsTabState extends State<_SharedGroupsTab> {
+  bool _loading = true;
+  List<Map<String, dynamic>> _rooms = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRooms();
+  }
+
+  Future<void> _loadRooms() async {
+    try {
+      final raw = await ApiService().getActiveRooms(limit: 100);
+      final rooms = raw
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .where((room) {
+        final ids = ((room['participant_user_ids'] as List?) ?? const [])
+            .map((id) => (id as num?)?.toInt())
+            .whereType<int>()
+            .toSet();
+        return ids.contains(widget.currentUserId) &&
+            ids.contains(widget.partnerId);
+      }).toList();
+      if (!mounted) return;
+      setState(() {
+        _rooms = rooms;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (items.isEmpty) {
-      return _SharedEmptyState(
-        icon: Icons.queue_music_rounded,
-        label: 'No playlists shared yet',
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(
+          color: AppColors.purpleLight,
+          strokeWidth: 2,
+        ),
+      );
+    }
+    if (_rooms.isEmpty) {
+      return const _SharedEmptyState(
+        icon: Icons.groups_rounded,
+        label: 'No shared groups yet',
       );
     }
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-      itemCount: items.length,
+      itemCount: _rooms.length,
       itemBuilder: (_, i) {
-        final m = items[i];
-        final title = (m['playlist_title'] ?? 'Playlist').toString();
-        final coverUrl = (m['playlist_cover_url'] ?? '').toString();
-        final playlistId = (m['playlist_id'] as num?)?.toInt();
-        final note = (m['note'] ?? '').toString().trim();
-        final time = _formatChatTime(m['sent_at']?.toString());
+        final room = _rooms[i];
+        final count = (room['participant_count'] as num?)?.toInt() ?? 0;
+        final active = room['is_active'] != false;
         return _SharedCard(
-          icon: Icons.queue_music_rounded,
-          title: title,
-          subtitle: 'Playlist',
-          tertiary: note.isNotEmpty ? note : null,
-          imageUrl: coverUrl,
-          time: time,
-          badge: 'Playlist',
-          onTap: playlistId == null
-              ? null
-              : () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PlaylistScreen(playlistId: playlistId),
-                    ),
-                  );
-                },
+          icon: Icons.groups_rounded,
+          title: (room['name'] ?? 'Listening room').toString(),
+          subtitle: '$count participant${count == 1 ? '' : 's'}',
+          tertiary: active ? 'Active now' : 'Inactive',
+          imageUrl: (room['host'] as Map?)?['avatar_url']?.toString() ?? '',
+          time: '',
+          badge: active ? 'Active' : 'Room',
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ListeningPartyScreen(room: room),
+            ),
+          ),
         );
       },
     );
@@ -3505,6 +4811,7 @@ class _SharedCard extends StatelessWidget {
   final String time;
   final String badge;
   final VoidCallback? onTap;
+  final VoidCallback? onJump;
 
   const _SharedCard({
     required this.icon,
@@ -3515,12 +4822,14 @@ class _SharedCard extends StatelessWidget {
     required this.time,
     required this.badge,
     this.onTap,
+    this.onJump,
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onJump,
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(14),
@@ -3639,9 +4948,10 @@ class _SharedCard extends StatelessWidget {
   }
 }
 
-class _MediaTab extends StatelessWidget {
+class _PhotoGridTab extends StatelessWidget {
   final List<Map<String, dynamic>> images;
-  const _MediaTab({required this.images});
+  final void Function(Map<String, dynamic>)? onJump;
+  const _PhotoGridTab({required this.images, this.onJump});
 
   @override
   Widget build(BuildContext context) {
@@ -3660,51 +4970,66 @@ class _MediaTab extends StatelessWidget {
       ),
       itemCount: images.length,
       itemBuilder: (_, i) {
-        final url =
-            (images[i]['image_url'] ?? images[i]['url'] ?? '').toString();
+        final url = (images[i]['image_url'] ??
+                images[i]['image_data_url'] ??
+                images[i]['url'] ??
+                '')
+            .toString();
         if (url.isEmpty) return const SizedBox.shrink();
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: CachedNetworkImage(
-                  imageUrl: url,
-                  fit: BoxFit.cover,
-                  placeholder: (_, __) => Container(color: AppColors.surface),
-                  errorWidget: (_, __, ___) => Container(
-                    color: AppColors.surface,
-                    child: const Icon(Icons.broken_image_rounded,
-                        color: AppColors.text3),
-                  ),
-                ),
+        return GestureDetector(
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => _SharedImageViewerScreen(
+                images: images,
+                initialIndex: i,
               ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Color(0xAA000000)],
-                    ),
-                  ),
-                  child: Text(
-                    _formatChatTime(images[i]['sent_at']?.toString()),
-                    textAlign: TextAlign.right,
-                    style: GoogleFonts.outfit(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
+            ),
+          ),
+          onLongPress: onJump != null ? () => onJump!(images[i]) : null,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: CachedNetworkImage(
+                    imageUrl: url,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) => Container(color: AppColors.surface),
+                    errorWidget: (_, __, ___) => Container(
+                      color: AppColors.surface,
+                      child: const Icon(Icons.broken_image_rounded,
+                          color: AppColors.text3),
                     ),
                   ),
                 ),
-              ),
-            ],
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, Color(0xAA000000)],
+                      ),
+                    ),
+                    child: Text(
+                      _formatChatTime(images[i]['sent_at']?.toString()),
+                      textAlign: TextAlign.right,
+                      style: GoogleFonts.outfit(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -3714,7 +5039,8 @@ class _MediaTab extends StatelessWidget {
 
 class _LinksTab extends StatelessWidget {
   final List<Map<String, dynamic>> links;
-  const _LinksTab({required this.links});
+  final void Function(Map<String, dynamic>)? onJump;
+  const _LinksTab({required this.links, this.onJump});
 
   @override
   Widget build(BuildContext context) {
@@ -3739,6 +5065,7 @@ class _LinksTab extends StatelessWidget {
           imageUrl: '',
           time: time,
           badge: 'Link',
+          onJump: onJump != null ? () => onJump!(m) : null,
         );
       },
     );
@@ -3797,6 +5124,123 @@ class _SharedEmptyState extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SharedImageViewerScreen extends StatefulWidget {
+  final List<Map<String, dynamic>> images;
+  final int initialIndex;
+
+  const _SharedImageViewerScreen({
+    required this.images,
+    required this.initialIndex,
+  });
+
+  @override
+  State<_SharedImageViewerScreen> createState() =>
+      _SharedImageViewerScreenState();
+}
+
+class _SharedImageViewerScreenState extends State<_SharedImageViewerScreen> {
+  late final PageController _pageController;
+  late int _currentIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  String _imageUrl(Map<String, dynamic> image) {
+    return (image['image_url'] ?? image['image_data_url'] ?? image['url'] ?? '')
+        .toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          PageView.builder(
+            controller: _pageController,
+            itemCount: widget.images.length,
+            onPageChanged: (index) => setState(() => _currentIndex = index),
+            itemBuilder: (_, i) {
+              final url = _imageUrl(widget.images[i]);
+              return InteractiveViewer(
+                minScale: 0.8,
+                maxScale: 4,
+                child: Center(
+                  child: CachedNetworkImage(
+                    imageUrl: url,
+                    fit: BoxFit.contain,
+                    errorWidget: (_, __, ___) => const Icon(
+                      Icons.broken_image_rounded,
+                      color: Colors.white70,
+                      size: 40,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Row(
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.42),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: const Icon(
+                        Icons.arrow_back_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.42),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: Text(
+                      '${_currentIndex + 1} / ${widget.images.length}',
+                      style: GoogleFonts.outfit(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
