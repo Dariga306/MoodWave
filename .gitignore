@@ -51,3 +51,21 @@ moodwave-backend/uvicorn*.log
 # ── Dev tools ────────────────────────────────────────────────────────
 .claude/
 .codex-logs/
+
+# ── Backend Temporary / Cache ───────────────────────────────────────
+moodwave-backend/tmp/
+moodwave-backend/tmp/*
+moodwave-backend/logs/
+
+# ── Flutter Generated Files ─────────────────────────────────────────
+diplom-frontend/pubspec.lock
+diplom-frontend/android/gradle.properties
+diplom-frontend/android/.gradle/
+diplom-frontend/ios/Podfile.lock
+diplom-frontend/macos/Flutter/GeneratedPluginRegistrant.swift
+diplom-frontend/windows/flutter/generated_plugin*
+diplom-frontend/linux/flutter/generated_plugin*
+diplom-frontend/.metadata
+
+# ── Alembic / Migrations (опционально) ─────────────────────────────
+# moodwave-backend/alembic/versions/   # раскомментируй, если не хотите коммитить миграции
