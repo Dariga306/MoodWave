@@ -262,8 +262,10 @@ class _LyricsScreenState extends State<LyricsScreen> {
       }
 
       candidates.sort((a, b) => _lyricsScore(b).compareTo(_lyricsScore(a)));
+
+      // Pass 1: strict match + synced lyrics
       for (final map in candidates) {
-        if (!_looksLikeRequestedSong(map)) continue;
+        if (!_looksLikeRequestedSong(map, strict: true)) continue;
         final syncedLyrics = map['syncedLyrics'] as String?;
         if (syncedLyrics == null || syncedLyrics.isEmpty) continue;
         final lines = _parseSyncedLyrics(syncedLyrics);
@@ -272,6 +274,46 @@ class _LyricsScreenState extends State<LyricsScreen> {
         setState(() {
           _syncedLines = lines;
           _lyricsLines = lines.map((line) => line.text).toList();
+          _loading = false;
+        });
+        _startTicker();
+        return;
+      }
+
+      // Pass 2: relaxed match (title only, no artist requirement) + synced lyrics
+      for (final map in candidates) {
+        if (!_looksLikeRequestedSong(map, strict: false)) continue;
+        final syncedLyrics = map['syncedLyrics'] as String?;
+        if (syncedLyrics == null || syncedLyrics.isEmpty) continue;
+        final lines = _parseSyncedLyrics(syncedLyrics);
+        if (lines.isEmpty) continue;
+        if (!mounted) return;
+        setState(() {
+          _syncedLines = lines;
+          _lyricsLines = lines.map((line) => line.text).toList();
+          _loading = false;
+        });
+        _startTicker();
+        return;
+      }
+
+      // Pass 3: relaxed match + plain lyrics with approximate sync
+      for (final map in candidates) {
+        if (!_looksLikeRequestedSong(map, strict: false)) continue;
+        final plainLyrics = map['plainLyrics'] as String?;
+        if (plainLyrics == null || plainLyrics.isEmpty) continue;
+        final lines = plainLyrics
+            .split('\n')
+            .map((l) => l.trim())
+            .where((l) => l.isNotEmpty)
+            .toList();
+        if (lines.isEmpty) continue;
+        final approx = _buildApproximateSyncedLines(lines, widget.duration);
+        if (!mounted) return;
+        setState(() {
+          _lyricsLines = lines;
+          _syncedLines = approx.any((l) => l.timeMs > 0) ? approx : [];
+          _activeIndex = _syncedLines.isNotEmpty ? 0 : -1;
           _loading = false;
         });
         _startTicker();
@@ -352,29 +394,27 @@ class _LyricsScreenState extends State<LyricsScreen> {
         durationPenalty;
   }
 
-  bool _looksLikeRequestedSong(Map item) {
+  bool _looksLikeRequestedSong(Map item, {bool strict = true}) {
     final itemTitle = (item['trackName'] ?? item['name'] ?? '').toString();
     final itemArtist = (item['artistName'] ?? item['artist'] ?? '').toString();
-    final titleTokens =
-        _tokens(_cleanTitle.isNotEmpty ? _cleanTitle : widget.title);
-    if (titleTokens.isNotEmpty &&
-        !_strongTitleMatch(
-          itemTitle,
-          _cleanTitle.isNotEmpty ? _cleanTitle : widget.title,
-        )) {
+    final wantedTitle = _cleanTitle.isNotEmpty ? _cleanTitle : widget.title;
+    if (!_strongTitleMatch(itemTitle, wantedTitle)) {
       return false;
     }
-    final artistMatch = _artistVariants.any(
-      (artist) => _strongTitleMatch(itemArtist, artist),
-    );
-    if (itemArtist.isNotEmpty && !artistMatch) {
-      return false;
+    if (strict) {
+      final artistMatch = _artistVariants.any(
+        (artist) => _strongTitleMatch(itemArtist, artist),
+      );
+      if (itemArtist.isNotEmpty && !artistMatch) {
+        return false;
+      }
     }
     final durationSeconds = widget.duration.inSeconds;
     final itemDuration = (item['duration'] as num?)?.toInt() ?? 0;
+    final maxDiff = strict ? 8 : 20;
     if (durationSeconds > 0 &&
         itemDuration > 0 &&
-        (durationSeconds - itemDuration).abs() > 8) {
+        (durationSeconds - itemDuration).abs() > maxDiff) {
       return false;
     }
     return true;

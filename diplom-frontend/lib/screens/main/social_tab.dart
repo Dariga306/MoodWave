@@ -1141,7 +1141,10 @@ class _ChatsViewState extends State<_ChatsView>
   bool get wantKeepAlive => true;
 
   List<dynamic> _chats = [];
+  List<Map<String, dynamic>> _liveList = [];
   Map<int, Map<String, dynamic>> _liveActivityByUser = {};
+  final Set<String> _hiddenChatKeys = {};
+  final Set<String> _mutedChatKeys = {};
   bool _loading = true;
 
   @override
@@ -1154,15 +1157,15 @@ class _ChatsViewState extends State<_ChatsView>
     try {
       final data = await ApiService().getChats();
       Map<int, Map<String, dynamic>> liveMap = {};
+      List<Map<String, dynamic>> liveList = [];
       try {
         final activity = await ApiService().getFriendsActivity();
         final live = (activity['live'] as List?) ?? const [];
         for (final item in live.whereType<Map>()) {
           final row = Map<String, dynamic>.from(item);
           final id = (row['id'] as num?)?.toInt();
-          if (id != null) {
-            liveMap[id] = row;
-          }
+          if (id != null) liveMap[id] = row;
+          liveList.add(row);
         }
       } catch (_) {}
 
@@ -1170,6 +1173,7 @@ class _ChatsViewState extends State<_ChatsView>
       setState(() {
         _chats = data;
         _liveActivityByUser = liveMap;
+        _liveList = liveList;
         _loading = false;
       });
     } catch (_) {
@@ -1177,9 +1181,19 @@ class _ChatsViewState extends State<_ChatsView>
       setState(() {
         _chats = [];
         _liveActivityByUser = {};
+        _liveList = [];
         _loading = false;
       });
     }
+  }
+
+  String _chatKey(Map<String, dynamic> chat) {
+    final gid = chat['group_chat_id'];
+    final cid = chat['chat_id'];
+    final mid = chat['match_id'];
+    if (gid != null) return 'g:$gid';
+    if (cid != null) return 'c:$cid';
+    return 'm:$mid';
   }
 
   @override
@@ -1190,7 +1204,11 @@ class _ChatsViewState extends State<_ChatsView>
           child: CircularProgressIndicator(
               strokeWidth: 2, color: AppColors.purpleLight));
     }
-    if (_chats.isEmpty) {
+    final visibleChats = _chats
+        .where((c) => !_hiddenChatKeys.contains(
+            _chatKey(Map<String, dynamic>.from(c as Map))))
+        .toList();
+    if (visibleChats.isEmpty && _liveList.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(36),
@@ -1228,20 +1246,85 @@ class _ChatsViewState extends State<_ChatsView>
       onRefresh: _load,
       color: AppColors.purpleLight,
       backgroundColor: AppColors.surface,
-      child: ListView.builder(
+      child: CustomScrollView(
         physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        itemCount: _chats.length,
-        itemBuilder: (_, i) {
-          final chat = Map<String, dynamic>.from(_chats[i] as Map);
-          final partner =
-              (chat['partner'] as Map<String, dynamic>?) ?? const {};
-          final partnerId = (partner['id'] as num?)?.toInt();
-          return _ChatItem(
-            chat: chat,
-            activity: partnerId == null ? null : _liveActivityByUser[partnerId],
-          );
-        },
+        slivers: [
+          // Live friends row
+          if (_liveList.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: const BoxDecoration(
+                          color: AppColors.pink,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Listening now',
+                        style: GoogleFonts.outfit(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.text2,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ]),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: 72,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _liveList.length,
+                        itemBuilder: (_, i) =>
+                            _LiveMiniCard(friend: _liveList[i]),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Divider(color: Color(0x0DFFFFFF), height: 1),
+                  ],
+                ),
+              ),
+            ),
+          // Chat list
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (_, i) {
+                  final chat =
+                      Map<String, dynamic>.from(visibleChats[i] as Map);
+                  final partner =
+                      (chat['partner'] as Map<String, dynamic>?) ?? const {};
+                  final partnerId = (partner['id'] as num?)?.toInt();
+                  final key = _chatKey(chat);
+                  return _ChatItem(
+                    chat: chat,
+                    activity:
+                        partnerId == null ? null : _liveActivityByUser[partnerId],
+                    isMuted: _mutedChatKeys.contains(key),
+                    onHide: () => setState(() => _hiddenChatKeys.add(key)),
+                    onToggleMute: () => setState(() {
+                      if (_mutedChatKeys.contains(key)) {
+                        _mutedChatKeys.remove(key);
+                      } else {
+                        _mutedChatKeys.add(key);
+                      }
+                    }),
+                  );
+                },
+                childCount: visibleChats.length,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1250,7 +1333,16 @@ class _ChatsViewState extends State<_ChatsView>
 class _ChatItem extends StatelessWidget {
   final Map<String, dynamic> chat;
   final Map<String, dynamic>? activity;
-  const _ChatItem({required this.chat, this.activity});
+  final bool isMuted;
+  final VoidCallback? onHide;
+  final VoidCallback? onToggleMute;
+  const _ChatItem({
+    required this.chat,
+    this.activity,
+    this.isMuted = false,
+    this.onHide,
+    this.onToggleMute,
+  });
 
   static String _cleanPreview(String? raw, String? type, String? timeStr) {
     if (raw == null || raw.isEmpty) {
@@ -1307,6 +1399,7 @@ class _ChatItem extends StatelessWidget {
                   partnerName: name,
                   partnerId: partner['id'] as int? ?? 0,
                   partnerAvatarUrl: (partner['avatar_url'] ?? '').toString()))),
+      onLongPress: () => _showChatOptions(context, name),
       child: Padding(
         padding: const EdgeInsets.only(bottom: 4),
         child: Container(
@@ -1470,6 +1563,95 @@ class _ChatItem extends StatelessWidget {
     );
   }
 
+  void _showChatOptions(BuildContext context, String chatName) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1a1a2e),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Text(
+              chatName,
+              style: GoogleFonts.outfit(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: AppColors.text,
+              ),
+            ),
+            const SizedBox(height: 16),
+            _sheetOption(
+              icon: isMuted ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+              label: isMuted ? 'Unmute' : 'Mute',
+              color: AppColors.text,
+              onTap: () {
+                Navigator.pop(context);
+                onToggleMute?.call();
+              },
+            ),
+            const SizedBox(height: 8),
+            _sheetOption(
+              icon: Icons.delete_outline_rounded,
+              label: 'Delete chat',
+              color: const Color(0xFFf87171),
+              onTap: () {
+                Navigator.pop(context);
+                onHide?.call();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sheetOption({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withOpacity(0.06)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(width: 12),
+            Text(
+              label,
+              style: GoogleFonts.outfit(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   String _relTime(String iso) {
     try {
       final dt = DateTime.parse(iso).toLocal();
@@ -1482,6 +1664,115 @@ class _ChatItem extends StatelessWidget {
     } catch (_) {
       return '';
     }
+  }
+}
+
+// ─── Live Mini Card ───────────────────────────────────────────────────────────
+
+class _LiveMiniCard extends StatelessWidget {
+  final Map<String, dynamic> friend;
+  const _LiveMiniCard({required this.friend});
+
+  @override
+  Widget build(BuildContext context) {
+    final name =
+        (friend['display_name'] ?? friend['username'] ?? 'User').toString();
+    final avatar = (friend['avatar_url'] ?? '').toString();
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
+    final nowPlaying =
+        (friend['now_playing'] as Map?)?.cast<String, dynamic>() ?? {};
+    final title = (nowPlaying['title'] ?? '').toString().trim();
+
+    return Container(
+      width: 62,
+      margin: const EdgeInsets.only(right: 12),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  gradient: AppColors.gradMixed,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: AppColors.purpleLight.withOpacity(0.5),
+                    width: 1.5,
+                  ),
+                ),
+                child: avatar.isNotEmpty
+                    ? ClipOval(
+                        child: CachedNetworkImage(
+                          imageUrl: avatar,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => const SizedBox(),
+                          errorWidget: (_, __, ___) => Center(
+                            child: Text(
+                              initial,
+                              style: GoogleFonts.outfit(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
+                    : Center(
+                        child: Text(
+                          initial,
+                          style: GoogleFonts.outfit(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+              ),
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: Container(
+                  width: 11,
+                  height: 11,
+                  decoration: BoxDecoration(
+                    color: AppColors.pink,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.bg, width: 1.5),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.outfit(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppColors.text,
+            ),
+          ),
+          if (title.isNotEmpty)
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.outfit(
+                fontSize: 10,
+                color: AppColors.purpleLight,
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 

@@ -22,6 +22,7 @@ class Chat(Base):
 
 class GroupChatRole(str, enum.Enum):
     owner = "owner"
+    admin = "admin"
     member = "member"
 
 

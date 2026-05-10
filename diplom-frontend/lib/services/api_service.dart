@@ -1765,6 +1765,22 @@ class ApiService {
     await _dio.post('/chats/groups/$groupChatId/transfer-owner', data: {'new_owner_id': newOwnerId});
   }
 
+  Future<Map<String, dynamic>> updateGroupChat(int groupChatId, {String? title, String? avatarUrl}) async {
+    final data = <String, dynamic>{};
+    if (title != null) data['title'] = title;
+    if (avatarUrl != null) data['avatar_url'] = avatarUrl;
+    final resp = await _dio.patch('/chats/groups/$groupChatId', data: data);
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<void> makeGroupChatAdmin(int groupChatId, int userId) async {
+    await _dio.post('/chats/groups/$groupChatId/members/$userId/make-admin');
+  }
+
+  Future<void> revokeGroupChatAdmin(int groupChatId, int userId) async {
+    await _dio.delete('/chats/groups/$groupChatId/members/$userId/admin');
+  }
+
   Future<Map<String, dynamic>?> getUserNowPlaying(int userId) async {
     try {
       final resp = await _dio.get('/users/$userId/now-playing');

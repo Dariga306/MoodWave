@@ -28,6 +28,7 @@ class UserProfileScreen extends StatefulWidget {
 
 class _UserProfileScreenState extends State<UserProfileScreen> {
   Map<String, dynamic>? _data;
+  Map<String, dynamic>? _nowPlaying;
   bool _loading = true;
   bool _followBusy = false;
   bool _messageBusy = false;
@@ -138,10 +139,18 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final data = await ApiService().getUserProfileSummary(widget.userId);
+      final results = await Future.wait([
+        ApiService().getUserProfileSummary(widget.userId),
+        ApiService().getUserNowPlaying(widget.userId).then((v) => v ?? {}),
+      ]);
       if (!mounted) return;
+      final data = results[0] as Map<String, dynamic>;
+      final nowPlayingData = results[1] as Map<String, dynamic>;
       setState(() {
         _data = data;
+        _nowPlaying = nowPlayingData['now_playing'] != null
+            ? Map<String, dynamic>.from(nowPlayingData['now_playing'] as Map)
+            : null;
         _loading = false;
       });
     } catch (_) {
@@ -493,6 +502,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                   color: AppColors.text2,
                                 ),
                               ),
+                            ],
+                            if (_nowPlaying != null) ...[
+                              const SizedBox(height: 12),
+                              _NowPlayingBadge(nowPlaying: _nowPlaying!),
                             ],
                             const SizedBox(height: 14),
                             _StatsRow(
@@ -1087,6 +1100,237 @@ class _ActionButton extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Now Playing Badge
+// ──────────────────────────────────────────────────────────────
+
+class _NowPlayingBadge extends StatefulWidget {
+  final Map<String, dynamic> nowPlaying;
+  const _NowPlayingBadge({required this.nowPlaying});
+
+  @override
+  State<_NowPlayingBadge> createState() => _NowPlayingBadgeState();
+}
+
+class _NowPlayingBadgeState extends State<_NowPlayingBadge>
+    with TickerProviderStateMixin {
+  late final List<AnimationController> _bars;
+  late final List<Animation<double>> _anims;
+
+  @override
+  void initState() {
+    super.initState();
+    final speeds = [600, 820, 520, 740];
+    _bars = speeds
+        .map((ms) => AnimationController(
+              vsync: this,
+              duration: Duration(milliseconds: ms),
+            )..repeat(reverse: true))
+        .toList();
+    _anims = [
+      Tween<double>(begin: 0.25, end: 1.0).animate(
+          CurvedAnimation(parent: _bars[0], curve: Curves.easeInOut)),
+      Tween<double>(begin: 0.5, end: 1.0).animate(
+          CurvedAnimation(parent: _bars[1], curve: Curves.easeInOut)),
+      Tween<double>(begin: 0.2, end: 0.85).animate(
+          CurvedAnimation(parent: _bars[2], curve: Curves.easeInOut)),
+      Tween<double>(begin: 0.4, end: 0.9).animate(
+          CurvedAnimation(parent: _bars[3], curve: Curves.easeInOut)),
+    ];
+  }
+
+  @override
+  void dispose() {
+    for (final c in _bars) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = (widget.nowPlaying['title'] ?? '').toString().trim();
+    final artist = (widget.nowPlaying['artist'] ?? '').toString().trim();
+    final coverUrl = (widget.nowPlaying['cover_url'] ?? '').toString();
+    final playedAt = widget.nowPlaying['played_at']?.toString();
+    final isLive = _isRecent(playedAt);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isLive
+              ? [
+                  const Color(0xFF4c1d95).withOpacity(0.35),
+                  const Color(0xFF7c3aed).withOpacity(0.20),
+                ]
+              : [
+                  Colors.white.withOpacity(0.04),
+                  Colors.white.withOpacity(0.02),
+                ],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isLive
+              ? AppColors.purpleLight.withOpacity(0.3)
+              : Colors.white.withOpacity(0.07),
+        ),
+      ),
+      child: Row(
+        children: [
+          // Cover art or music icon
+          if (coverUrl.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: CachedNetworkImage(
+                imageUrl: coverUrl,
+                width: 36,
+                height: 36,
+                fit: BoxFit.cover,
+                errorWidget: (_, __, ___) => _musicIcon(isLive),
+              ),
+            )
+          else
+            _musicIcon(isLive),
+          const SizedBox(width: 10),
+          // Track info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    if (isLive) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF7c3aed), Color(0xFFec4899)],
+                          ),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: Text(
+                          'LIVE',
+                          style: GoogleFonts.outfit(
+                            fontSize: 8,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Expanded(
+                      child: Text(
+                        title.isNotEmpty
+                            ? title
+                            : (isLive ? 'Listening now' : 'Recently played'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.text,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (artist.isNotEmpty)
+                  Text(
+                    artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                      fontSize: 11,
+                      color: AppColors.text2,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          // Animated bars if live, else time ago
+          if (isLive)
+            AnimatedBuilder(
+              animation: Listenable.merge(_bars),
+              builder: (_, __) => Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: List.generate(4, (i) {
+                  return Container(
+                    width: 2.5,
+                    height: 20 * _anims[i].value,
+                    margin: const EdgeInsets.only(right: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.purpleLight.withOpacity(0.8),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  );
+                }),
+              ),
+            )
+          else if (playedAt != null)
+            Text(
+              _relTime(playedAt),
+              style: GoogleFonts.outfit(
+                fontSize: 11,
+                color: AppColors.text3,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _musicIcon(bool isLive) {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: isLive
+            ? AppColors.purpleDark.withOpacity(0.4)
+            : Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Icon(
+        Icons.music_note_rounded,
+        size: 18,
+        color: isLive ? AppColors.purpleLight : AppColors.text3,
+      ),
+    );
+  }
+
+  bool _isRecent(String? iso) {
+    if (iso == null || iso.isEmpty) return false;
+    try {
+      final normalized =
+          (iso.endsWith('Z') || iso.contains('+')) ? iso : '${iso}Z';
+      final dt = DateTime.parse(normalized).toLocal();
+      return DateTime.now().difference(dt).inMinutes < 5;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  String _relTime(String iso) {
+    try {
+      final normalized =
+          (iso.endsWith('Z') || iso.contains('+')) ? iso : '${iso}Z';
+      final dt = DateTime.parse(normalized).toLocal();
+      final diff = DateTime.now().difference(dt);
+      if (diff.inMinutes < 1) return 'just now';
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+      if (diff.inHours < 24) return '${diff.inHours}h ago';
+      return '${diff.inDays}d ago';
+    } catch (_) {
+      return '';
+    }
   }
 }
 

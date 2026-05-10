@@ -29,6 +29,7 @@ class GroupChatSetupScreen extends StatefulWidget {
 class _GroupChatSetupScreenState extends State<GroupChatSetupScreen> {
   final _searchCtrl = TextEditingController();
   final _nameCtrl = TextEditingController();
+  final _avatarCtrl = TextEditingController();
 
   List<Map<String, dynamic>> _allUsers = [];
   List<Map<String, dynamic>> _recommended = [];
@@ -49,6 +50,7 @@ class _GroupChatSetupScreenState extends State<GroupChatSetupScreen> {
     _searchDebounce?.cancel();
     _searchCtrl.dispose();
     _nameCtrl.dispose();
+    _avatarCtrl.dispose();
     super.dispose();
   }
 
@@ -204,6 +206,9 @@ class _GroupChatSetupScreenState extends State<GroupChatSetupScreen> {
             .map((user) => (user['id'] as num?)?.toInt())
             .whereType<int>()
             .toList(),
+        avatarUrl: _avatarCtrl.text.trim().isNotEmpty
+            ? _avatarCtrl.text.trim()
+            : null,
       );
       if (!mounted) return;
       final groupChatId = (group['group_chat_id'] as num?)?.toInt();
@@ -291,6 +296,35 @@ class _GroupChatSetupScreenState extends State<GroupChatSetupScreen> {
                                 GoogleFonts.outfit(color: AppColors.text3),
                             prefixIcon: const Icon(
                               Icons.groups_rounded,
+                              color: AppColors.text3,
+                            ),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 14,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: TextField(
+                          controller: _avatarCtrl,
+                          style: GoogleFonts.outfit(
+                            color: AppColors.text,
+                            fontSize: 14,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'Group avatar URL (optional)',
+                            hintStyle:
+                                GoogleFonts.outfit(color: AppColors.text3),
+                            prefixIcon: const Icon(
+                              Icons.image_rounded,
                               color: AppColors.text3,
                             ),
                             border: InputBorder.none,

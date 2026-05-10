@@ -4,7 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
-import 'extra_screens.dart';
 import 'user_profile_screen.dart';
 
 class SocialActivityScreen extends StatefulWidget {
@@ -93,36 +92,13 @@ class _SocialActivityScreenState extends State<SocialActivityScreen> {
                             ],
                             if (_recent.isNotEmpty) ...[
                               SizedBox(height: _live.isNotEmpty ? 18 : 0),
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    'Recently Played',
-                                    style: GoogleFonts.outfit(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppColors.text,
-                                    ),
-                                  ),
-                                  GestureDetector(
-                                    onTap: () => Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) =>
-                                            const RecentHistoryScreen(),
-                                      ),
-                                    ),
-                                    child: Text(
-                                      'All →',
-                                      style: GoogleFonts.outfit(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppColors.purpleLight,
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                              Text(
+                                'Recently Played',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.text,
+                                ),
                               ),
                               const SizedBox(height: 12),
                               ..._recent.map(

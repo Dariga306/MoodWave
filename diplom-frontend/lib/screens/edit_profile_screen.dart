@@ -63,6 +63,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late int _bannerPreset;
   late bool _isPublic;
   late bool _showActivity;
+  late bool _showFollowers;
+  late bool _hideMusicTaste;
   String? _gender;
   bool _saving = false;
   bool _showAvatarPicker = false;
@@ -84,6 +86,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _bannerPreset = widget.user['banner_preset'] ?? 0;
     _isPublic = widget.user['is_public'] ?? true;
     _showActivity = widget.user['show_activity'] ?? true;
+    _showFollowers = widget.user['show_followers'] ?? true;
+    _hideMusicTaste = widget.user['hide_music_taste'] ?? false;
     _gender = widget.user['gender'];
     _savedAvatarUrl = widget.user['avatar_url'] as String?;
     _savedBannerUrl = widget.user['banner_url'] as String?;
@@ -394,6 +398,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'banner_preset': _bannerPreset,
         'is_public': _isPublic,
         'show_activity': _showActivity,
+        'show_followers': _showFollowers,
+        'hide_music_taste': _hideMusicTaste,
         if (_gender != null) 'gender': _gender,
       };
 
@@ -795,6 +801,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     Icons.visibility_rounded,
                     _showActivity,
                     (v) => setState(() => _showActivity = v),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildToggleRow(
+                    'Show Followers',
+                    'Others can see your follower count',
+                    Icons.people_rounded,
+                    _showFollowers,
+                    (v) => setState(() => _showFollowers = v),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildToggleRow(
+                    'Show Music Taste',
+                    'Display your genres and favorite artists',
+                    Icons.music_note_rounded,
+                    !_hideMusicTaste,
+                    (v) => setState(() => _hideMusicTaste = !v),
                   ),
                   const SizedBox(height: 32),
                 ]),

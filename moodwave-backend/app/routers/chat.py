@@ -647,6 +647,40 @@ async def get_group_chat_details(
     }
 
 
+class UpdateGroupChatRequest(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    avatar_url: Optional[str] = None
+
+
+@router.patch(
+    "/groups/{group_chat_id}",
+    summary="Update group chat name or avatar (owner or admin)",
+)
+async def update_group_chat(
+    group_chat_id: int,
+    body: UpdateGroupChatRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await db.get(GroupChat, group_chat_id)
+    if not group or not group.is_active:
+        raise HTTPException(status_code=404, detail="Group not found")
+    my_membership = await db.scalar(
+        select(GroupChatMember).where(
+            GroupChatMember.group_chat_id == group_chat_id,
+            GroupChatMember.user_id == current_user.id,
+        )
+    )
+    if not my_membership or my_membership.role == GroupChatRole.member:
+        raise HTTPException(status_code=403, detail="Only owner or admin can edit the group")
+    if body.title is not None:
+        group.title = body.title.strip()
+    if body.avatar_url is not None:
+        group.avatar_url = body.avatar_url if body.avatar_url.strip() else None
+    await db.commit()
+    return {"ok": True, "title": group.title, "avatar_url": group.avatar_url}
+
+
 @router.delete(
     "/groups/{group_chat_id}/leave",
     summary="Leave group chat",
@@ -701,9 +735,15 @@ async def remove_group_member(
     group = await db.get(GroupChat, group_chat_id)
     if not group or not group.is_active:
         raise HTTPException(status_code=404, detail="Group not found")
-    if group.owner_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Only the owner can remove members")
-    if user_id == current_user.id:
+    my_membership = await db.scalar(
+        select(GroupChatMember).where(
+            GroupChatMember.group_chat_id == group_chat_id,
+            GroupChatMember.user_id == current_user.id,
+        )
+    )
+    if not my_membership:
+        raise HTTPException(status_code=403, detail="Not a member")
+    if current_user.id == user_id:
         raise HTTPException(status_code=400, detail="Use leave endpoint to leave")
     member = await db.scalar(
         select(GroupChatMember).where(
@@ -713,6 +753,14 @@ async def remove_group_member(
     )
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
+    # owner can remove anyone; admin can only remove regular members
+    if my_membership.role == GroupChatRole.owner:
+        pass
+    elif my_membership.role == GroupChatRole.admin:
+        if member.role in (GroupChatRole.owner, GroupChatRole.admin):
+            raise HTTPException(status_code=403, detail="Admins can only remove regular members")
+    else:
+        raise HTTPException(status_code=403, detail="Only admins or owner can remove members")
     await db.delete(member)
     await db.commit()
     return {"ok": True}
@@ -751,6 +799,66 @@ async def transfer_group_owner(
         old_member.role = GroupChatRole.member
     new_member.role = GroupChatRole.owner
     group.owner_id = body.new_owner_id
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post(
+    "/groups/{group_chat_id}/members/{user_id}/make-admin",
+    summary="Promote a member to admin (owner only)",
+)
+async def make_group_admin(
+    group_chat_id: int,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await db.get(GroupChat, group_chat_id)
+    if not group or not group.is_active:
+        raise HTTPException(status_code=404, detail="Group not found")
+    if group.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can promote members")
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Owner is already the highest role")
+    member = await db.scalar(
+        select(GroupChatMember).where(
+            GroupChatMember.group_chat_id == group_chat_id,
+            GroupChatMember.user_id == user_id,
+        )
+    )
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+    member.role = GroupChatRole.admin
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete(
+    "/groups/{group_chat_id}/members/{user_id}/admin",
+    summary="Revoke admin role (owner only)",
+)
+async def revoke_group_admin(
+    group_chat_id: int,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await db.get(GroupChat, group_chat_id)
+    if not group or not group.is_active:
+        raise HTTPException(status_code=404, detail="Group not found")
+    if group.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can revoke admin")
+    member = await db.scalar(
+        select(GroupChatMember).where(
+            GroupChatMember.group_chat_id == group_chat_id,
+            GroupChatMember.user_id == user_id,
+        )
+    )
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if member.role != GroupChatRole.admin:
+        raise HTTPException(status_code=400, detail="Member is not an admin")
+    member.role = GroupChatRole.member
     await db.commit()
     return {"ok": True}
 

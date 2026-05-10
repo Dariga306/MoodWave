@@ -29,7 +29,7 @@ const _kPhrases = [
   ('Почему это так больно', '😭'),
 ];
 
-const _kReactions = ['❤️', '🔥', '😭', '🎯', '⚡', '💀', '🧐'];
+const _kReactions = ['❤️', '🔥', '😂', '🤯', '😍', '👀', '💀', '😢', '🎵', '👏'];
 
 String _formatChatTime(String? raw) {
   if (raw == null || raw.isEmpty) return '';
@@ -85,6 +85,9 @@ class _ChatScreenState extends State<ChatScreen> {
   Map<String, dynamic>? _partnerNowPlaying;
   List<Map<String, dynamic>> _groupMembers = [];
   int _groupOwnerId = 0;
+  Set<int> _groupAdminIds = {};
+  String _groupTitle = '';
+  String _groupAvatarUrl = '';
 
   bool get _isGroupChat => widget.groupChatId != null;
   bool get _usesDirectThread =>
@@ -142,15 +145,18 @@ class _ChatScreenState extends State<ChatScreen> {
               .toList() ??
           [];
       int ownerId = 0;
+      final adminIds = <int>{};
       for (final m in members) {
-        if (m['role'] == 'owner') {
-          ownerId = (m['id'] as num?)?.toInt() ?? 0;
-          break;
-        }
+        final uid = (m['id'] as num?)?.toInt() ?? 0;
+        if (m['role'] == 'owner') ownerId = uid;
+        if (m['role'] == 'admin') adminIds.add(uid);
       }
       setState(() {
         _groupMembers = members;
         _groupOwnerId = ownerId;
+        _groupAdminIds = adminIds;
+        _groupTitle = (data['title'] ?? '').toString();
+        _groupAvatarUrl = (data['avatar_url'] ?? '').toString();
       });
     } catch (_) {}
   }
@@ -620,6 +626,15 @@ class _ChatScreenState extends State<ChatScreen> {
                   _openMembersSheet(myId, amIOwner);
                 },
               ),
+            if (_isGroupChat && (amIOwner || _groupAdminIds.contains(myId)))
+              _menuTile(
+                icon: Icons.edit_rounded,
+                label: 'Edit group',
+                onTap: () {
+                  Navigator.pop(context);
+                  _openEditGroupSheet();
+                },
+              ),
             _menuTile(
               icon: Icons.folder_shared_rounded,
               label: 'Shared media',
@@ -786,7 +801,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _showDeleteMenu(String messageId) {
+  void _showDeleteMenu(String messageId, {bool isSender = false}) {
     HapticFeedback.mediumImpact();
     showModalBottomSheet(
       context: context,
@@ -814,28 +829,29 @@ class _ChatScreenState extends State<ChatScreen> {
               _deleteForMe(messageId);
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.delete_rounded,
-                color: Color(0xFFef4444)),
-            title: Text('Delete for everyone',
-                style: GoogleFonts.outfit(
-                    fontSize: 15, color: const Color(0xFFef4444))),
-            subtitle: Text('Removed for all participants',
-                style: GoogleFonts.outfit(
-                    fontSize: 12, color: AppColors.text3)),
-            onTap: () async {
-              Navigator.pop(context);
-              try {
-                await ApiService().deleteMessage(
-                  matchId: widget.matchId,
-                  chatId: widget.chatId,
-                  groupChatId: widget.groupChatId,
-                  messageId: messageId,
-                );
-                _loadMessages();
-              } catch (_) {}
-            },
-          ),
+          if (isSender)
+            ListTile(
+              leading: const Icon(Icons.delete_rounded,
+                  color: Color(0xFFef4444)),
+              title: Text('Delete for everyone',
+                  style: GoogleFonts.outfit(
+                      fontSize: 15, color: const Color(0xFFef4444))),
+              subtitle: Text('Removed for all participants',
+                  style: GoogleFonts.outfit(
+                      fontSize: 12, color: AppColors.text3)),
+              onTap: () async {
+                Navigator.pop(context);
+                try {
+                  await ApiService().deleteMessage(
+                    matchId: widget.matchId,
+                    chatId: widget.chatId,
+                    groupChatId: widget.groupChatId,
+                    messageId: messageId,
+                  );
+                  _loadMessages();
+                } catch (_) {}
+              },
+            ),
           ListTile(
             leading: const Icon(Icons.close_rounded, color: AppColors.text3),
             title: Text('Cancel',
@@ -913,6 +929,141 @@ class _ChatScreenState extends State<ChatScreen> {
             }
           });
         },
+      ),
+    );
+  }
+
+  void _openEditGroupSheet() {
+    final titleCtrl = TextEditingController(text: _groupTitle);
+    final avatarCtrl = TextEditingController(text: _groupAvatarUrl);
+    bool saving = false;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSS) => Padding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Edit Group',
+                  style: GoogleFonts.outfit(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.text,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _settingsField(
+                  controller: titleCtrl,
+                  hint: 'Group name',
+                  icon: Icons.groups_rounded,
+                ),
+                const SizedBox(height: 10),
+                _settingsField(
+                  controller: avatarCtrl,
+                  hint: 'Avatar URL (optional)',
+                  icon: Icons.image_rounded,
+                ),
+                const SizedBox(height: 16),
+                GestureDetector(
+                  onTap: saving
+                      ? null
+                      : () async {
+                          setSS(() => saving = true);
+                          try {
+                            final result = await ApiService().updateGroupChat(
+                              widget.groupChatId!,
+                              title: titleCtrl.text.trim().isNotEmpty
+                                  ? titleCtrl.text.trim()
+                                  : null,
+                              avatarUrl: avatarCtrl.text.trim(),
+                            );
+                            if (!mounted) return;
+                            setState(() {
+                              _groupTitle = (result['title'] ?? _groupTitle).toString();
+                              _groupAvatarUrl = (result['avatar_url'] ?? '').toString();
+                            });
+                            Navigator.pop(ctx);
+                          } catch (_) {
+                            setSS(() => saving = false);
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Could not update group')),
+                            );
+                          }
+                        },
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      gradient: saving ? null : AppColors.primaryBtn,
+                      color: saving ? AppColors.glass : null,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Center(
+                      child: saving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(
+                              'Save',
+                              style: GoogleFonts.outfit(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _settingsField({
+    required TextEditingController controller,
+    required String hint,
+    required IconData icon,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: TextField(
+        controller: controller,
+        style: GoogleFonts.outfit(color: AppColors.text, fontSize: 14),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: GoogleFonts.outfit(color: AppColors.text3),
+          prefixIcon: Icon(icon, color: AppColors.text3, size: 18),
+          border: InputBorder.none,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+        ),
       ),
     );
   }
@@ -1078,8 +1229,12 @@ class _ChatScreenState extends State<ChatScreen> {
                           useGroupChat: _isGroupChat,
                           useDirectThread: _usesDirectThread,
                           onReacted: _loadMessages,
-                          onDelete: (isMe && messageId != null)
-                              ? () => _showDeleteMenu(messageId)
+                          onDelete: messageId != null
+                              ? () => _showDeleteMenu(messageId,
+                                  isSender: isMe ||
+                                      (_isGroupChat &&
+                                          (myId == _groupOwnerId ||
+                                              _groupAdminIds.contains(myId))))
                               : null,
                         ),
                       'album' => _AlbumMessage(
@@ -1111,10 +1266,15 @@ class _ChatScreenState extends State<ChatScreen> {
                               : '',
                         ),
                     };
-                    // Non-track messages: wrap with delete-on-long-press
-                    if (isMe && messageId != null && type != 'track') {
+                    // Non-track messages: wrap with delete-on-long-press (anyone can hide for themselves)
+                    if (messageId != null && type != 'track') {
+                      final canDeleteAll = isMe ||
+                          (_isGroupChat &&
+                              (myId == _groupOwnerId ||
+                                  _groupAdminIds.contains(myId)));
                       child = GestureDetector(
-                        onLongPress: () => _showDeleteMenu(messageId),
+                        onLongPress: () =>
+                            _showDeleteMenu(messageId, isSender: canDeleteAll),
                         child: child,
                       );
                     }
@@ -1124,7 +1284,10 @@ class _ChatScreenState extends State<ChatScreen> {
                     final isOwnerMsg = _isGroupChat &&
                         _groupOwnerId > 0 &&
                         senderId == _groupOwnerId;
-                    if (isOwnerMsg) {
+                    final isAdminMsg = _isGroupChat &&
+                        senderId != null &&
+                        _groupAdminIds.contains(senderId);
+                    if (isOwnerMsg || isAdminMsg) {
                       final badge = Container(
                         margin: EdgeInsets.only(
                           bottom: 3,
@@ -1135,19 +1298,20 @@ class _ChatScreenState extends State<ChatScreen> {
                             isMe ? Alignment.centerRight : Alignment.centerLeft,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
+                              horizontal: 5, vertical: 1),
                           decoration: BoxDecoration(
-                            color: AppColors.purpleDark.withOpacity(0.35),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                                color: AppColors.purpleLight.withOpacity(0.3)),
+                            color: AppColors.purpleDark.withOpacity(0.28),
+                            borderRadius: BorderRadius.circular(5),
                           ),
                           child: Text(
-                            '👑 Admin',
+                            isOwnerMsg ? 'owner' : 'admin',
                             style: GoogleFonts.outfit(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.purpleLight,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              color: isOwnerMsg
+                                  ? AppColors.pink
+                                  : AppColors.purpleLight,
+                              letterSpacing: 0.2,
                             ),
                           ),
                         ),
@@ -2062,7 +2226,7 @@ class _TrackMessage extends StatelessWidget {
       backgroundColor: Colors.transparent,
       builder: (_) => Container(
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(24),
@@ -2071,59 +2235,68 @@ class _TrackMessage extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Text('React',
               style: GoogleFonts.outfit(
-                  fontSize: 14,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: AppColors.text2)),
-          const SizedBox(height: 14),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: _kReactions.map((emoji) {
-              return GestureDetector(
-                onTap: () async {
-                  Navigator.pop(context);
-                  try {
-                    if (useGroupChat) {
-                      await ApiService()
-                          .reactToGroupMessage(groupChatId!, messageId, emoji);
-                    } else if (useDirectThread) {
-                      await ApiService()
-                          .reactToDirectMessage(chatId!, messageId, emoji);
-                    } else {
-                      await ApiService()
-                          .reactToMessage(matchId!, messageId, emoji);
-                    }
-                    onReacted();
-                  } catch (_) {}
-                },
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: AppColors.glass,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Center(
-                      child: Text(emoji, style: const TextStyle(fontSize: 22))),
-                ),
-              );
-            }).toList(),
-          ),
-          if (isMe && onDelete != null) ...[
-            const SizedBox(height: 10),
-            const Divider(color: AppColors.border, height: 1),
+          const SizedBox(height: 12),
+          // 5+5 grid
+          ...List.generate(2, (row) {
+            final start = row * 5;
+            final slice = _kReactions.skip(start).take(5).toList();
+            return Padding(
+              padding: EdgeInsets.only(bottom: row == 0 ? 8 : 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: slice.map((emoji) {
+                  return GestureDetector(
+                    onTap: () async {
+                      Navigator.pop(context);
+                      try {
+                        if (useGroupChat) {
+                          await ApiService().reactToGroupMessage(
+                              groupChatId!, messageId, emoji);
+                        } else if (useDirectThread) {
+                          await ApiService().reactToDirectMessage(
+                              chatId!, messageId, emoji);
+                        } else {
+                          await ApiService()
+                              .reactToMessage(matchId!, messageId, emoji);
+                        }
+                        onReacted();
+                      } catch (_) {}
+                    },
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: AppColors.glass,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Center(
+                          child:
+                              Text(emoji, style: const TextStyle(fontSize: 22))),
+                    ),
+                  );
+                }).toList(),
+              ),
+            );
+          }),
+          const SizedBox(height: 4),
+          const Divider(color: AppColors.border, height: 1),
+          if (onDelete != null)
             ListTile(
+              dense: true,
               leading: const Icon(Icons.delete_outline_rounded,
-                  color: Color(0xFFef4444), size: 20),
+                  color: Color(0xFFef4444), size: 18),
               title: Text('Delete message',
                   style: GoogleFonts.outfit(
-                      fontSize: 14, color: const Color(0xFFef4444))),
+                      fontSize: 13, color: const Color(0xFFef4444))),
               onTap: () {
                 Navigator.pop(context);
                 onDelete!();
               },
             ),
-          ],
         ]),
       ),
     );
@@ -3051,7 +3224,7 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
       builder: (_) => AlertDialog(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Transfer admin to $name?',
+        title: Text('Transfer ownership to $name?',
             style: GoogleFonts.outfit(
                 fontWeight: FontWeight.w700, color: AppColors.text)),
         content: Text(
@@ -3088,7 +3261,40 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not transfer admin')));
+          const SnackBar(content: Text('Could not transfer ownership')));
+    }
+  }
+
+  Future<void> _makeAdmin(Map<String, dynamic> member) async {
+    final id = (member['id'] as num?)?.toInt() ?? 0;
+    final name = (member['display_name'] ?? member['username'] ?? 'user').toString();
+    try {
+      await ApiService().makeGroupChatAdmin(widget.groupChatId, id);
+      setState(() {
+        for (final m in _members) {
+          if ((m['id'] as num?)?.toInt() == id) m['role'] = 'admin';
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not make $name an admin')));
+    }
+  }
+
+  Future<void> _revokeAdmin(Map<String, dynamic> member) async {
+    final id = (member['id'] as num?)?.toInt() ?? 0;
+    try {
+      await ApiService().revokeGroupChatAdmin(widget.groupChatId, id);
+      setState(() {
+        for (final m in _members) {
+          if ((m['id'] as num?)?.toInt() == id) m['role'] = 'member';
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Could not revoke admin')));
     }
   }
 
@@ -3150,6 +3356,7 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
                 final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
                 final avatarUrl = (m['avatar_url'] ?? '').toString();
                 final isOwner = m['role'] == 'owner';
+                final isAdminRole = m['role'] == 'admin';
                 final isMe = uid == widget.currentUserId;
                 return ListTile(
                   contentPadding:
@@ -3195,28 +3402,31 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
                           ),
                         ),
                       ),
-                      if (isOwner) ...[
+                      if (isOwner || isAdminRole) ...[
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
+                              horizontal: 5, vertical: 1),
                           decoration: BoxDecoration(
-                            color: AppColors.purpleDark.withOpacity(0.35),
-                            borderRadius: BorderRadius.circular(6),
+                            color: AppColors.purpleDark.withOpacity(0.28),
+                            borderRadius: BorderRadius.circular(5),
                           ),
                           child: Text(
-                            '👑 Admin',
+                            isOwner ? 'owner' : 'admin',
                             style: GoogleFonts.outfit(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.purpleLight,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              color: isOwner
+                                  ? AppColors.pink
+                                  : AppColors.purpleLight,
+                              letterSpacing: 0.2,
                             ),
                           ),
                         ),
                       ],
                     ],
                   ),
-                  trailing: (widget.amIOwner && !isMe)
+                  trailing: (widget.amIOwner && !isMe && !isOwner)
                       ? PopupMenuButton<String>(
                           color: AppColors.surface,
                           shape: RoundedRectangleBorder(
@@ -3225,6 +3435,8 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
                               size: 18, color: AppColors.text3),
                           onSelected: (v) {
                             if (v == 'remove') _remove(m);
+                            if (v == 'make_admin') _makeAdmin(m);
+                            if (v == 'revoke_admin') _revokeAdmin(m);
                             if (v == 'transfer') _transferOwner(m);
                           },
                           itemBuilder: (_) => [
@@ -3240,16 +3452,42 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
                                         color: const Color(0xFFef4444))),
                               ]),
                             ),
+                            if (!isAdminRole)
+                              PopupMenuItem(
+                                value: 'make_admin',
+                                child: Row(children: [
+                                  const Icon(Icons.shield_rounded,
+                                      size: 16, color: AppColors.purpleLight),
+                                  const SizedBox(width: 8),
+                                  Text('Make admin',
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 13,
+                                          color: AppColors.purpleLight)),
+                                ]),
+                              )
+                            else
+                              PopupMenuItem(
+                                value: 'revoke_admin',
+                                child: Row(children: [
+                                  const Icon(Icons.shield_outlined,
+                                      size: 16, color: AppColors.text2),
+                                  const SizedBox(width: 8),
+                                  Text('Revoke admin',
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 13,
+                                          color: AppColors.text2)),
+                                ]),
+                              ),
                             PopupMenuItem(
                               value: 'transfer',
                               child: Row(children: [
                                 const Icon(Icons.manage_accounts_rounded,
-                                    size: 16, color: AppColors.purpleLight),
+                                    size: 16, color: AppColors.text3),
                                 const SizedBox(width: 8),
-                                Text('Make Admin',
+                                Text('Transfer ownership',
                                     style: GoogleFonts.outfit(
                                         fontSize: 13,
-                                        color: AppColors.purpleLight)),
+                                        color: AppColors.text3)),
                               ]),
                             ),
                           ],
