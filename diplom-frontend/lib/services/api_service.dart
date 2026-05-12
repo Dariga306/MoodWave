@@ -37,11 +37,11 @@ class ApiService {
 
       return localApi;
     }
-    if (defaultTargetPlatform == TargetPlatform.android && kDebugMode) {
+    if (defaultTargetPlatform == TargetPlatform.android) {
       return 'http://10.0.2.2:8000';
     }
-    return 'http://localhost:8000';
-  }
+      return 'http://localhost:8000';
+    }
 
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
@@ -55,7 +55,7 @@ class ApiService {
       baseUrl: ApiService.baseUrl,
       connectTimeout: const Duration(seconds: 35),
       receiveTimeout: const Duration(seconds: 35),
-      sendTimeout: const Duration(seconds: 10),
+      sendTimeout: const Duration(seconds: 30),
       headers: {'Content-Type': 'application/json'},
     ));
 
