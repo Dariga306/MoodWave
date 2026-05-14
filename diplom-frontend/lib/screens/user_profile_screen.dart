@@ -29,6 +29,9 @@ class UserProfileScreen extends StatefulWidget {
 class _UserProfileScreenState extends State<UserProfileScreen> {
   Map<String, dynamic>? _data;
   Map<String, dynamic>? _nowPlaying;
+  String _presenceStatus = '';
+  String _lastSeenAt = '';
+  String _activityStatus = '';
   bool _loading = true;
   bool _followBusy = false;
   bool _messageBusy = false;
@@ -151,6 +154,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         _nowPlaying = nowPlayingData['now_playing'] != null
             ? Map<String, dynamic>.from(nowPlayingData['now_playing'] as Map)
             : null;
+        _presenceStatus = (nowPlayingData['presence_status'] ?? '').toString();
+        _lastSeenAt = (nowPlayingData['last_seen_at'] ?? '').toString();
+        _activityStatus = (nowPlayingData['activity_status'] ?? '').toString();
         _loading = false;
       });
     } catch (_) {
@@ -181,6 +187,29 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     await Clipboard.setData(ClipboardData(text: '@$_username'));
     if (!mounted) return;
     _showSnack('Username copied');
+  }
+
+  String get _presenceLabel {
+    if (_activityStatus == 'live' && _nowPlaying != null) {
+      return 'Listening now';
+    }
+    if (_activityStatus == 'recent' && _nowPlaying != null) {
+      return 'Listened recently';
+    }
+    if (_presenceStatus == 'online') {
+      return 'Online';
+    }
+    if (_lastSeenAt.isNotEmpty) {
+      try {
+        final dt = DateTime.parse(_lastSeenAt).toLocal();
+        final diff = DateTime.now().difference(dt);
+        if (diff.inMinutes < 1) return 'Last seen just now';
+        if (diff.inMinutes < 60) return 'Last seen ${diff.inMinutes}m ago';
+        if (diff.inHours < 24) return 'Last seen ${diff.inHours}h ago';
+        return 'Last seen ${diff.inDays}d ago';
+      } catch (_) {}
+    }
+    return 'Offline';
   }
 
   Future<void> _toggleBlock() async {
@@ -488,6 +517,20 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               style: GoogleFonts.outfit(
                                 fontSize: 13,
                                 color: AppColors.text3,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _presenceLabel,
+                              style: GoogleFonts.outfit(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: _presenceStatus == 'online' ||
+                                        _activityStatus == 'live'
+                                    ? AppColors.green
+                                    : _activityStatus == 'recent'
+                                        ? const Color(0xFFFACC15)
+                                        : AppColors.text3,
                               ),
                             ),
                             if (_bio.isNotEmpty) ...[
@@ -1131,14 +1174,14 @@ class _NowPlayingBadgeState extends State<_NowPlayingBadge>
             )..repeat(reverse: true))
         .toList();
     _anims = [
-      Tween<double>(begin: 0.25, end: 1.0).animate(
-          CurvedAnimation(parent: _bars[0], curve: Curves.easeInOut)),
-      Tween<double>(begin: 0.5, end: 1.0).animate(
-          CurvedAnimation(parent: _bars[1], curve: Curves.easeInOut)),
-      Tween<double>(begin: 0.2, end: 0.85).animate(
-          CurvedAnimation(parent: _bars[2], curve: Curves.easeInOut)),
-      Tween<double>(begin: 0.4, end: 0.9).animate(
-          CurvedAnimation(parent: _bars[3], curve: Curves.easeInOut)),
+      Tween<double>(begin: 0.25, end: 1.0)
+          .animate(CurvedAnimation(parent: _bars[0], curve: Curves.easeInOut)),
+      Tween<double>(begin: 0.5, end: 1.0)
+          .animate(CurvedAnimation(parent: _bars[1], curve: Curves.easeInOut)),
+      Tween<double>(begin: 0.2, end: 0.85)
+          .animate(CurvedAnimation(parent: _bars[2], curve: Curves.easeInOut)),
+      Tween<double>(begin: 0.4, end: 0.9)
+          .animate(CurvedAnimation(parent: _bars[3], curve: Curves.easeInOut)),
     ];
   }
 
@@ -1885,39 +1928,58 @@ class _ProfileConnectionsScreenState extends State<_ProfileConnectionsScreen> {
       version: user['updated_at'],
     );
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
-    final rawId = user['id'];
-    final userId = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
+    final rawId = user['id'] ??
+        user['user_id'] ??
+        user['following_id'] ??
+        user['follower_id'] ??
+        user['followed_id'];
+    final userId =
+        rawId is num ? rawId.toInt() : int.tryParse(rawId?.toString() ?? '');
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: userId == null
-          ? null
-          : () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => UserProfileScreen(
-                    userId: userId,
-                    initialUser: user,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: userId == null
+            ? null
+            : () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => UserProfileScreen(
+                      userId: userId,
+                      initialUser: {
+                        ...user,
+                        'id': userId,
+                      },
+                    ),
                   ),
                 ),
-              ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-        child: Row(
-          children: [
-            Container(
-              width: 50,
-              height: 50,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: AppColors.gradMixed,
-              ),
-              child: ClipOval(
-                child: avatar.isNotEmpty
-                    ? CachedNetworkImage(
-                        imageUrl: avatar,
-                        fit: BoxFit.cover,
-                        errorWidget: (_, __, ___) => Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          child: Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: AppColors.gradMixed,
+                ),
+                child: ClipOval(
+                  child: avatar.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: avatar,
+                          fit: BoxFit.cover,
+                          errorWidget: (_, __, ___) => Center(
+                            child: Text(
+                              initial,
+                              style: GoogleFonts.outfit(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        )
+                      : Center(
                           child: Text(
                             initial,
                             style: GoogleFonts.outfit(
@@ -1927,49 +1989,39 @@ class _ProfileConnectionsScreenState extends State<_ProfileConnectionsScreen> {
                             ),
                           ),
                         ),
-                      )
-                    : Center(
-                        child: Text(
-                          initial,
-                          style: GoogleFonts.outfit(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: GoogleFonts.outfit(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text,
+                      ),
+                    ),
+                    if (username.isNotEmpty)
+                      Text(
+                        '@$username',
+                        style: GoogleFonts.outfit(
+                          fontSize: 12,
+                          color: AppColors.text3,
                         ),
                       ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: GoogleFonts.outfit(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.text,
-                    ),
-                  ),
-                  if (username.isNotEmpty)
-                    Text(
-                      '@$username',
-                      style: GoogleFonts.outfit(
-                        fontSize: 12,
-                        color: AppColors.text3,
-                      ),
-                    ),
-                ],
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.text3,
+                size: 20,
               ),
-            ),
-            const Icon(
-              Icons.chevron_right_rounded,
-              color: AppColors.text3,
-              size: 20,
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

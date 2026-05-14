@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
@@ -29,7 +31,8 @@ class GroupChatSetupScreen extends StatefulWidget {
 class _GroupChatSetupScreenState extends State<GroupChatSetupScreen> {
   final _searchCtrl = TextEditingController();
   final _nameCtrl = TextEditingController();
-  final _avatarCtrl = TextEditingController();
+  Uint8List? _pickedAvatarBytes;
+  String _pickedAvatarName = 'avatar.jpg';
 
   List<Map<String, dynamic>> _allUsers = [];
   List<Map<String, dynamic>> _recommended = [];
@@ -50,7 +53,6 @@ class _GroupChatSetupScreenState extends State<GroupChatSetupScreen> {
     _searchDebounce?.cancel();
     _searchCtrl.dispose();
     _nameCtrl.dispose();
-    _avatarCtrl.dispose();
     super.dispose();
   }
 
@@ -206,10 +208,22 @@ class _GroupChatSetupScreenState extends State<GroupChatSetupScreen> {
             .map((user) => (user['id'] as num?)?.toInt())
             .whereType<int>()
             .toList(),
-        avatarUrl: _avatarCtrl.text.trim().isNotEmpty
-            ? _avatarCtrl.text.trim()
-            : null,
+        avatarUrl: null,
       );
+      // Upload avatar after creation if a photo was picked
+      if (_pickedAvatarBytes != null) {
+        final groupChatId = (group['group_chat_id'] as num?)?.toInt();
+        if (groupChatId != null) {
+          try {
+            final url = await ApiService().uploadGroupChatAvatar(
+              groupChatId,
+              _pickedAvatarBytes!,
+              _pickedAvatarName,
+            );
+            group['avatar_url'] = url;
+          } catch (_) {}
+        }
+      }
       if (!mounted) return;
       final groupChatId = (group['group_chat_id'] as num?)?.toInt();
       final me = context.read<AuthProvider>().user;
@@ -307,31 +321,54 @@ class _GroupChatSetupScreenState extends State<GroupChatSetupScreen> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: TextField(
-                          controller: _avatarCtrl,
-                          style: GoogleFonts.outfit(
-                            color: AppColors.text,
-                            fontSize: 14,
+                      GestureDetector(
+                        onTap: () async {
+                          final picker = ImagePicker();
+                          final img = await picker.pickImage(
+                            source: ImageSource.gallery,
+                            maxWidth: 400,
+                            maxHeight: 400,
+                            imageQuality: 80,
+                          );
+                          if (img == null) return;
+                          final bytes = await img.readAsBytes();
+                          setState(() {
+                            _pickedAvatarBytes = bytes;
+                            _pickedAvatarName = img.name;
+                          });
+                        },
+                        child: Container(
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.border),
                           ),
-                          decoration: InputDecoration(
-                            hintText: 'Group avatar URL (optional)',
-                            hintStyle:
-                                GoogleFonts.outfit(color: AppColors.text3),
-                            prefixIcon: const Icon(
-                              Icons.image_rounded,
-                              color: AppColors.text3,
-                            ),
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 14,
-                            ),
+                          child: Row(
+                            children: [
+                              const SizedBox(width: 14),
+                              if (_pickedAvatarBytes != null)
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.memory(
+                                    _pickedAvatarBytes!,
+                                    width: 30,
+                                    height: 30,
+                                    fit: BoxFit.cover,
+                                  ),
+                                )
+                              else
+                                const Icon(Icons.add_photo_alternate_rounded,
+                                    color: AppColors.text3, size: 22),
+                              const SizedBox(width: 12),
+                              Text(
+                                _pickedAvatarBytes != null
+                                    ? 'Photo selected'
+                                    : 'Add group photo (optional)',
+                                style: GoogleFonts.outfit(
+                                    fontSize: 14, color: AppColors.text3),
+                              ),
+                            ],
                           ),
                         ),
                       ),

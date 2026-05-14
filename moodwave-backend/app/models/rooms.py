@@ -27,6 +27,7 @@ class ListeningRoom(Base):
     host_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String(500))
+    background_url: Mapped[Optional[str]] = mapped_column(Text)
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
     max_guests: Mapped[int] = mapped_column(Integer, default=10)
     current_track_spotify_id: Mapped[Optional[str]] = mapped_column(String(100))

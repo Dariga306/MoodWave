@@ -69,26 +69,26 @@ class _SocialActivityScreenState extends State<SocialActivityScreen> {
                               Text(
                                 'Listening Now',
                                 style: GoogleFonts.outfit(
-                                  fontSize: 24,
+                                  fontSize: 20,
                                   fontWeight: FontWeight.w800,
                                   color: AppColors.text,
                                 ),
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 2),
                               Text(
                                 'Your friends are live right now',
                                 style: GoogleFonts.outfit(
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   color: AppColors.text2,
                                 ),
                               ),
-                              const SizedBox(height: 14),
-                              ..._live.map(
-                                (item) => _LiveFriendCard(
-                                  friend:
-                                      Map<String, dynamic>.from(item as Map),
-                                ),
-                              ),
+                              const SizedBox(height: 10),
+                              ..._live.take(2).map(
+                                    (item) => _LiveFriendCard(
+                                      friend: Map<String, dynamic>.from(
+                                          item as Map),
+                                    ),
+                                  ),
                             ],
                             if (_recent.isNotEmpty) ...[
                               SizedBox(height: _live.isNotEmpty ? 18 : 0),
@@ -318,8 +318,8 @@ class _LiveFriendCardState extends State<_LiveFriendCard>
     return GestureDetector(
       onTap: () => _openProfile(context, widget.friend),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -338,7 +338,7 @@ class _LiveFriendCardState extends State<_LiveFriendCard>
             Stack(
               clipBehavior: Clip.none,
               children: [
-                _FriendAvatar(friend: widget.friend, size: 48),
+                _FriendAvatar(friend: widget.friend, size: 40),
                 Positioned(
                   bottom: -2,
                   left: -2,
@@ -350,8 +350,7 @@ class _LiveFriendCardState extends State<_LiveFriendCard>
                         colors: [colors[0], colors[1]],
                       ),
                       borderRadius: BorderRadius.circular(6),
-                      border:
-                          Border.all(color: AppColors.bg, width: 1.5),
+                      border: Border.all(color: AppColors.bg, width: 1.5),
                     ),
                     child: Text(
                       'LIVE',
@@ -452,7 +451,31 @@ class _RecentFriendItem extends StatelessWidget {
         ),
         child: Row(
           children: [
-            _FriendAvatar(friend: friend, size: 48),
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                _FriendAvatar(friend: friend, size: 48),
+                Positioned(
+                  right: -1,
+                  bottom: -1,
+                  child: Container(
+                    width: 13,
+                    height: 13,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFBBF24),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.bg, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFFBBF24).withOpacity(0.34),
+                          blurRadius: 8,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

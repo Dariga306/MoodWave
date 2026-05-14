@@ -19,6 +19,7 @@ import 'playlist_screen.dart';
 import 'user_profile_screen.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../utils/media_url.dart';
 
 const _kPhrases = [
   ('Слушай это прямо сейчас', '🎵'),
@@ -29,7 +30,18 @@ const _kPhrases = [
   ('Почему это так больно', '😭'),
 ];
 
-const _kReactions = ['❤️', '🔥', '😂', '🤯', '😍', '👀', '💀', '😢', '🎵', '👏'];
+const _kReactions = [
+  '❤️',
+  '🔥',
+  '😂',
+  '🤯',
+  '😍',
+  '👀',
+  '💀',
+  '😢',
+  '🎵',
+  '👏'
+];
 
 String _formatChatTime(String? raw) {
   if (raw == null || raw.isEmpty) return '';
@@ -51,6 +63,7 @@ class ChatScreen extends StatefulWidget {
   final String partnerName;
   final int partnerId;
   final String? partnerAvatarUrl;
+  final String? firebaseChatId;
 
   const ChatScreen({
     super.key,
@@ -60,6 +73,7 @@ class ChatScreen extends StatefulWidget {
     required this.partnerName,
     required this.partnerId,
     this.partnerAvatarUrl,
+    this.firebaseChatId,
   }) : assert(matchId != null || chatId != null || groupChatId != null);
 
   @override
@@ -69,25 +83,45 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   static const _mutedChatsKey = 'muted_chat_threads_v1';
   static const _deletedMsgsKey = 'deleted_msgs_for_me_v1';
+  static const _lastReadKeyPrefix = 'last_read_v1_';
   final Set<String> _deletedForMe = {};
   final _textCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   List<GlobalKey> _messageKeys = [];
   List<dynamic> _messages = [];
   bool _sending = false;
+  bool _creatingListeningRoom = false;
   Timer? _pollTimer;
   Timer? _statusTimer;
   Timer? _searchHighlightTimer;
   int _lastCount = 0;
+  int _pollCycle = 0;
   bool _chatMuted = false;
   int? _highlightedMessageIndex;
   String _highlightedQuery = '';
   Map<String, dynamic>? _partnerNowPlaying;
+  bool _partnerOnline = false;
+  String _partnerLastSeenAt = '';
   List<Map<String, dynamic>> _groupMembers = [];
   int _groupOwnerId = 0;
   Set<int> _groupAdminIds = {};
   String _groupTitle = '';
   String _groupAvatarUrl = '';
+  String _groupUpdatedAt = '';
+  String _firebaseChatId = '';
+  List<Map<String, dynamic>> _groupAvatarHistory = [];
+  List<Map<String, dynamic>> _pinnedMessages = [];
+  final List<Map<String, dynamic>> _pendingMessages = [];
+  final Set<String> _selectedMessageIds = {};
+  bool _selectingMessages = false;
+  bool _loadingMessages = false;
+  bool _loadingGroupDetails = false;
+  bool _loadingPins = false;
+  String _lastMessagesSignature = '';
+  String _lastPinsSignature = '';
+  String _lastGroupSignature = '';
+  String _lastDeliveredText = '';
+  String _lastDeliveredAt = '';
 
   bool get _isGroupChat => widget.groupChatId != null;
   bool get _usesDirectThread =>
@@ -97,15 +131,135 @@ class _ChatScreenState extends State<ChatScreen> {
       : _usesDirectThread
           ? 'thread:${widget.chatId}'
           : 'match:${widget.matchId}';
+  String get _chatListKey => _isGroupChat
+      ? 'g:${widget.groupChatId}'
+      : _usesDirectThread
+          ? 'c:${widget.chatId}'
+          : 'm:${widget.matchId}';
+  int get _currentUserId =>
+      (context.read<AuthProvider>().user?['id'] as num?)?.toInt() ?? 0;
+
+  Map<String, dynamic> _chatReturnPayload() {
+    final now = DateTime.now().toUtc().toIso8601String();
+    final deliveredAt = _lastDeliveredAt.isNotEmpty ? _lastDeliveredAt : now;
+    return {
+      'chat': {
+        'chat_id': widget.chatId,
+        'match_id': widget.matchId,
+        'group_chat_id': widget.groupChatId,
+        'chat_kind': _isGroupChat
+            ? 'group'
+            : widget.matchId != null
+                ? 'match'
+                : 'direct',
+        if (_firebaseChatId.isNotEmpty) 'firebase_chat_id': _firebaseChatId,
+        'created_at': deliveredAt,
+        'updated_at': deliveredAt,
+        'last_message_at': _lastDeliveredText.isNotEmpty ? deliveredAt : null,
+        'last_message_preview':
+            _lastDeliveredText.isNotEmpty ? _lastDeliveredText : null,
+        'last_message_type': _lastDeliveredText.isNotEmpty ? 'text' : null,
+        'partner': {
+          'id': widget.partnerId,
+          'display_name': widget.partnerName,
+          'first_name': widget.partnerName,
+          'avatar_url': widget.partnerAvatarUrl ?? '',
+        },
+      }
+    };
+  }
+
+  void _popWithResult() {
+    Navigator.of(context).pop(_chatReturnPayload());
+  }
+
+  Map<String, dynamic> _reactionMap(Map<String, dynamic> message) {
+    final raw = message['reactions'];
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return {};
+  }
+
+  String _messageSignature(Map<String, dynamic> message) {
+    final reactions = _reactionMap(message);
+    final reactionSignature = reactions.entries
+        .map((entry) =>
+            '${entry.key}:${((entry.value as List?) ?? const []).length}')
+        .join(',');
+    return [
+      (message['message_id'] ?? '').toString(),
+      (message['type'] ?? '').toString(),
+      (message['sent_at'] ?? '').toString(),
+      (message['text'] ?? '').toString(),
+      (message['caption'] ?? '').toString(),
+      reactionSignature,
+    ].join('|');
+  }
+
+  String _messagesSignature(List<dynamic> messages) => messages
+      .whereType<Map>()
+      .map((item) => _messageSignature(Map<String, dynamic>.from(item)))
+      .join('||');
+
+  String _pinsSignature(List<Map<String, dynamic>> pins) => pins
+      .map((pin) => [
+            (pin['message_id'] ?? '').toString(),
+            (pin['pinned_at'] ?? '').toString(),
+            (pin['preview'] ?? '').toString(),
+          ].join('|'))
+      .join('||');
+
+  String _groupSignature({
+    required List<Map<String, dynamic>> members,
+    required int ownerId,
+    required Set<int> adminIds,
+    required String title,
+    required String avatarUrl,
+    required String updatedAt,
+    required String firebaseChatId,
+    required List<Map<String, dynamic>> avatarHistory,
+  }) {
+    final memberSignature = members
+        .map((member) => [
+              (member['id'] ?? '').toString(),
+              (member['role'] ?? '').toString(),
+              (member['display_name'] ?? '').toString(),
+              (member['avatar_url'] ?? '').toString(),
+            ].join('|'))
+        .join('||');
+    final avatarSignature = avatarHistory
+        .map((item) => [
+              (item['avatar_url'] ?? '').toString(),
+              (item['created_at'] ?? '').toString(),
+              (item['is_current'] ?? '').toString(),
+            ].join('|'))
+        .join('||');
+    final orderedAdmins = adminIds.toList()..sort();
+    return [
+      title,
+      avatarUrl,
+      updatedAt,
+      firebaseChatId,
+      ownerId.toString(),
+      orderedAdmins.join(','),
+      memberSignature,
+      avatarSignature,
+    ].join('###');
+  }
 
   @override
   void initState() {
     super.initState();
+    _firebaseChatId = widget.firebaseChatId ?? '';
     _loadMuteState();
     _loadDeletedForMe();
     _loadMessages();
-    _pollTimer =
-        Timer.periodic(const Duration(seconds: 4), (_) => _loadMessages());
+    _loadPinned();
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 1200), (_) {
+      _loadMessages();
+      _pollCycle++;
+      if (_pollCycle % 2 == 0) _loadPinned();
+      if (_isGroupChat && _pollCycle % 4 == 0) _loadGroupDetails();
+    });
     if (!_isGroupChat && widget.partnerId > 0) {
       _loadPartnerStatus();
       _statusTimer = Timer.periodic(
@@ -125,20 +279,25 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadPartnerStatus() async {
+    if (!await ApiService().hasToken()) return;
     try {
       final data = await ApiService().getUserNowPlaying(widget.partnerId);
       if (!mounted) return;
       setState(() {
         _partnerNowPlaying =
             (data?['now_playing'] as Map?)?.cast<String, dynamic>();
+        _partnerOnline = data?['is_online'] == true;
+        _partnerLastSeenAt = (data?['last_seen_at'] ?? '').toString();
       });
     } catch (_) {}
   }
 
   Future<void> _loadGroupDetails() async {
+    if (_loadingGroupDetails) return;
+    if (!await ApiService().hasToken()) return;
+    _loadingGroupDetails = true;
     try {
-      final data =
-          await ApiService().getGroupChatDetails(widget.groupChatId!);
+      final data = await ApiService().getGroupChatDetails(widget.groupChatId!);
       if (!mounted) return;
       final members = (data['members'] as List?)
               ?.map((m) => Map<String, dynamic>.from(m as Map))
@@ -151,14 +310,42 @@ class _ChatScreenState extends State<ChatScreen> {
         if (m['role'] == 'owner') ownerId = uid;
         if (m['role'] == 'admin') adminIds.add(uid);
       }
-      setState(() {
-        _groupMembers = members;
-        _groupOwnerId = ownerId;
-        _groupAdminIds = adminIds;
-        _groupTitle = (data['title'] ?? '').toString();
-        _groupAvatarUrl = (data['avatar_url'] ?? '').toString();
-      });
-    } catch (_) {}
+      final fid = (data['firebase_chat_id'] ?? '').toString();
+      final avatarHistory = (data['avatar_history'] as List?)
+              ?.map((item) => Map<String, dynamic>.from(item as Map))
+              .toList() ??
+          [];
+      final shouldLoadPins = fid.isNotEmpty && fid != _firebaseChatId;
+      final nextSignature = _groupSignature(
+        members: members,
+        ownerId: ownerId,
+        adminIds: adminIds,
+        title: (data['title'] ?? '').toString(),
+        avatarUrl: (data['avatar_url'] ?? '').toString(),
+        updatedAt: (data['updated_at'] ?? '').toString(),
+        firebaseChatId: fid,
+        avatarHistory: avatarHistory,
+      );
+      if (nextSignature != _lastGroupSignature) {
+        _lastGroupSignature = nextSignature;
+        setState(() {
+          _groupMembers = members;
+          _groupOwnerId = ownerId;
+          _groupAdminIds = adminIds;
+          _groupTitle = (data['title'] ?? '').toString();
+          _groupAvatarUrl = (data['avatar_url'] ?? '').toString();
+          _groupUpdatedAt = (data['updated_at'] ?? '').toString();
+          _groupAvatarHistory = avatarHistory;
+          if (fid.isNotEmpty) _firebaseChatId = fid;
+        });
+      } else if (fid.isNotEmpty && fid != _firebaseChatId) {
+        setState(() => _firebaseChatId = fid);
+      }
+      if (shouldLoadPins) _loadPinned();
+    } catch (_) {
+    } finally {
+      _loadingGroupDetails = false;
+    }
   }
 
   Future<void> _loadDeletedForMe() async {
@@ -168,14 +355,342 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() => _deletedForMe.addAll(ids));
   }
 
+  Future<void> _saveLastRead() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      '$_lastReadKeyPrefix$_chatListKey',
+      DateTime.now().toUtc().toIso8601String(),
+    );
+  }
+
+  Future<void> _loadPinned() async {
+    if (_firebaseChatId.isEmpty || _loadingPins) return;
+    if (!await ApiService().hasToken()) return;
+    _loadingPins = true;
+    try {
+      final pins = await ApiService().getPinnedMessages(_firebaseChatId);
+      if (!mounted) return;
+      final nextPins = pins
+          .map((p) => Map<String, dynamic>.from(p as Map))
+          .toList()
+        ..sort((a, b) => (b['pinned_at'] as String? ?? '')
+            .compareTo(a['pinned_at'] as String? ?? ''));
+      final nextSignature = _pinsSignature(nextPins);
+      if (nextSignature != _lastPinsSignature) {
+        _lastPinsSignature = nextSignature;
+        setState(() {
+          _pinnedMessages = nextPins;
+        });
+      }
+    } catch (_) {
+    } finally {
+      _loadingPins = false;
+    }
+  }
+
+  Future<void> _pinMessage(String messageId, String preview) async {
+    if (!await _ensureFirebaseChatId()) {
+      _showActionError('Could not find this chat for pinning');
+      return;
+    }
+    _applyLocalPin(messageId, preview);
+    try {
+      await ApiService().pinMessage(_firebaseChatId, messageId, preview);
+      unawaited(_loadPinned());
+    } catch (_) {
+      unawaited(_loadPinned());
+      _showActionError('Could not pin this message');
+    }
+  }
+
+  Future<void> _unpinMessage(String messageId) async {
+    if (!await _ensureFirebaseChatId()) {
+      _showActionError('Could not find this chat for unpinning');
+      return;
+    }
+    _applyLocalUnpin(messageId);
+    try {
+      await ApiService().unpinMessage(_firebaseChatId, messageId);
+      unawaited(_loadPinned());
+    } catch (_) {
+      unawaited(_loadPinned());
+      _showActionError('Could not unpin this message');
+    }
+  }
+
+  Future<bool> _ensureFirebaseChatId() async {
+    if (_firebaseChatId.isNotEmpty) return true;
+    if (_isGroupChat) {
+      await _loadGroupDetails();
+    }
+    return _firebaseChatId.isNotEmpty;
+  }
+
+  void _showActionError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AppColors.surface,
+        content: Text(message),
+      ),
+    );
+  }
+
+  void _toggleMessageSelection(String messageId) {
+    setState(() {
+      if (_selectedMessageIds.contains(messageId)) {
+        _selectedMessageIds.remove(messageId);
+      } else {
+        _selectedMessageIds.add(messageId);
+      }
+      if (_selectedMessageIds.isEmpty) _selectingMessages = false;
+    });
+  }
+
+  Future<void> _forwardMessages(List<String> messageIds) async {
+    if (messageIds.isEmpty) return;
+    if (!await _ensureFirebaseChatId()) {
+      _showActionError('Could not find this chat for forwarding');
+      return;
+    }
+    final target = await _showForwardTargetSheet();
+    if (target == null) return;
+    try {
+      await ApiService().forwardMessages(
+        sourceFirebaseChatId: _firebaseChatId,
+        messageIds: messageIds,
+        targetKind: target.kind,
+        targetId: target.id,
+      );
+      if (!mounted) return;
+      setState(() {
+        _selectingMessages = false;
+        _selectedMessageIds.clear();
+      });
+      _showActionError('Forwarded');
+    } catch (_) {
+      _showActionError('Could not forward messages');
+    }
+  }
+
+  Future<_ForwardTarget?> _showForwardTargetSheet() async {
+    List<dynamic> chats = [];
+    try {
+      final cached = (await SharedPreferences.getInstance())
+          .getString('social_cached_chats_v2');
+      final decoded = cached == null ? null : jsonDecode(cached);
+      if (decoded is List) chats = decoded;
+    } catch (_) {}
+    if (chats.whereType<Map>().isEmpty) {
+      chats = await ApiService().getChats();
+    } else {
+      unawaited(ApiService().getChats().then((fresh) async {
+        if (fresh.whereType<Map>().isNotEmpty) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('social_cached_chats_v2', jsonEncode(fresh));
+        }
+      }).catchError((_) => <dynamic>[]));
+    }
+    if (!mounted) return null;
+    return showModalBottomSheet<_ForwardTarget>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('Forward to',
+                style: GoogleFonts.outfit(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.text)),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: chats.whereType<Map>().map((raw) {
+                  final chat = Map<String, dynamic>.from(raw);
+                  final partner =
+                      (chat['partner'] as Map?)?.cast<String, dynamic>() ?? {};
+                  final name = (partner['display_name'] ??
+                          partner['first_name'] ??
+                          partner['username'] ??
+                          'Chat')
+                      .toString();
+                  final avatar = (partner['avatar_url'] ?? '').toString();
+                  final target = _ForwardTarget.fromChat(chat);
+                  if (target == null) return const SizedBox.shrink();
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: _Avatar(
+                      initial: name.isNotEmpty ? name[0].toUpperCase() : 'C',
+                      imageUrl: avatar,
+                      size: 42,
+                      fontSize: 15,
+                    ),
+                    title: Text(name,
+                        style: GoogleFonts.outfit(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.text)),
+                    subtitle: Text(
+                        target.kind == 'group' ? 'Group chat' : 'Direct chat',
+                        style: GoogleFonts.outfit(
+                            fontSize: 12, color: AppColors.text3)),
+                    onTap: () => Navigator.pop(context, target),
+                  );
+                }).toList(),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openRoomInviteFromMessage(Map<String, dynamic> msg) async {
+    final rawId = msg['room_id'];
+    var id =
+        rawId is num ? rawId.toInt() : int.tryParse(rawId?.toString() ?? '');
+    if (id == null || id <= 0) {
+      id = _roomIdFromInviteCode((msg['invite_code'] ?? '').toString());
+    }
+    if (id == null || id <= 0) {
+      _showActionError('Room invite is missing room id');
+      return;
+    }
+    try {
+      final room = await ApiService().getRoomDetails(id);
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => ListeningPartyScreen(room: room)),
+      );
+    } catch (e) {
+      final detail = e.toString().contains('404')
+          ? 'Room no longer active'
+          : 'Could not open this room';
+      _showActionError(detail);
+    }
+  }
+
+  int? _roomIdFromInviteCode(String code) {
+    final normalized = code.trim().toUpperCase();
+    final match = RegExp(r'^MW-([0-9A-F]+)$').firstMatch(normalized);
+    if (match == null) return null;
+    return int.tryParse(match.group(1)!, radix: 16);
+  }
+
+  void _applyLocalPin(String messageId, String preview) {
+    final next = [
+      {
+        'message_id': messageId,
+        'preview': preview,
+        'pinned_at': DateTime.now().toUtc().toIso8601String(),
+        'pinned_by': _currentUserId,
+      },
+      ..._pinnedMessages.where((item) => item['message_id'] != messageId),
+    ];
+    setState(() {
+      _pinnedMessages = next;
+      _lastPinsSignature = _pinsSignature(next);
+    });
+  }
+
+  void _applyLocalUnpin(String messageId) {
+    final next = _pinnedMessages
+        .where((item) => item['message_id'] != messageId)
+        .toList();
+    setState(() {
+      _pinnedMessages = next;
+      _lastPinsSignature = _pinsSignature(next);
+    });
+  }
+
+  void _applyLocalReaction(String messageId, String emoji) {
+    if (_currentUserId <= 0) return;
+    final updatedMessages = _messages.map((raw) {
+      final msg = Map<String, dynamic>.from(raw as Map);
+      if ((msg['message_id'] ?? '').toString() != messageId) {
+        return raw;
+      }
+      final rawReactions = msg['reactions'];
+      final reactions = rawReactions is Map
+          ? Map<String, dynamic>.from(rawReactions)
+          : <String, dynamic>{};
+      var hadSame = false;
+      final next = <String, dynamic>{};
+      for (final entry in reactions.entries) {
+        final rawUsers = (entry.value as List?) ?? const [];
+        final users = ((entry.value as List?) ?? const [])
+            .map((user) => (user as num?)?.toInt() ?? 0)
+            .where((userId) => userId > 0 && userId != _currentUserId)
+            .toList();
+        if (entry.key == emoji &&
+            rawUsers
+                .any((user) => user.toString() == _currentUserId.toString())) {
+          hadSame = true;
+        }
+        if (users.isNotEmpty) next[entry.key] = users;
+      }
+      if (!hadSame) {
+        next[emoji] = [...((next[emoji] as List?) ?? const []), _currentUserId];
+      }
+      msg['reactions'] = next;
+      return msg;
+    }).toList();
+    setState(() {
+      _messages = updatedMessages;
+      _lastMessagesSignature = _messagesSignature(updatedMessages);
+    });
+  }
+
+  Future<void> _submitReaction(String messageId, String emoji) async {
+    _applyLocalReaction(messageId, emoji);
+    try {
+      if (_isGroupChat) {
+        await ApiService().reactToGroupMessage(
+          widget.groupChatId!,
+          messageId,
+          emoji,
+        );
+      } else if (_usesDirectThread) {
+        await ApiService().reactToDirectMessage(
+          widget.chatId!,
+          messageId,
+          emoji,
+        );
+      } else {
+        await ApiService().reactToMessage(
+          widget.matchId!,
+          messageId,
+          emoji,
+        );
+      }
+      unawaited(_loadMessages());
+    } catch (_) {
+      unawaited(_loadMessages());
+      _showActionError('Could not add reaction');
+    }
+  }
+
   Future<void> _deleteForMe(String messageId) async {
     _deletedForMe.add(messageId);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_deletedMsgsKey, _deletedForMe.toList());
     if (!mounted) return;
     setState(() {
-      _messages =
-          _messages.where((m) => (m as Map)['message_id'] != messageId).toList();
+      _messages = _messages
+          .where((m) => (m as Map)['message_id'] != messageId)
+          .toList();
     });
   }
 
@@ -212,7 +727,11 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadMessages() async {
+    if (_loadingMessages) return;
+    if (!await ApiService().hasToken()) return;
+    _loadingMessages = true;
     try {
+      unawaited(ApiService().sendPresenceHeartbeat());
       final msgs = _isGroupChat
           ? await ApiService().getGroupChatMessages(widget.groupChatId!)
           : _usesDirectThread
@@ -222,16 +741,33 @@ class _ChatScreenState extends State<ChatScreen> {
       final filtered = msgs
           .where((m) => !_deletedForMe.contains((m as Map)['message_id']))
           .toList();
-      final needsScroll = filtered.length != _lastCount;
-      setState(() {
-        _messages = filtered;
-        _messageKeys = List<GlobalKey>.generate(
-          msgs.length,
-          (_) => GlobalKey(),
-          growable: false,
-        );
-        _lastCount = msgs.length;
-      });
+      _pendingMessages.removeWhere(
+        (pending) => filtered.any(
+          (loaded) => (loaded as Map)['message_id'] == pending['message_id'],
+        ),
+      );
+      final merged = [
+        ...filtered,
+        ..._pendingMessages.where((pending) => !filtered.any(
+              (loaded) =>
+                  (loaded as Map)['message_id'] == pending['message_id'],
+            )),
+      ];
+      final needsScroll = merged.length != _lastCount;
+      final nextSignature = _messagesSignature(merged);
+      if (nextSignature != _lastMessagesSignature) {
+        _lastMessagesSignature = nextSignature;
+        setState(() {
+          _messages = merged;
+          _messageKeys = List<GlobalKey>.generate(
+            merged.length,
+            (_) => GlobalKey(),
+            growable: false,
+          );
+          _lastCount = merged.length;
+        });
+      }
+      _saveLastRead();
       if (needsScroll) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_scrollCtrl.hasClients) {
@@ -243,26 +779,102 @@ class _ChatScreenState extends State<ChatScreen> {
           }
         });
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _loadingMessages = false;
+    }
   }
 
   Future<void> _send() async {
     final text = _textCtrl.text.trim();
     if (text.isEmpty || _sending) return;
     HapticFeedback.lightImpact();
+    final authUser =
+        (context.read<AuthProvider>().user ?? const <String, dynamic>{});
+    final myId = (authUser['id'] as num?)?.toInt() ?? 0;
+    final optimisticId = 'local_${DateTime.now().microsecondsSinceEpoch}';
+    final optimisticMessage = <String, dynamic>{
+      'message_id': optimisticId,
+      'type': 'text',
+      'text': text,
+      'sender_id': myId,
+      'sender_name': (authUser['display_name'] ??
+              authUser['first_name'] ??
+              authUser['username'] ??
+              '')
+          .toString(),
+      'sender_avatar_url': (authUser['avatar_url'] ?? '').toString(),
+      'sent_at': DateTime.now().toUtc().toIso8601String(),
+      'reactions': <String, dynamic>{},
+    };
     setState(() => _sending = true);
+    setState(() {
+      _pendingMessages.add(optimisticMessage);
+      _messages = [..._messages, optimisticMessage];
+      _messageKeys = List<GlobalKey>.generate(
+        _messages.length,
+        (_) => GlobalKey(),
+        growable: false,
+      );
+      _lastCount = _messages.length;
+    });
     _textCtrl.clear();
-    try {
-      if (_isGroupChat) {
-        await ApiService().sendGroupTextMessage(widget.groupChatId!, text);
-      } else if (_usesDirectThread) {
-        await ApiService().sendDirectTextMessage(widget.chatId!, text);
-      } else {
-        await ApiService().sendTextMessage(widget.matchId!, text);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.animateTo(
+          _scrollCtrl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+        );
       }
-      await _loadMessages();
+    });
+    try {
+      final response = _isGroupChat
+          ? await ApiService().sendGroupTextMessage(widget.groupChatId!, text)
+          : _usesDirectThread
+              ? await ApiService().sendDirectTextMessage(widget.chatId!, text)
+              : await ApiService().sendTextMessage(widget.matchId!, text);
+      final deliveredId = (response['message_id'] ?? '').toString();
+      final deliveredAt =
+          (response['sent_at'] ?? optimisticMessage['sent_at']).toString();
+      _lastDeliveredText = text;
+      _lastDeliveredAt = deliveredAt;
+      final pendingIndex =
+          _pendingMessages.indexWhere((m) => m['message_id'] == optimisticId);
+      if (pendingIndex >= 0) {
+        _pendingMessages[pendingIndex] = {
+          ..._pendingMessages[pendingIndex],
+          'message_id': deliveredId.isNotEmpty ? deliveredId : optimisticId,
+          'sent_at': deliveredAt,
+        };
+      }
+      if (mounted) {
+        setState(() {
+          final messageIndex = _messages.indexWhere(
+            (m) => (m as Map)['message_id'] == optimisticId,
+          );
+          if (messageIndex >= 0) {
+            _messages[messageIndex] = {
+              ...(_messages[messageIndex] as Map<String, dynamic>),
+              'message_id': deliveredId.isNotEmpty ? deliveredId : optimisticId,
+              'sent_at': deliveredAt,
+            };
+          }
+        });
+      }
+      unawaited(_loadMessages());
     } catch (e) {
       if (!mounted) return;
+      _pendingMessages.removeWhere((m) => m['message_id'] == optimisticId);
+      setState(() {
+        _messages.removeWhere((m) => (m as Map)['message_id'] == optimisticId);
+        _messageKeys = List<GlobalKey>.generate(
+          _messages.length,
+          (_) => GlobalKey(),
+          growable: false,
+        );
+        _lastCount = _messages.length;
+      });
       _textCtrl.text = text;
       _textCtrl.selection =
           TextSelection.collapsed(offset: _textCtrl.text.length);
@@ -580,6 +1192,53 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  Future<void> _openGroupAvatarGallery() async {
+    if (!_isGroupChat) {
+      _openPartnerProfile();
+      return;
+    }
+    List<Map<String, dynamic>> avatars = _groupAvatarHistory;
+    if (avatars.isEmpty) {
+      try {
+        final data =
+            await ApiService().getGroupChatAvatarHistory(widget.groupChatId!);
+        avatars =
+            data.map((item) => Map<String, dynamic>.from(item as Map)).toList();
+        if (mounted) {
+          setState(() => _groupAvatarHistory = avatars);
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    final imageItems = avatars
+        .map((item) => <String, dynamic>{
+              'image_url': (item['avatar_url'] ?? '').toString(),
+              'caption': (item['is_current'] == true)
+                  ? 'Current group avatar'
+                  : 'Previous group avatar',
+              'sent_at': item['created_at'],
+            })
+        .where((item) => (item['image_url'] as String).isNotEmpty)
+        .toList();
+    if (imageItems.isEmpty && _groupAvatarUrl.isNotEmpty) {
+      imageItems.add({
+        'image_url': _groupAvatarUrl,
+        'caption': 'Current group avatar',
+      });
+    }
+    if (imageItems.isEmpty) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _SharedImageViewerScreen(
+          images: imageItems,
+          initialIndex: 0,
+          title: _groupTitle.isNotEmpty ? _groupTitle : widget.partnerName,
+        ),
+      ),
+    );
+  }
+
   void _openConversationMenu() {
     final myId =
         (context.read<AuthProvider>().user?['id'] as num?)?.toInt() ?? 0;
@@ -587,129 +1246,180 @@ class _ChatScreenState extends State<ChatScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (!_isGroupChat) ...[
-              _menuTile(
-                icon: Icons.groups_rounded,
-                label: 'Create group',
-                onTap: () {
-                  Navigator.pop(context);
-                  _createGroupChat();
-                },
-              ),
-              _menuTile(
-                icon: Icons.headphones_rounded,
-                label: 'Listening room',
-                onTap: () {
-                  Navigator.pop(context);
-                  _createListeningGroup();
-                },
-              ),
-            ],
-            if (_isGroupChat)
-              _menuTile(
-                icon: Icons.people_rounded,
-                label: 'Members',
-                trailing: '${_groupMembers.length}',
-                onTap: () {
-                  Navigator.pop(context);
-                  _openMembersSheet(myId, amIOwner);
-                },
-              ),
-            if (_isGroupChat && (amIOwner || _groupAdminIds.contains(myId)))
-              _menuTile(
-                icon: Icons.edit_rounded,
-                label: 'Edit group',
-                onTap: () {
-                  Navigator.pop(context);
-                  _openEditGroupSheet();
-                },
-              ),
-            _menuTile(
-              icon: Icons.folder_shared_rounded,
-              label: 'Shared media',
-              onTap: () {
-                Navigator.pop(context);
-                _openSharedContent();
-              },
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        top: false,
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(sheetContext).size.height * 0.74,
+          ),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!_isGroupChat) ...[
+                  _menuTile(
+                    icon: Icons.groups_rounded,
+                    label: 'Create group',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _createGroupChat();
+                    },
+                  ),
+                  _menuTile(
+                    icon: Icons.headphones_rounded,
+                    label: 'Live Room',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _createListeningGroup();
+                    },
+                  ),
+                ],
+                if (_isGroupChat)
+                  _menuTile(
+                    icon: Icons.people_rounded,
+                    label: 'Members',
+                    trailing: '${_groupMembers.length}',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _openMembersSheet(myId, amIOwner);
+                    },
+                  ),
+                if (_isGroupChat &&
+                    (_groupAvatarUrl.isNotEmpty ||
+                        _groupAvatarHistory.isNotEmpty))
+                  _menuTile(
+                    icon: Icons.history_rounded,
+                    label: 'Avatar history',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _openGroupAvatarGallery();
+                    },
+                  ),
+                if (_pinnedMessages.isNotEmpty)
+                  _menuTile(
+                    icon: Icons.push_pin_rounded,
+                    label: 'Pinned messages',
+                    trailing: '${_pinnedMessages.length}',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showAllPinned();
+                    },
+                  ),
+                if (_isGroupChat && (amIOwner || _groupAdminIds.contains(myId)))
+                  _menuTile(
+                    icon: Icons.edit_rounded,
+                    label: 'Edit group',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _openEditGroupSheet();
+                    },
+                  ),
+                _menuTile(
+                  icon: Icons.folder_shared_rounded,
+                  label: 'Shared media',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _openSharedContent();
+                  },
+                ),
+                _menuTile(
+                  icon: Icons.search_rounded,
+                  label: 'Search in chat',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _openSearchInChat();
+                  },
+                ),
+                _menuTile(
+                  icon: _chatMuted
+                      ? Icons.notifications_active_outlined
+                      : Icons.notifications_off_outlined,
+                  label: _chatMuted
+                      ? 'Unmute notifications'
+                      : 'Mute notifications',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _toggleMuteConversation();
+                  },
+                ),
+                if (_isGroupChat)
+                  _menuTile(
+                    icon: Icons.exit_to_app_rounded,
+                    label: 'Leave group',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _leaveGroupChat();
+                    },
+                  ),
+              ],
             ),
-            _menuTile(
-              icon: Icons.search_rounded,
-              label: 'Search in chat',
-              onTap: () {
-                Navigator.pop(context);
-                _openSearchInChat();
-              },
-            ),
-            _menuTile(
-              icon: _chatMuted
-                  ? Icons.notifications_active_outlined
-                  : Icons.notifications_off_outlined,
-              label: _chatMuted ? 'Unmute notifications' : 'Mute notifications',
-              onTap: () {
-                Navigator.pop(context);
-                _toggleMuteConversation();
-              },
-            ),
-            if (_isGroupChat)
-              _menuTile(
-                icon: Icons.exit_to_app_rounded,
-                label: 'Leave group',
-                onTap: () {
-                  Navigator.pop(context);
-                  _leaveGroupChat();
-                },
-              ),
-          ],
+          ),
         ),
       ),
     );
   }
 
   Future<void> _createListeningGroup() async {
+    if (_creatingListeningRoom) return;
+    setState(() => _creatingListeningRoom = true);
+    Map<String, dynamic>? room;
     try {
-      final room = await ApiService().createListeningRoom(
-        name: '${widget.partnerName} Listening Room',
-        isPublic: false,
-        maxGuests: 8,
+      room = await showListeningRoomCreateSheet(
+        context,
+        initialName: '${widget.partnerName} Live Room',
+        initialPublic: false,
       );
-      if (!mounted) return;
-      final inviteCode = room['invite_code']?.toString() ?? '';
-      if (_isGroupChat) {
-        await ApiService().sendGroupTextMessage(
-          widget.groupChatId!,
-          '🎵 Listening room created! Invite code: $inviteCode',
-        );
-      } else if (_usesDirectThread) {
-        await ApiService().sendDirectTextMessage(
-          widget.chatId!,
-          '🎵 Listening room created! Invite code: $inviteCode',
-        );
-      } else {
-        await ApiService().sendTextMessage(widget.matchId!,
-            '🎵 Listening room created! Invite code: $inviteCode');
+      if (room == null) {
+        if (mounted) setState(() => _creatingListeningRoom = false);
+        return;
       }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _creatingListeningRoom = false);
+      _showSendError(e, fallback: 'Could not create Live Room');
+      return;
+    }
+
+    try {
+      await ApiService().sendRoomInviteMessage(
+        matchId: widget.matchId,
+        chatId: widget.chatId,
+        groupChatId: widget.groupChatId,
+        room: room,
+        inviteRole: 'listener',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _creatingListeningRoom = false);
+      _showSendError(e, fallback: 'Room created, but invite was not sent');
+      return;
+    }
+
+    try {
       await _loadMessages();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _creatingListeningRoom = false);
+    try {
       if (!mounted) return;
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => ListeningPartyScreen(room: room),
+          builder: (_) => ListeningPartyScreen(room: room!),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      _showSendError(e, fallback: 'Could not create listening room');
+      _showSendError(e, fallback: 'Room created, but could not open it');
     }
   }
 
@@ -801,65 +1511,204 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _showDeleteMenu(String messageId, {bool isSender = false}) {
+  void _showMessageReactionSheet(String messageId,
+      {required bool canDeleteAll, String preview = ''}) {
     HapticFeedback.mediumImpact();
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            leading: const Icon(Icons.visibility_off_rounded,
-                color: AppColors.text2),
-            title: Text('Delete for me',
-                style: GoogleFonts.outfit(
-                    fontSize: 15, color: AppColors.text)),
-            subtitle: Text('Only visible to you',
-                style: GoogleFonts.outfit(
-                    fontSize: 12, color: AppColors.text3)),
-            onTap: () {
-              Navigator.pop(context);
-              _deleteForMe(messageId);
-            },
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.border),
           ),
-          if (isSender)
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('React',
+                style: GoogleFonts.outfit(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.text2)),
+            const SizedBox(height: 12),
+            ...List.generate(2, (row) {
+              final start = row * 5;
+              final slice = _kReactions.skip(start).take(5).toList();
+              return Padding(
+                padding: EdgeInsets.only(bottom: row == 0 ? 8 : 0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: slice.map((emoji) {
+                    return GestureDetector(
+                      onTap: () async {
+                        Navigator.pop(context);
+                        await _submitReaction(messageId, emoji);
+                      },
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: AppColors.glass,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Center(
+                            child: Text(emoji,
+                                style: const TextStyle(fontSize: 22))),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              );
+            }),
+            const SizedBox(height: 4),
+            const Divider(color: AppColors.border, height: 1),
+            Builder(builder: (ctx) {
+              final isPinned =
+                  _pinnedMessages.any((p) => p['message_id'] == messageId);
+              return ListTile(
+                dense: true,
+                leading: Icon(
+                  isPinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
+                  color: AppColors.purpleLight,
+                  size: 18,
+                ),
+                title: Text(
+                  isPinned ? 'Unpin message' : 'Pin message',
+                  style:
+                      GoogleFonts.outfit(fontSize: 13, color: AppColors.text),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  if (isPinned) {
+                    _unpinMessage(messageId);
+                  } else {
+                    _pinMessage(messageId, preview);
+                  }
+                },
+              );
+            }),
             ListTile(
-              leading: const Icon(Icons.delete_rounded,
-                  color: Color(0xFFef4444)),
-              title: Text('Delete for everyone',
-                  style: GoogleFonts.outfit(
-                      fontSize: 15, color: const Color(0xFFef4444))),
-              subtitle: Text('Removed for all participants',
-                  style: GoogleFonts.outfit(
-                      fontSize: 12, color: AppColors.text3)),
-              onTap: () async {
+              dense: true,
+              leading: const Icon(Icons.forward_rounded,
+                  color: AppColors.purpleLight, size: 18),
+              title: Text('Forward',
+                  style:
+                      GoogleFonts.outfit(fontSize: 13, color: AppColors.text)),
+              onTap: () {
                 Navigator.pop(context);
-                try {
-                  await ApiService().deleteMessage(
-                    matchId: widget.matchId,
-                    chatId: widget.chatId,
-                    groupChatId: widget.groupChatId,
-                    messageId: messageId,
-                  );
-                  _loadMessages();
-                } catch (_) {}
+                _forwardMessages([messageId]);
               },
             ),
-          ListTile(
-            leading: const Icon(Icons.close_rounded, color: AppColors.text3),
-            title: Text('Cancel',
-                style:
-                    GoogleFonts.outfit(fontSize: 15, color: AppColors.text2)),
-            onTap: () => Navigator.pop(context),
-          ),
-        ]),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.checklist_rounded,
+                  color: AppColors.text2, size: 18),
+              title: Text('Select messages',
+                  style:
+                      GoogleFonts.outfit(fontSize: 13, color: AppColors.text)),
+              onTap: () {
+                Navigator.pop(context);
+                setState(() {
+                  _selectingMessages = true;
+                  _selectedMessageIds
+                    ..clear()
+                    ..add(messageId);
+                });
+              },
+            ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.visibility_off_rounded,
+                  color: AppColors.text2, size: 18),
+              title: Text('Delete for me',
+                  style:
+                      GoogleFonts.outfit(fontSize: 13, color: AppColors.text)),
+              onTap: () {
+                Navigator.pop(context);
+                _deleteForMe(messageId);
+              },
+            ),
+            if (canDeleteAll)
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.delete_rounded,
+                    color: Color(0xFFef4444), size: 18),
+                title: Text('Delete for everyone',
+                    style: GoogleFonts.outfit(
+                        fontSize: 13, color: const Color(0xFFef4444))),
+                onTap: () async {
+                  Navigator.pop(context);
+                  try {
+                    await ApiService().deleteMessage(
+                      matchId: widget.matchId,
+                      chatId: widget.chatId,
+                      groupChatId: widget.groupChatId,
+                      messageId: messageId,
+                    );
+                    _loadMessages();
+                  } catch (_) {}
+                },
+              ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReactionBar(Map<String, dynamic> msg, {required bool isMe}) {
+    final messageId = msg['message_id'] as String?;
+    final reactions = _reactionMap(msg);
+    if (messageId == null || reactions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Transform.translate(
+      offset: const Offset(0, -1),
+      child: Wrap(
+        alignment: isMe ? WrapAlignment.end : WrapAlignment.start,
+        spacing: 4,
+        runSpacing: 4,
+        children: reactions.entries.map((entry) {
+          final emoji = entry.key;
+          final users = (entry.value as List?) ?? const [];
+          if (users.isEmpty) return const SizedBox.shrink();
+          return GestureDetector(
+            onTap: () => _submitReaction(messageId, emoji),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.bg2.withOpacity(0.94),
+                borderRadius: BorderRadius.circular(100),
+                border:
+                    Border.all(color: AppColors.purpleLight.withOpacity(0.35)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.18),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(emoji, style: const TextStyle(fontSize: 13)),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${users.length}',
+                    style: GoogleFonts.outfit(
+                      fontSize: 11,
+                      color: AppColors.text2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
@@ -935,16 +1784,19 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _openEditGroupSheet() {
     final titleCtrl = TextEditingController(text: _groupTitle);
-    final avatarCtrl = TextEditingController(text: _groupAvatarUrl);
     bool saving = false;
+    Uint8List? pickedBytes;
+    String pickedName = 'avatar.jpg';
+    bool clearAvatar = false;
+
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSS) => Padding(
-          padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          padding:
+              EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
           child: Container(
             margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
@@ -972,11 +1824,102 @@ class _ChatScreenState extends State<ChatScreen> {
                   icon: Icons.groups_rounded,
                 ),
                 const SizedBox(height: 10),
-                _settingsField(
-                  controller: avatarCtrl,
-                  hint: 'Avatar URL (optional)',
-                  icon: Icons.image_rounded,
-                ),
+                // Avatar picker
+                Row(children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () async {
+                        final picker = ImagePicker();
+                        final img = await picker.pickImage(
+                          source: ImageSource.gallery,
+                          maxWidth: 400,
+                          maxHeight: 400,
+                          imageQuality: 80,
+                        );
+                        if (img == null) return;
+                        final bytes = await img.readAsBytes();
+                        setSS(() {
+                          pickedBytes = bytes;
+                          pickedName = img.name;
+                          clearAvatar = false;
+                        });
+                      },
+                      child: Container(
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: AppColors.bg,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Row(children: [
+                          const SizedBox(width: 14),
+                          if (pickedBytes != null && !clearAvatar)
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.memory(pickedBytes!,
+                                  width: 32, height: 32, fit: BoxFit.cover),
+                            )
+                          else if (_groupAvatarUrl.isNotEmpty && !clearAvatar)
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: CachedNetworkImage(
+                                imageUrl: buildMediaUrl(
+                                  _groupAvatarUrl,
+                                  version: _groupUpdatedAt.isNotEmpty
+                                      ? _groupUpdatedAt
+                                      : null,
+                                ),
+                                width: 32,
+                                height: 32,
+                                fit: BoxFit.cover,
+                                errorWidget: (_, __, ___) => const Icon(
+                                  Icons.image_rounded,
+                                  color: AppColors.text3,
+                                  size: 22,
+                                ),
+                              ),
+                            )
+                          else
+                            const Icon(Icons.image_rounded,
+                                color: AppColors.text3, size: 22),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              clearAvatar
+                                  ? 'No photo'
+                                  : pickedBytes != null
+                                      ? 'Photo selected'
+                                      : 'Change avatar photo',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 14, color: AppColors.text3),
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ),
+                  ),
+                  if ((_groupAvatarUrl.isNotEmpty || pickedBytes != null) &&
+                      !clearAvatar) ...[
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () => setSS(() {
+                        clearAvatar = true;
+                        pickedBytes = null;
+                      }),
+                      child: Container(
+                        width: 46,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: AppColors.bg,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: const Icon(Icons.delete_outline_rounded,
+                            color: Color(0xFFef4444), size: 20),
+                      ),
+                    ),
+                  ],
+                ]),
                 const SizedBox(height: 16),
                 GestureDetector(
                   onTap: saving
@@ -984,24 +1927,51 @@ class _ChatScreenState extends State<ChatScreen> {
                       : () async {
                           setSS(() => saving = true);
                           try {
+                            String? newAvatarUrl;
+                            if (pickedBytes != null) {
+                              newAvatarUrl =
+                                  await ApiService().uploadGroupChatAvatar(
+                                widget.groupChatId!,
+                                pickedBytes!,
+                                pickedName,
+                              );
+                            } else if (clearAvatar) {
+                              newAvatarUrl = '';
+                            }
                             final result = await ApiService().updateGroupChat(
                               widget.groupChatId!,
                               title: titleCtrl.text.trim().isNotEmpty
                                   ? titleCtrl.text.trim()
                                   : null,
-                              avatarUrl: avatarCtrl.text.trim(),
+                              avatarUrl: newAvatarUrl,
                             );
+                            if (newAvatarUrl != null &&
+                                newAvatarUrl.isNotEmpty) {
+                              await CachedNetworkImage.evictFromCache(
+                                newAvatarUrl,
+                              );
+                            }
                             if (!mounted) return;
                             setState(() {
-                              _groupTitle = (result['title'] ?? _groupTitle).toString();
-                              _groupAvatarUrl = (result['avatar_url'] ?? '').toString();
+                              _groupTitle =
+                                  (result['title'] ?? _groupTitle).toString();
+                              _groupAvatarUrl =
+                                  (result['avatar_url'] ?? '').toString();
+                              _groupUpdatedAt = (result['updated_at'] ?? '')
+                                      .toString()
+                                      .trim()
+                                      .isNotEmpty
+                                  ? (result['updated_at'] ?? '').toString()
+                                  : DateTime.now().toUtc().toIso8601String();
                             });
+                            _loadGroupDetails();
                             Navigator.pop(ctx);
                           } catch (_) {
                             setSS(() => saving = false);
                             if (!mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Could not update group')),
+                              const SnackBar(
+                                  content: Text('Could not update group')),
                             );
                           }
                         },
@@ -1180,183 +2150,295 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final myId = context.read<AuthProvider>().user?['id'];
-    final initial = widget.partnerName.isNotEmpty
-        ? widget.partnerName[0].toUpperCase()
-        : 'U';
-    final partnerAvatarUrl = widget.partnerAvatarUrl ?? '';
+    final displayName = _isGroupChat && _groupTitle.isNotEmpty
+        ? _groupTitle
+        : widget.partnerName;
+    final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U';
+    final partnerAvatarUrl = _isGroupChat && _groupAvatarUrl.isNotEmpty
+        ? buildMediaUrl(
+            _groupAvatarUrl,
+            version: _groupUpdatedAt.isNotEmpty ? _groupUpdatedAt : null,
+          )
+        : (widget.partnerAvatarUrl ?? '');
 
-    return Scaffold(
-      backgroundColor: AppColors.bg,
-      body: Column(children: [
-        _buildHeader(initial, partnerAvatarUrl),
-        const _ChatNowPlayingBar(),
-        Container(height: 1, color: AppColors.border),
-        Expanded(
-          child: _messages.isEmpty
-              ? _buildEmpty()
-              : ListView.builder(
-                  controller: _scrollCtrl,
-                  physics: const BouncingScrollPhysics(),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  itemCount: _messages.length,
-                  itemBuilder: (_, i) {
-                    final msg = _messages[i] as Map<String, dynamic>;
-                    final isMe = msg['sender_id'] == myId;
-                    final type = msg['type'] ?? 'text';
-                    final messageId = msg['message_id'] as String?;
-                    final senderName = _isGroupChat && !isMe
-                        ? (msg['sender_name']?.toString().trim().isNotEmpty ??
-                                false)
-                            ? msg['sender_name'].toString()
-                            : widget.partnerName
-                        : widget.partnerName;
-                    final bubbleInitial = senderName.isNotEmpty
-                        ? senderName[0].toUpperCase()
-                        : initial;
-                    final bubbleAvatarUrl = _isGroupChat && !isMe
-                        ? (msg['sender_avatar_url'] ?? '').toString()
-                        : partnerAvatarUrl;
-                    Widget child = switch (type) {
-                      'track' => _TrackMessage(
-                          msg: msg,
-                          isMe: isMe,
-                          partnerInitial: bubbleInitial,
-                          partnerAvatarUrl: bubbleAvatarUrl,
-                          matchId: widget.matchId,
-                          chatId: widget.chatId,
-                          groupChatId: widget.groupChatId,
-                          useGroupChat: _isGroupChat,
-                          useDirectThread: _usesDirectThread,
-                          onReacted: _loadMessages,
-                          onDelete: messageId != null
-                              ? () => _showDeleteMenu(messageId,
-                                  isSender: isMe ||
-                                      (_isGroupChat &&
-                                          (myId == _groupOwnerId ||
-                                              _groupAdminIds.contains(myId))))
-                              : null,
-                        ),
-                      'album' => _AlbumMessage(
-                          msg: msg,
-                          isMe: isMe,
-                          partnerInitial: bubbleInitial,
-                          partnerAvatarUrl: bubbleAvatarUrl,
-                        ),
-                      'playlist' => _PlaylistMessage(
-                          msg: msg,
-                          isMe: isMe,
-                          partnerInitial: bubbleInitial,
-                          partnerAvatarUrl: bubbleAvatarUrl,
-                        ),
-                      'image' => _ImageMessage(
-                          msg: msg,
-                          isMe: isMe,
-                          partnerInitial: bubbleInitial,
-                          partnerAvatarUrl: bubbleAvatarUrl,
-                        ),
-                      _ => _TextMessage(
-                          msg: msg,
-                          isMe: isMe,
-                          partnerInitial: bubbleInitial,
-                          partnerAvatarUrl: bubbleAvatarUrl,
-                          highlighted: i == _highlightedMessageIndex,
-                          highlightQuery: i == _highlightedMessageIndex
-                              ? _highlightedQuery
-                              : '',
-                        ),
-                    };
-                    // Non-track messages: wrap with delete-on-long-press (anyone can hide for themselves)
-                    if (messageId != null && type != 'track') {
-                      final canDeleteAll = isMe ||
-                          (_isGroupChat &&
-                              (myId == _groupOwnerId ||
-                                  _groupAdminIds.contains(myId)));
-                      child = GestureDetector(
-                        onLongPress: () =>
-                            _showDeleteMenu(messageId, isSender: canDeleteAll),
-                        child: child,
-                      );
-                    }
-                    // Admin badge for group chats
-                    final senderId =
-                        (msg['sender_id'] as num?)?.toInt();
-                    final isOwnerMsg = _isGroupChat &&
-                        _groupOwnerId > 0 &&
-                        senderId == _groupOwnerId;
-                    final isAdminMsg = _isGroupChat &&
-                        senderId != null &&
-                        _groupAdminIds.contains(senderId);
-                    if (isOwnerMsg || isAdminMsg) {
-                      final badge = Container(
-                        margin: EdgeInsets.only(
-                          bottom: 3,
-                          left: isMe ? 0 : 44,
-                          right: isMe ? 8 : 0,
-                        ),
-                        alignment:
-                            isMe ? Alignment.centerRight : Alignment.centerLeft,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: AppColors.purpleDark.withOpacity(0.28),
-                            borderRadius: BorderRadius.circular(5),
+    return WillPopScope(
+      onWillPop: () async {
+        _popWithResult();
+        return false;
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.bg,
+        body: Column(children: [
+          _buildHeader(initial, partnerAvatarUrl, displayName),
+          const _ChatNowPlayingBar(),
+          Container(height: 1, color: AppColors.border),
+          if (_pinnedMessages.isNotEmpty) _buildPinnedBanner(),
+          Expanded(
+            child: _messages.isEmpty
+                ? _buildEmpty()
+                : ListView.builder(
+                    controller: _scrollCtrl,
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 14),
+                    itemCount: _messages.length,
+                    itemBuilder: (_, i) {
+                      final msg = _messages[i] as Map<String, dynamic>;
+                      final isMe = msg['sender_id'] == myId;
+                      final type = msg['type'] ?? 'text';
+                      final messageId = msg['message_id'] as String?;
+                      final senderName = _isGroupChat && !isMe
+                          ? (msg['sender_name']?.toString().trim().isNotEmpty ??
+                                  false)
+                              ? msg['sender_name'].toString()
+                              : widget.partnerName
+                          : widget.partnerName;
+                      final bubbleInitial = senderName.isNotEmpty
+                          ? senderName[0].toUpperCase()
+                          : initial;
+                      final bubbleAvatarUrl = _isGroupChat && !isMe
+                          ? (msg['sender_avatar_url'] ?? '').toString()
+                          : partnerAvatarUrl;
+                      final messageFooter =
+                          type != 'track' && _reactionMap(msg).isNotEmpty
+                              ? _buildReactionBar(msg, isMe: isMe)
+                              : null;
+                      Widget child = switch (type) {
+                        'track' => _TrackMessage(
+                            msg: msg,
+                            isMe: isMe,
+                            partnerInitial: bubbleInitial,
+                            partnerAvatarUrl: bubbleAvatarUrl,
+                            matchId: widget.matchId,
+                            chatId: widget.chatId,
+                            groupChatId: widget.groupChatId,
+                            useGroupChat: _isGroupChat,
+                            useDirectThread: _usesDirectThread,
+                            onReacted: _loadMessages,
                           ),
-                          child: Text(
-                            isOwnerMsg ? 'owner' : 'admin',
-                            style: GoogleFonts.outfit(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w600,
-                              color: isOwnerMsg
-                                  ? AppColors.pink
-                                  : AppColors.purpleLight,
-                              letterSpacing: 0.2,
+                        'album' => _AlbumMessage(
+                            msg: msg,
+                            isMe: isMe,
+                            partnerInitial: bubbleInitial,
+                            partnerAvatarUrl: bubbleAvatarUrl,
+                            footer: messageFooter,
+                          ),
+                        'playlist' => _PlaylistMessage(
+                            msg: msg,
+                            isMe: isMe,
+                            partnerInitial: bubbleInitial,
+                            partnerAvatarUrl: bubbleAvatarUrl,
+                            footer: messageFooter,
+                          ),
+                        'image' => _ImageMessage(
+                            msg: msg,
+                            isMe: isMe,
+                            partnerInitial: bubbleInitial,
+                            partnerAvatarUrl: bubbleAvatarUrl,
+                            footer: messageFooter,
+                          ),
+                        'room_invite' => _RoomInviteMessage(
+                            msg: msg,
+                            isMe: isMe,
+                            partnerInitial: bubbleInitial,
+                            partnerAvatarUrl: bubbleAvatarUrl,
+                            footer: messageFooter,
+                          ),
+                        _ => _TextMessage(
+                            msg: msg,
+                            isMe: isMe,
+                            partnerInitial: bubbleInitial,
+                            partnerAvatarUrl: bubbleAvatarUrl,
+                            footer: messageFooter,
+                            highlighted: i == _highlightedMessageIndex,
+                            highlightQuery: i == _highlightedMessageIndex
+                                ? _highlightedQuery
+                                : '',
+                          ),
+                      };
+                      if (messageId != null) {
+                        final canDeleteAll = isMe ||
+                            (_isGroupChat &&
+                                (myId == _groupOwnerId ||
+                                    _groupAdminIds.contains(myId)));
+                        final msgPreview = type == 'text'
+                            ? (msg['text'] as String? ?? '').substring(
+                                0,
+                                ((msg['text'] as String? ?? '').length)
+                                    .clamp(0, 60))
+                            : '[$type]';
+                        child = GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _selectingMessages
+                              ? () => _toggleMessageSelection(messageId)
+                              : type == 'room_invite'
+                                  ? () => _openRoomInviteFromMessage(msg)
+                                  : null,
+                          onDoubleTap: _selectingMessages
+                              ? null
+                              : () => _showMessageReactionSheet(messageId,
+                                  canDeleteAll: canDeleteAll,
+                                  preview: msgPreview),
+                          onLongPress: _selectingMessages
+                              ? () => _toggleMessageSelection(messageId)
+                              : () => _showMessageReactionSheet(messageId,
+                                  canDeleteAll: canDeleteAll,
+                                  preview: msgPreview),
+                          child: Stack(children: [
+                            child,
+                            if (_selectedMessageIds.contains(messageId))
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: AppColors.purpleLight
+                                          .withOpacity(0.08),
+                                      borderRadius: BorderRadius.circular(18),
+                                      border: Border.all(
+                                        color: AppColors.purpleLight
+                                            .withOpacity(0.55),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ]),
+                        );
+                      }
+                      // Admin badge for group chats
+                      final senderId = (msg['sender_id'] as num?)?.toInt();
+                      final isOwnerMsg = _isGroupChat &&
+                          _groupOwnerId > 0 &&
+                          senderId == _groupOwnerId;
+                      final isAdminMsg = _isGroupChat &&
+                          senderId != null &&
+                          _groupAdminIds.contains(senderId);
+                      if (isOwnerMsg || isAdminMsg) {
+                        final badge = Container(
+                          margin: EdgeInsets.only(
+                            bottom: 3,
+                            left: isMe ? 0 : 44,
+                            right: isMe ? 8 : 0,
+                          ),
+                          alignment: isMe
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: AppColors.purpleDark.withOpacity(0.28),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text(
+                              isOwnerMsg ? 'owner' : 'admin',
+                              style: GoogleFonts.outfit(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                                color: isOwnerMsg
+                                    ? AppColors.pink
+                                    : AppColors.purpleLight,
+                                letterSpacing: 0.2,
+                              ),
                             ),
                           ),
-                        ),
+                        );
+                        child = Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [badge, child],
+                        );
+                      }
+                      return Padding(
+                        key: i < _messageKeys.length ? _messageKeys[i] : null,
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: child,
                       );
-                      child = Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [badge, child],
-                      );
-                    }
-                    return Padding(
-                      key: i < _messageKeys.length ? _messageKeys[i] : null,
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: child,
-                    );
-                  },
-                ),
-        ),
-        _buildComposer(),
-      ]),
+                    },
+                  ),
+          ),
+          _selectingMessages ? _buildSelectionBar() : _buildComposer(),
+        ]),
+      ),
     );
   }
 
-  Widget _buildHeader(String initial, String partnerAvatarUrl) {
+  Widget _buildSelectionBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+      decoration: const BoxDecoration(
+        color: AppColors.bg2,
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(children: [
+          TextButton(
+            onPressed: () => setState(() {
+              _selectingMessages = false;
+              _selectedMessageIds.clear();
+            }),
+            child: Text('Cancel',
+                style: GoogleFonts.outfit(color: AppColors.text2)),
+          ),
+          const Spacer(),
+          Text('${_selectedMessageIds.length} selected',
+              style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.text)),
+          const Spacer(),
+          GestureDetector(
+            onTap: _selectedMessageIds.isEmpty
+                ? null
+                : () => _forwardMessages(_selectedMessageIds.toList()),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                gradient: AppColors.gradPurple,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(children: [
+                const Icon(Icons.forward_rounded,
+                    size: 17, color: Colors.white),
+                const SizedBox(width: 6),
+                Text('Forward',
+                    style: GoogleFonts.outfit(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white)),
+              ]),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildHeader(
+      String initial, String partnerAvatarUrl, String displayName) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.bg2,
+        color: AppColors.bg,
+        border: const Border(bottom: BorderSide(color: AppColors.border)),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 8,
-              offset: const Offset(0, 2))
+              color: Colors.black.withOpacity(0.26),
+              blurRadius: 14,
+              offset: const Offset(0, 5))
         ],
       ),
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
           child: Row(children: [
             GestureDetector(
-              onTap: () => Navigator.of(context).pop(),
+              onTap: _popWithResult,
               child: Container(
-                width: 38,
-                height: 38,
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
-                    color: AppColors.glass,
+                    color: AppColors.surface.withOpacity(0.86),
                     shape: BoxShape.circle,
                     border: Border.all(color: AppColors.border)),
                 child: const Icon(Icons.arrow_back_rounded,
@@ -1365,12 +2447,13 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             const SizedBox(width: 12),
             GestureDetector(
-              onTap: _openPartnerProfile,
+              onTap:
+                  _isGroupChat ? _openGroupAvatarGallery : _openPartnerProfile,
               child: _Avatar(
                 initial: initial,
                 imageUrl: partnerAvatarUrl,
-                size: 44,
-                fontSize: 17,
+                size: 60,
+                fontSize: 21,
                 borderWidth: 2,
               ),
             ),
@@ -1382,9 +2465,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(widget.partnerName,
+                      Text(displayName,
                           style: GoogleFonts.outfit(
-                              fontSize: 16,
+                              fontSize: 18,
                               fontWeight: FontWeight.w700,
                               color: AppColors.text)),
                       if (_isGroupChat)
@@ -1403,11 +2486,11 @@ class _ChatScreenState extends State<ChatScreen> {
             GestureDetector(
               onTap: _openConversationMenu,
               child: Container(
-                width: 40,
-                height: 40,
+                width: 50,
+                height: 50,
                 decoration: BoxDecoration(
-                  color: AppColors.glass,
-                  borderRadius: BorderRadius.circular(12),
+                  color: AppColors.surface.withOpacity(0.86),
+                  borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: AppColors.border),
                 ),
                 child: const Icon(Icons.more_horiz_rounded,
@@ -1422,39 +2505,216 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildPartnerStatus() {
     final np = _partnerNowPlaying;
-    if (np != null) {
+    if (np != null && np.isNotEmpty) {
       final artist = np['artist']?.toString() ?? '';
       final title = np['title']?.toString() ?? '';
       final label = artist.isNotEmpty
           ? 'Now listening to $artist'
           : title.isNotEmpty
               ? 'Now listening to $title'
-              : 'online';
-      return Row(children: [
-        const Icon(Icons.music_note_rounded, size: 11, color: AppColors.pink),
-        const SizedBox(width: 4),
-        Flexible(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.outfit(fontSize: 12, color: AppColors.pink),
+              : null;
+      if (label != null) {
+        return Row(children: [
+          const Icon(Icons.music_note_rounded, size: 11, color: AppColors.pink),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.outfit(fontSize: 12, color: AppColors.pink),
+            ),
           ),
-        ),
-      ]);
+        ]);
+      }
     }
-    return Row(children: [
-      Container(
-        width: 6,
-        height: 6,
-        decoration: const BoxDecoration(
-            color: AppColors.purpleLight, shape: BoxShape.circle),
-      ),
-      const SizedBox(width: 5),
-      Text('online',
+    if (_partnerOnline) {
+      return Text('Online',
           style:
-              GoogleFonts.outfit(fontSize: 12, color: AppColors.purpleLight)),
-    ]);
+              GoogleFonts.outfit(fontSize: 12, color: AppColors.purpleLight));
+    }
+    if (_partnerLastSeenAt.isNotEmpty) {
+      return Text('Last seen ${_formatLastSeen(_partnerLastSeenAt)}',
+          style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3));
+    }
+    return const SizedBox.shrink();
+  }
+
+  String _formatLastSeen(String iso) {
+    try {
+      final dt = DateTime.parse(iso).toLocal();
+      final diff = DateTime.now().difference(dt);
+      if (diff.inMinutes < 1) return 'just now';
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+      if (diff.inHours < 24) return '${diff.inHours}h ago';
+      return '${diff.inDays}d ago';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Widget _buildPinnedBanner() {
+    final latest = _pinnedMessages.first;
+    final preview = (latest['preview'] as String? ?? '').trim();
+    final count = _pinnedMessages.length;
+    return GestureDetector(
+      onTap: () {
+        if (count > 1) {
+          _showAllPinned();
+        } else {
+          _scrollToMessage(latest['message_id'] as String? ?? '');
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              AppColors.purple.withOpacity(0.22),
+              AppColors.surface,
+            ],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.purpleLight.withOpacity(0.24)),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.purpleDark.withOpacity(0.18),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: AppColors.purpleLight.withOpacity(0.14),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.push_pin_rounded,
+                size: 16, color: AppColors.purpleLight),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  count > 1 ? 'Pinned messages · $count' : 'Pinned message',
+                  style: GoogleFonts.outfit(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.purpleLight),
+                ),
+                if (preview.isNotEmpty)
+                  Text(
+                    preview,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text),
+                  ),
+              ],
+            ),
+          ),
+          Text(
+            count > 1 ? 'All pins' : 'Open',
+            style: GoogleFonts.outfit(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppColors.text3,
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  void _showAllPinned() {
+    if (_pinnedMessages.isEmpty) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            child: Row(children: [
+              const Icon(Icons.push_pin_rounded,
+                  size: 16, color: AppColors.purpleLight),
+              const SizedBox(width: 8),
+              Text('Pinned messages',
+                  style: GoogleFonts.outfit(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.text)),
+            ]),
+          ),
+          const Divider(color: AppColors.border, height: 1),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 320),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: _pinnedMessages.length,
+              itemBuilder: (ctx, i) {
+                final pin = _pinnedMessages[i];
+                final msgId = pin['message_id'] as String? ?? '';
+                final prev = (pin['preview'] as String? ?? '').trim();
+                return ListTile(
+                  leading: const Icon(Icons.push_pin_rounded,
+                      size: 16, color: AppColors.purpleLight),
+                  title: Text(
+                    prev.isNotEmpty ? prev : '[message]',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        GoogleFonts.outfit(fontSize: 13, color: AppColors.text),
+                  ),
+                  subtitle: Text(
+                    _formatChatTime((pin['pinned_at'] ?? '').toString()),
+                    style: GoogleFonts.outfit(
+                        fontSize: 11, color: AppColors.text3),
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.push_pin_outlined,
+                        size: 16, color: AppColors.text3),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _unpinMessage(msgId);
+                    },
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _scrollToMessage(msgId);
+                  },
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
+  void _scrollToMessage(String messageId) {
+    final idx =
+        _messages.indexWhere((m) => (m as Map)['message_id'] == messageId);
+    if (idx < 0) return;
+    _jumpToMessage(idx, query: '');
   }
 
   Widget _buildEmpty() {
@@ -1596,11 +2856,70 @@ class _ChatScreenState extends State<ChatScreen> {
 
 // ─── Text Message ─────────────────────────────────────────────────────────────
 
+class _ForwardedLabel extends StatelessWidget {
+  final Map<String, dynamic> msg;
+  final bool isMe;
+
+  const _ForwardedLabel({required this.msg, required this.isMe});
+
+  @override
+  Widget build(BuildContext context) {
+    if (msg['forwarded'] != true) return const SizedBox.shrink();
+    final hidden = msg['forwarded_profile_hidden'] == true;
+    final name = (msg['forwarded_from_name'] ?? '').toString();
+    final userId = (msg['forwarded_from_user_id'] as num?)?.toInt() ?? 0;
+    final canOpenProfile = !hidden && userId > 0;
+    final label =
+        hidden || name.isEmpty ? 'Forwarded message' : 'Forwarded from $name';
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: 3,
+        left: isMe ? 0 : 2,
+        right: isMe ? 2 : 0,
+      ),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: canOpenProfile
+            ? () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => UserProfileScreen(
+                      userId: userId,
+                      initialUser: {
+                        'id': userId,
+                        'display_name': name,
+                      },
+                    ),
+                  ),
+                )
+            : null,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.forward_rounded,
+                size: 12, color: AppColors.purpleLight),
+            const SizedBox(width: 4),
+            Text(label,
+                style: GoogleFonts.outfit(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.purpleLight,
+                    decoration:
+                        canOpenProfile ? TextDecoration.underline : null,
+                    decorationColor: AppColors.purpleLight)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _TextMessage extends StatelessWidget {
   final Map<String, dynamic> msg;
   final bool isMe;
   final String partnerInitial;
   final String partnerAvatarUrl;
+  final Widget? footer;
   final bool highlighted;
   final String highlightQuery;
   const _TextMessage(
@@ -1608,6 +2927,7 @@ class _TextMessage extends StatelessWidget {
       required this.isMe,
       required this.partnerInitial,
       required this.partnerAvatarUrl,
+      this.footer,
       this.highlighted = false,
       this.highlightQuery = ''});
 
@@ -1626,9 +2946,8 @@ class _TextMessage extends StatelessWidget {
       final author = (groupMatch.group(1) ?? '').trim();
       return {
         'kind': 'group',
-        'title': author.isNotEmpty
-            ? '$author invites to group'
-            : 'Group invite',
+        'title':
+            author.isNotEmpty ? '$author invites to group' : 'Group invite',
         'code': (groupMatch.group(2) ?? '').trim(),
       };
     }
@@ -1639,8 +2958,24 @@ class _TextMessage extends StatelessWidget {
     if (roomMatch != null) {
       return {
         'kind': 'room',
-        'title': 'Listening room invite',
+        'title': 'Live Room invite',
+        'role': 'Listener',
         'code': (roomMatch.group(1) ?? '').trim(),
+      };
+    }
+    final modernRoomMatch = RegExp(
+      r'^(?:🎧\s*)?(.+?)\s+invites you to listen together\s+Room:\s*(.+?)\s+Role:\s*(.+?)\s+Code:\s*(MW-[A-Fa-f0-9]+)',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(trimmed.replaceAll('\n', ' '));
+    if (modernRoomMatch != null) {
+      final role = (modernRoomMatch.group(3) ?? 'Listener').trim();
+      return {
+        'kind': 'room',
+        'title': '${modernRoomMatch.group(1)?.trim() ?? 'Someone'} invites you',
+        'room': (modernRoomMatch.group(2) ?? 'Live Room').trim(),
+        'role': role,
+        'code': (modernRoomMatch.group(4) ?? '').trim(),
       };
     }
     return null;
@@ -1697,10 +3032,13 @@ class _TextMessage extends StatelessWidget {
     final sentAt = msg['sent_at'] as String? ?? '';
     final timeStr = _formatChatTime(sentAt);
     final inviteCard = _inviteCard(text.toString());
+    final forwarded = _ForwardedLabel(msg: msg, isMe: isMe);
 
     if (inviteCard != null) {
       final isGroup = inviteCard['kind'] == 'group';
       final code = inviteCard['code'] ?? '';
+      final role = inviteCard['role'] ?? '';
+      final roomTitle = inviteCard['room'] ?? '';
 
       Future<void> handleTap() async {
         if (isGroup) {
@@ -1732,14 +3070,23 @@ class _TextMessage extends StatelessWidget {
               builder: (_) => ListeningPartyScreen(room: room),
             ),
           );
-        } catch (_) {}
+        } catch (e) {
+          if (!context.mounted) return;
+          final detail = e.toString().contains('404')
+              ? 'Room no longer active'
+              : 'Could not open room';
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(detail, style: GoogleFonts.outfit(fontSize: 13)),
+            backgroundColor: AppColors.surface,
+          ));
+        }
       }
 
       final bubble = GestureDetector(
         onTap: handleTap,
         child: Container(
-          constraints:
-              BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.76),
+          constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.76),
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(
             gradient: isGroup ? AppColors.primaryBtn : AppColors.gradPurple,
@@ -1790,25 +3137,54 @@ class _TextMessage extends StatelessWidget {
                             color: Colors.white,
                           ),
                         ),
+                        if (roomTitle.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(roomTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.outfit(
+                                  fontSize: 12,
+                                  color: Colors.white.withOpacity(0.76))),
+                        ],
                         const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            code,
-                            style: GoogleFonts.outfit(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
-                              letterSpacing: 0.5,
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: [
+                            if (!isGroup && role.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 7),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(role,
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.white)),
+                              ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 7,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                code,
+                                style: GoogleFonts.outfit(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
                             ),
-                          ),
+                          ],
                         ),
                       ],
                     ),
@@ -1840,6 +3216,7 @@ class _TextMessage extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              forwarded,
               bubble,
               if (timeStr.isNotEmpty) ...[
                 const SizedBox(height: 3),
@@ -1865,6 +3242,7 @@ class _TextMessage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                forwarded,
                 bubble,
                 if (timeStr.isNotEmpty) ...[
                   const SizedBox(height: 3),
@@ -1887,6 +3265,7 @@ class _TextMessage extends StatelessWidget {
       return Align(
         alignment: Alignment.centerRight,
         child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          forwarded,
           Container(
             constraints: BoxConstraints(
                 maxWidth: MediaQuery.of(context).size.width * 0.72),
@@ -1923,8 +3302,12 @@ class _TextMessage extends StatelessWidget {
               ),
             ),
           ),
+          if (footer != null) ...[
+            const SizedBox(height: 2),
+            footer!,
+          ],
           if (timeStr.isNotEmpty) ...[
-            const SizedBox(height: 3),
+            const SizedBox(height: 2),
             Text(timeStr,
                 style:
                     GoogleFonts.outfit(fontSize: 10, color: AppColors.text3)),
@@ -1938,6 +3321,7 @@ class _TextMessage extends StatelessWidget {
       const SizedBox(width: 8),
       Flexible(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          forwarded,
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
@@ -1967,8 +3351,12 @@ class _TextMessage extends StatelessWidget {
               ),
             ),
           ),
+          if (footer != null) ...[
+            const SizedBox(height: 2),
+            footer!,
+          ],
           if (timeStr.isNotEmpty) ...[
-            const SizedBox(height: 3),
+            const SizedBox(height: 2),
             Text(timeStr,
                 style:
                     GoogleFonts.outfit(fontSize: 10, color: AppColors.text3)),
@@ -1976,6 +3364,271 @@ class _TextMessage extends StatelessWidget {
         ]),
       ),
     ]);
+  }
+}
+
+class _RoomInviteMessage extends StatelessWidget {
+  final Map<String, dynamic> msg;
+  final bool isMe;
+  final String partnerInitial;
+  final String partnerAvatarUrl;
+  final Widget? footer;
+
+  const _RoomInviteMessage({
+    required this.msg,
+    required this.isMe,
+    required this.partnerInitial,
+    required this.partnerAvatarUrl,
+    this.footer,
+  });
+
+  Future<void> _openRoom(BuildContext context) async {
+    final rawId = msg['room_id'];
+    var id =
+        rawId is num ? rawId.toInt() : int.tryParse(rawId?.toString() ?? '');
+    if (id == null || id <= 0) {
+      id = _roomIdFromInviteCode((msg['invite_code'] ?? '').toString());
+    }
+    if (id == null || id <= 0) {
+      if (!context.mounted) return;
+      _inviteSnack(context, 'Invalid room invite', error: true);
+      return;
+    }
+    try {
+      var room = await ApiService().getRoomDetails(id);
+      final myStatus = (room['my_status'] ?? '').toString();
+      final canAutoJoin = myStatus != 'connected' &&
+          (room['is_public'] == true || myStatus == 'approved');
+      if (canAutoJoin) {
+        try {
+          await ApiService().joinRoom(id);
+          room = await ApiService().getRoomDetails(id);
+        } catch (_) {}
+      }
+      if (!context.mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => ListeningPartyScreen(room: room)),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      final detail = e.toString().contains('404')
+          ? 'Room no longer active'
+          : 'Could not open room';
+      _inviteSnack(context, detail, error: true);
+    }
+  }
+
+  void _inviteSnack(BuildContext context, String text, {bool error = false}) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        margin: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+        padding: EdgeInsets.zero,
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            gradient: error
+                ? const LinearGradient(
+                    colors: [Color(0xFF7F1D1D), Color(0xFFDC2626)])
+                : AppColors.gradPurple,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(children: [
+            Icon(error ? Icons.error_outline_rounded : Icons.check_rounded,
+                size: 18, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(text,
+                  style: GoogleFonts.outfit(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  int? _roomIdFromInviteCode(String code) {
+    final normalized = code.trim().toUpperCase();
+    final match = RegExp(r'^MW-([0-9A-F]+)$').firstMatch(normalized);
+    if (match == null) return null;
+    return int.tryParse(match.group(1)!, radix: 16);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sentAt = msg['sent_at'] as String? ?? '';
+    final timeStr = _formatChatTime(sentAt);
+    final title = (msg['room_title'] ?? 'Live Room').toString();
+    final description = (msg['room_description'] ?? '').toString();
+    final role = (msg['invite_role'] ?? 'listener').toString();
+    final bg = buildMediaUrl((msg['room_background_url'] ?? '').toString());
+    final roleLabel = role.isEmpty
+        ? 'Listener'
+        : '${role[0].toUpperCase()}${role.substring(1).replaceAll('_', ' ')}';
+
+    final bubble = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _openRoom(context),
+      child: Container(
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: AppColors.purpleLight.withOpacity(0.28)),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.purpleDark.withOpacity(0.26),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: bg.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: bg,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) => Container(
+                        decoration:
+                            BoxDecoration(gradient: AppColors.gradPurple),
+                      ),
+                    )
+                  : Container(
+                      decoration:
+                          BoxDecoration(gradient: AppColors.gradPurple)),
+            ),
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.black.withOpacity(bg.isNotEmpty ? 0.36 : 0.04),
+                      AppColors.purpleDark.withOpacity(0.18),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.16),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Icon(Icons.headphones_rounded,
+                            color: Colors.white, size: 20),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Live Room invite',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white)),
+                              const SizedBox(height: 2),
+                              Text(title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                      color: Colors.white)),
+                            ]),
+                      ),
+                    ]),
+                    if (description.trim().isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(description,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.outfit(
+                              fontSize: 12,
+                              height: 1.35,
+                              color: Colors.white.withOpacity(0.78))),
+                    ],
+                    const SizedBox(height: 12),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      _inviteChip(roleLabel),
+                      _inviteChip(
+                          msg['is_public'] == true ? 'Public' : 'Private'),
+                    ]),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Text('Tap to join →',
+                          style: GoogleFonts.outfit(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white.withOpacity(0.78))),
+                    ),
+                  ]),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final content = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _openRoom(context),
+      child: Column(
+        crossAxisAlignment:
+            isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          _ForwardedLabel(msg: msg, isMe: isMe),
+          bubble,
+          if (footer != null) ...[const SizedBox(height: 2), footer!],
+          if (timeStr.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(timeStr,
+                style:
+                    GoogleFonts.outfit(fontSize: 10, color: AppColors.text3)),
+          ],
+        ],
+      ),
+    );
+
+    if (isMe) return Align(alignment: Alignment.centerRight, child: content);
+    return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+      _Avatar(initial: partnerInitial, imageUrl: partnerAvatarUrl),
+      const SizedBox(width: 8),
+      Flexible(child: content),
+    ]);
+  }
+
+  Widget _inviteChip(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(text,
+          style: GoogleFonts.outfit(
+              fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
+    );
   }
 }
 
@@ -1992,7 +3645,6 @@ class _TrackMessage extends StatelessWidget {
   final bool useGroupChat;
   final bool useDirectThread;
   final VoidCallback onReacted;
-  final VoidCallback? onDelete;
   const _TrackMessage(
       {required this.msg,
       required this.isMe,
@@ -2003,8 +3655,7 @@ class _TrackMessage extends StatelessWidget {
       required this.groupChatId,
       required this.useGroupChat,
       required this.useDirectThread,
-      required this.onReacted,
-      this.onDelete});
+      required this.onReacted});
 
   @override
   Widget build(BuildContext context) {
@@ -2017,177 +3668,173 @@ class _TrackMessage extends StatelessWidget {
     final messageId = msg['message_id'] as String?;
     final sentAt = msg['sent_at'] as String? ?? '';
     final timeStr = _formatChatTime(sentAt);
-    final reactions = (msg['reactions'] as Map<String, dynamic>?) ?? {};
+    final rawReactions = msg['reactions'];
+    final reactions =
+        rawReactions is Map ? Map<String, dynamic>.from(rawReactions) : {};
 
-    final bubble = GestureDetector(
-      onLongPress: messageId != null
-          ? () => _showReactionPicker(context, messageId)
-          : null,
-      child: Container(
-        constraints:
-            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
-        decoration: BoxDecoration(
-          color: AppColors.surface2,
-          borderRadius: BorderRadius.circular(20),
-          border:
-              Border.all(color: AppColors.purple.withOpacity(0.2), width: 1),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withOpacity(0.2),
-                blurRadius: 8,
-                offset: const Offset(0, 3))
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Phrase badge
-            if (phrase.isNotEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [
-                    AppColors.purple.withOpacity(0.15),
-                    AppColors.pink.withOpacity(0.08),
-                  ]),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(20),
-                    topRight: Radius.circular(20),
-                  ),
-                  border: Border(
-                      bottom: BorderSide(
-                          color: AppColors.purple.withOpacity(0.15))),
-                ),
-                child: Row(children: [
-                  Text(phraseEmoji, style: const TextStyle(fontSize: 15)),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: Text(phrase,
-                        style: GoogleFonts.outfit(
-                            fontSize: 13,
-                            fontStyle: FontStyle.italic,
-                            color: AppColors.text2,
-                            height: 1.3)),
-                  ),
+    final bubble = Container(
+      constraints:
+          BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.purple.withOpacity(0.2), width: 1),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 8,
+              offset: const Offset(0, 3))
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Phrase badge
+          if (phrase.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: [
+                  AppColors.purple.withOpacity(0.15),
+                  AppColors.pink.withOpacity(0.08),
                 ]),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(20),
+                  topRight: Radius.circular(20),
+                ),
+                border: Border(
+                    bottom:
+                        BorderSide(color: AppColors.purple.withOpacity(0.15))),
               ),
-            // Track info row
-            Padding(
-              padding: const EdgeInsets.all(12),
               child: Row(children: [
-                // Cover art
-                Container(
-                  width: 54,
-                  height: 54,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    gradient: AppColors.gradMixed,
-                    boxShadow: [
-                      BoxShadow(
-                          color: AppColors.purpleDark.withOpacity(0.3),
-                          blurRadius: 10)
-                    ],
-                  ),
-                  child: coverUrl != null && coverUrl.isNotEmpty
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.network(coverUrl,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => const Center(
-                                  child: Text('🎵',
-                                      style: TextStyle(fontSize: 22)))))
-                      : const Center(
-                          child: Text('🎵', style: TextStyle(fontSize: 22))),
+                Text(phraseEmoji, style: const TextStyle(fontSize: 15)),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(phrase,
+                      style: GoogleFonts.outfit(
+                          fontSize: 13,
+                          fontStyle: FontStyle.italic,
+                          color: AppColors.text2,
+                          height: 1.3)),
                 ),
-                const SizedBox(width: 12),
-                Flexible(
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title,
-                            style: GoogleFonts.outfit(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.text),
-                            overflow: TextOverflow.ellipsis),
-                        if (artist.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(artist,
-                              style: GoogleFonts.outfit(
-                                  fontSize: 12, color: AppColors.text2),
-                              overflow: TextOverflow.ellipsis),
-                        ],
-                      ]),
-                ),
-                const SizedBox(width: 8),
-                const Icon(Icons.play_circle_filled_rounded,
-                    color: AppColors.purpleLight, size: 28),
               ]),
             ),
-            // Reactions
-            if (reactions.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                child: Wrap(
-                  spacing: 5,
-                  children: reactions.entries.map((e) {
-                    final emoji = e.key;
-                    final users = (e.value as List?) ?? [];
-                    if (users.isEmpty) return const SizedBox.shrink();
-                    return GestureDetector(
-                      onTap: messageId != null
-                          ? () async {
-                              try {
-                                if (useGroupChat) {
-                                  await ApiService().reactToGroupMessage(
-                                      groupChatId!, messageId, emoji);
-                                } else if (useDirectThread) {
-                                  await ApiService().reactToDirectMessage(
-                                      chatId!, messageId, emoji);
-                                } else {
-                                  await ApiService().reactToMessage(
-                                      matchId!, messageId, emoji);
-                                }
-                                onReacted();
-                              } catch (_) {}
-                            }
-                          : null,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppColors.purple.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(100),
-                          border: Border.all(
-                              color: AppColors.purple.withOpacity(0.2)),
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Text(emoji, style: const TextStyle(fontSize: 13)),
-                          const SizedBox(width: 3),
-                          Text('${users.length}',
-                              style: GoogleFonts.outfit(
-                                  fontSize: 11, color: AppColors.text2)),
-                        ]),
+          // Track info row
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(children: [
+              // Cover art
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: AppColors.gradMixed,
+                  boxShadow: [
+                    BoxShadow(
+                        color: AppColors.purpleDark.withOpacity(0.3),
+                        blurRadius: 10)
+                  ],
+                ),
+                child: coverUrl != null && coverUrl.isNotEmpty
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(coverUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Center(
+                                child: Text('🎵',
+                                    style: TextStyle(fontSize: 22)))))
+                    : const Center(
+                        child: Text('🎵', style: TextStyle(fontSize: 22))),
+              ),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: GoogleFonts.outfit(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.text),
+                          overflow: TextOverflow.ellipsis),
+                      if (artist.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(artist,
+                            style: GoogleFonts.outfit(
+                                fontSize: 12, color: AppColors.text2),
+                            overflow: TextOverflow.ellipsis),
+                      ],
+                    ]),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.play_circle_filled_rounded,
+                  color: AppColors.purpleLight, size: 28),
+            ]),
+          ),
+          // Reactions
+          if (reactions.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: Wrap(
+                spacing: 5,
+                children: reactions.entries.map((e) {
+                  final emoji = e.key;
+                  final users = (e.value as List?) ?? [];
+                  if (users.isEmpty) return const SizedBox.shrink();
+                  return GestureDetector(
+                    onTap: messageId != null
+                        ? () async {
+                            try {
+                              if (useGroupChat) {
+                                await ApiService().reactToGroupMessage(
+                                    groupChatId!, messageId, emoji);
+                              } else if (useDirectThread) {
+                                await ApiService().reactToDirectMessage(
+                                    chatId!, messageId, emoji);
+                              } else {
+                                await ApiService()
+                                    .reactToMessage(matchId!, messageId, emoji);
+                              }
+                              onReacted();
+                            } catch (_) {}
+                          }
+                        : null,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.purple.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(100),
+                        border: Border.all(
+                            color: AppColors.purple.withOpacity(0.2)),
                       ),
-                    );
-                  }).toList(),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Text(emoji, style: const TextStyle(fontSize: 13)),
+                        const SizedBox(width: 3),
+                        Text('${users.length}',
+                            style: GoogleFonts.outfit(
+                                fontSize: 11, color: AppColors.text2)),
+                      ]),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          if (note.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              child: Text(
+                note,
+                style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  color: AppColors.text2,
+                  height: 1.4,
                 ),
               ),
-            if (note.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-                child: Text(
-                  note,
-                  style: GoogleFonts.outfit(
-                    fontSize: 13,
-                    color: AppColors.text2,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
 
@@ -2218,89 +3865,6 @@ class _TrackMessage extends StatelessWidget {
       ],
     ]);
   }
-
-  void _showReactionPicker(BuildContext context, String messageId) {
-    HapticFeedback.mediumImpact();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('React',
-              style: GoogleFonts.outfit(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.text2)),
-          const SizedBox(height: 12),
-          // 5+5 grid
-          ...List.generate(2, (row) {
-            final start = row * 5;
-            final slice = _kReactions.skip(start).take(5).toList();
-            return Padding(
-              padding: EdgeInsets.only(bottom: row == 0 ? 8 : 0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: slice.map((emoji) {
-                  return GestureDetector(
-                    onTap: () async {
-                      Navigator.pop(context);
-                      try {
-                        if (useGroupChat) {
-                          await ApiService().reactToGroupMessage(
-                              groupChatId!, messageId, emoji);
-                        } else if (useDirectThread) {
-                          await ApiService().reactToDirectMessage(
-                              chatId!, messageId, emoji);
-                        } else {
-                          await ApiService()
-                              .reactToMessage(matchId!, messageId, emoji);
-                        }
-                        onReacted();
-                      } catch (_) {}
-                    },
-                    child: Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: AppColors.glass,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      child: Center(
-                          child:
-                              Text(emoji, style: const TextStyle(fontSize: 22))),
-                    ),
-                  );
-                }).toList(),
-              ),
-            );
-          }),
-          const SizedBox(height: 4),
-          const Divider(color: AppColors.border, height: 1),
-          if (onDelete != null)
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.delete_outline_rounded,
-                  color: Color(0xFFef4444), size: 18),
-              title: Text('Delete message',
-                  style: GoogleFonts.outfit(
-                      fontSize: 13, color: const Color(0xFFef4444))),
-              onTap: () {
-                Navigator.pop(context);
-                onDelete!();
-              },
-            ),
-        ]),
-      ),
-    );
-  }
 }
 
 class _AlbumMessage extends StatelessWidget {
@@ -2308,12 +3872,14 @@ class _AlbumMessage extends StatelessWidget {
   final bool isMe;
   final String partnerInitial;
   final String partnerAvatarUrl;
+  final Widget? footer;
 
   const _AlbumMessage({
     required this.msg,
     required this.isMe,
     required this.partnerInitial,
     required this.partnerAvatarUrl,
+    this.footer,
   });
 
   @override
@@ -2339,6 +3905,7 @@ class _AlbumMessage extends StatelessWidget {
       partnerInitial: partnerInitial,
       partnerAvatarUrl: partnerAvatarUrl,
       timeStr: timeStr,
+      footer: footer,
       child: card,
     );
   }
@@ -2349,12 +3916,14 @@ class _PlaylistMessage extends StatelessWidget {
   final bool isMe;
   final String partnerInitial;
   final String partnerAvatarUrl;
+  final Widget? footer;
 
   const _PlaylistMessage({
     required this.msg,
     required this.isMe,
     required this.partnerInitial,
     required this.partnerAvatarUrl,
+    this.footer,
   });
 
   @override
@@ -2383,6 +3952,7 @@ class _PlaylistMessage extends StatelessWidget {
       partnerInitial: partnerInitial,
       partnerAvatarUrl: partnerAvatarUrl,
       timeStr: timeStr,
+      footer: footer,
       child: card,
     );
   }
@@ -2393,12 +3963,14 @@ class _ImageMessage extends StatelessWidget {
   final bool isMe;
   final String partnerInitial;
   final String partnerAvatarUrl;
+  final Widget? footer;
 
   const _ImageMessage({
     required this.msg,
     required this.isMe,
     required this.partnerInitial,
     required this.partnerAvatarUrl,
+    this.footer,
   });
 
   @override
@@ -2420,15 +3992,18 @@ class _ImageMessage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Image.network(
-            imageDataUrl,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(
-              height: 180,
-              color: AppColors.surface,
-              alignment: Alignment.center,
-              child: const Icon(Icons.image_rounded,
-                  color: Colors.white70, size: 28),
+          SizedBox(
+            width: double.infinity,
+            height: 240,
+            child: _SmartImage(
+              imageUrl: imageDataUrl,
+              fit: BoxFit.cover,
+              error: Container(
+                color: AppColors.surface,
+                alignment: Alignment.center,
+                child: const Icon(Icons.image_rounded,
+                    color: Colors.white70, size: 28),
+              ),
             ),
           ),
           if (caption.isNotEmpty)
@@ -2452,6 +4027,7 @@ class _ImageMessage extends StatelessWidget {
       partnerInitial: partnerInitial,
       partnerAvatarUrl: partnerAvatarUrl,
       timeStr: timeStr,
+      footer: footer,
       child: card,
     );
   }
@@ -2462,6 +4038,7 @@ class _MessageFrame extends StatelessWidget {
   final String partnerInitial;
   final String partnerAvatarUrl;
   final String timeStr;
+  final Widget? footer;
   final Widget child;
 
   const _MessageFrame({
@@ -2469,6 +4046,7 @@ class _MessageFrame extends StatelessWidget {
     required this.partnerInitial,
     required this.partnerAvatarUrl,
     required this.timeStr,
+    this.footer,
     required this.child,
   });
 
@@ -2479,6 +4057,10 @@ class _MessageFrame extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Align(alignment: Alignment.centerRight, child: child),
+          if (footer != null) ...[
+            const SizedBox(height: 6),
+            footer!,
+          ],
           if (timeStr.isNotEmpty) ...[
             const SizedBox(height: 3),
             Text(timeStr,
@@ -2500,6 +4082,10 @@ class _MessageFrame extends StatelessWidget {
             Flexible(child: child),
           ],
         ),
+        if (footer != null) ...[
+          const SizedBox(height: 6),
+          footer!,
+        ],
         if (timeStr.isNotEmpty) ...[
           const SizedBox(height: 3),
           Padding(
@@ -3178,7 +4764,8 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
 
   Future<void> _remove(Map<String, dynamic> member) async {
     final id = (member['id'] as num?)?.toInt() ?? 0;
-    final name = (member['display_name'] ?? member['username'] ?? 'user').toString();
+    final name =
+        (member['display_name'] ?? member['username'] ?? 'user').toString();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -3206,8 +4793,8 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
     if (confirmed != true || !mounted) return;
     try {
       await ApiService().removeGroupChatMember(widget.groupChatId, id);
-      setState(() => _members.removeWhere(
-          (m) => (m['id'] as num?)?.toInt() == id));
+      setState(
+          () => _members.removeWhere((m) => (m['id'] as num?)?.toInt() == id));
       widget.onMemberRemoved();
     } catch (_) {
       if (!mounted) return;
@@ -3218,7 +4805,8 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
 
   Future<void> _transferOwner(Map<String, dynamic> member) async {
     final id = (member['id'] as num?)?.toInt() ?? 0;
-    final name = (member['display_name'] ?? member['username'] ?? 'user').toString();
+    final name =
+        (member['display_name'] ?? member['username'] ?? 'user').toString();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -3267,7 +4855,8 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
 
   Future<void> _makeAdmin(Map<String, dynamic> member) async {
     final id = (member['id'] as num?)?.toInt() ?? 0;
-    final name = (member['display_name'] ?? member['username'] ?? 'user').toString();
+    final name =
+        (member['display_name'] ?? member['username'] ?? 'user').toString();
     try {
       await ApiService().makeGroupChatAdmin(widget.groupChatId, id);
       setState(() {
@@ -3293,8 +4882,8 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
       });
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Could not revoke admin')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not revoke admin')));
     }
   }
 
@@ -3352,7 +4941,8 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
               itemBuilder: (_, i) {
                 final m = _members[i];
                 final uid = (m['id'] as num?)?.toInt() ?? 0;
-                final name = (m['display_name'] ?? m['username'] ?? 'User').toString();
+                final name =
+                    (m['display_name'] ?? m['username'] ?? 'User').toString();
                 final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
                 final avatarUrl = (m['avatar_url'] ?? '').toString();
                 final isOwner = m['role'] == 'owner';
@@ -3361,6 +4951,18 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
                 return ListTile(
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+                  onTap: !isMe
+                      ? () {
+                          Navigator.of(context, rootNavigator: true).push(
+                            MaterialPageRoute(
+                              builder: (_) => UserProfileScreen(
+                                userId: uid,
+                                initialUser: m,
+                              ),
+                            ),
+                          );
+                        }
+                      : null,
                   leading: Container(
                     width: 42,
                     height: 42,
@@ -3486,8 +5088,7 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
                                 const SizedBox(width: 8),
                                 Text('Transfer ownership',
                                     style: GoogleFonts.outfit(
-                                        fontSize: 13,
-                                        color: AppColors.text3)),
+                                        fontSize: 13, color: AppColors.text3)),
                               ]),
                             ),
                           ],
@@ -4533,6 +6134,23 @@ class _SelectableMediaRow extends StatelessWidget {
 
 // ─── Avatar widget ────────────────────────────────────────────────────────────
 
+class _ForwardTarget {
+  final String kind;
+  final int id;
+
+  const _ForwardTarget(this.kind, this.id);
+
+  static _ForwardTarget? fromChat(Map<String, dynamic> chat) {
+    final groupId = (chat['group_chat_id'] as num?)?.toInt();
+    if (groupId != null) return _ForwardTarget('group', groupId);
+    final chatId = (chat['chat_id'] as num?)?.toInt();
+    if (chatId != null) return _ForwardTarget('thread', chatId);
+    final matchId = (chat['match_id'] as num?)?.toInt();
+    if (matchId != null) return _ForwardTarget('match', matchId);
+    return null;
+  }
+}
+
 class _Avatar extends StatelessWidget {
   final String initial;
   final String imageUrl;
@@ -4555,7 +6173,8 @@ class _Avatar extends StatelessWidget {
       height: size,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        gradient: AppColors.gradMixed,
+        color: imageUrl.isNotEmpty ? Colors.transparent : null,
+        gradient: imageUrl.isNotEmpty ? null : AppColors.gradMixed,
         shape: BoxShape.circle,
         border: borderWidth > 0
             ? Border.all(
@@ -4567,7 +6186,16 @@ class _Avatar extends StatelessWidget {
       child: imageUrl.isNotEmpty
           ? CachedNetworkImage(
               imageUrl: imageUrl,
-              fit: BoxFit.cover,
+              imageBuilder: (_, imageProvider) => Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  image: DecorationImage(
+                    image: imageProvider,
+                    fit: BoxFit.cover,
+                    alignment: Alignment.center,
+                  ),
+                ),
+              ),
               errorWidget: (_, __, ___) => _AvatarFallback(
                 initial: initial,
                 fontSize: fontSize,
@@ -5022,7 +6650,7 @@ class _SharedGroupsTabState extends State<_SharedGroupsTab> {
         final active = room['is_active'] != false;
         return _SharedCard(
           icon: Icons.groups_rounded,
-          title: (room['name'] ?? 'Listening room').toString(),
+          title: (room['name'] ?? 'Live Room').toString(),
           subtitle: '$count participant${count == 1 ? '' : 's'}',
           tertiary: active ? 'Active now' : 'Inactive',
           imageUrl: (room['host'] as Map?)?['avatar_url']?.toString() ?? '',
@@ -5036,6 +6664,53 @@ class _SharedGroupsTabState extends State<_SharedGroupsTab> {
           ),
         );
       },
+    );
+  }
+}
+
+Uint8List? _tryDecodeDataImage(String imageUrl) {
+  if (!imageUrl.startsWith('data:image')) return null;
+  final commaIndex = imageUrl.indexOf(',');
+  if (commaIndex < 0 || commaIndex + 1 >= imageUrl.length) return null;
+  try {
+    return base64Decode(imageUrl.substring(commaIndex + 1));
+  } catch (_) {
+    return null;
+  }
+}
+
+class _SmartImage extends StatelessWidget {
+  final String imageUrl;
+  final BoxFit fit;
+  final Widget? placeholder;
+  final Widget? error;
+
+  const _SmartImage({
+    required this.imageUrl,
+    required this.fit,
+    this.placeholder,
+    this.error,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _tryDecodeDataImage(imageUrl);
+    if (bytes != null) {
+      return Image.memory(
+        bytes,
+        fit: fit,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => error ?? const SizedBox.shrink(),
+      );
+    }
+    if (imageUrl.isEmpty) {
+      return error ?? const SizedBox.shrink();
+    }
+    return CachedNetworkImage(
+      imageUrl: imageUrl,
+      fit: fit,
+      placeholder: placeholder == null ? null : (_, __) => placeholder!,
+      errorWidget: (_, __, ___) => error ?? const SizedBox.shrink(),
     );
   }
 }
@@ -5094,11 +6769,10 @@ class _SharedCard extends StatelessWidget {
               child: imageUrl.isNotEmpty
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(16),
-                      child: CachedNetworkImage(
+                      child: _SmartImage(
                         imageUrl: imageUrl,
                         fit: BoxFit.cover,
-                        errorWidget: (_, __, ___) =>
-                            Icon(icon, color: Colors.white70),
+                        error: Icon(icon, color: Colors.white70),
                       ),
                     )
                   : Icon(icon, color: Colors.white70, size: 22),
@@ -5230,11 +6904,11 @@ class _PhotoGridTab extends StatelessWidget {
             child: Stack(
               children: [
                 Positioned.fill(
-                  child: CachedNetworkImage(
+                  child: _SmartImage(
                     imageUrl: url,
                     fit: BoxFit.cover,
-                    placeholder: (_, __) => Container(color: AppColors.surface),
-                    errorWidget: (_, __, ___) => Container(
+                    placeholder: Container(color: AppColors.surface),
+                    error: Container(
                       color: AppColors.surface,
                       child: const Icon(Icons.broken_image_rounded,
                           color: AppColors.text3),
@@ -5370,10 +7044,12 @@ class _SharedEmptyState extends StatelessWidget {
 class _SharedImageViewerScreen extends StatefulWidget {
   final List<Map<String, dynamic>> images;
   final int initialIndex;
+  final String? title;
 
   const _SharedImageViewerScreen({
     required this.images,
     required this.initialIndex,
+    this.title,
   });
 
   @override
@@ -5403,8 +7079,16 @@ class _SharedImageViewerScreenState extends State<_SharedImageViewerScreen> {
         .toString();
   }
 
+  String _caption(Map<String, dynamic> image) {
+    return (image['caption'] ?? image['title'] ?? '').toString().trim();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final current = widget.images[_currentIndex];
+    final caption = _caption(current);
+    final sentAt = _formatChatTime(current['sent_at']?.toString());
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
@@ -5419,10 +7103,10 @@ class _SharedImageViewerScreenState extends State<_SharedImageViewerScreen> {
                 minScale: 0.8,
                 maxScale: 4,
                 child: Center(
-                  child: CachedNetworkImage(
+                  child: _SmartImage(
                     imageUrl: url,
                     fit: BoxFit.contain,
-                    errorWidget: (_, __, ___) => const Icon(
+                    error: const Icon(
                       Icons.broken_image_rounded,
                       color: Colors.white70,
                       size: 40,
@@ -5454,7 +7138,23 @@ class _SharedImageViewerScreenState extends State<_SharedImageViewerScreen> {
                       ),
                     ),
                   ),
-                  const Spacer(),
+                  if (widget.title != null &&
+                      widget.title!.trim().isNotEmpty) ...[
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        widget.title!.trim(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ] else
+                    const Spacer(),
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -5476,6 +7176,102 @@ class _SharedImageViewerScreenState extends State<_SharedImageViewerScreen> {
                   ),
                 ],
               ),
+            ),
+          ),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 18,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (caption.isNotEmpty || sentAt.isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.42),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (caption.isNotEmpty)
+                          Text(
+                            caption,
+                            style: GoogleFonts.outfit(
+                              fontSize: 13,
+                              color: Colors.white,
+                              height: 1.35,
+                            ),
+                          ),
+                        if (caption.isNotEmpty && sentAt.isNotEmpty)
+                          const SizedBox(height: 6),
+                        if (sentAt.isNotEmpty)
+                          Text(
+                            sentAt,
+                            style: GoogleFonts.outfit(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white70,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                if (widget.images.length > 1)
+                  SizedBox(
+                    height: 72,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: widget.images.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (_, i) {
+                        final url = _imageUrl(widget.images[i]);
+                        final selected = i == _currentIndex;
+                        return GestureDetector(
+                          onTap: () {
+                            _pageController.animateToPage(
+                              i,
+                              duration: const Duration(milliseconds: 220),
+                              curve: Curves.easeOut,
+                            );
+                          },
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            width: 60,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: selected ? Colors.white : Colors.white24,
+                                width: selected ? 2 : 1,
+                              ),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: _SmartImage(
+                              imageUrl: url,
+                              fit: BoxFit.cover,
+                              error: Container(
+                                color: Colors.white10,
+                                child: const Icon(
+                                  Icons.broken_image_rounded,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
             ),
           ),
         ],

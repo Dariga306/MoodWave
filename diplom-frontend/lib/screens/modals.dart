@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:share_plus/share_plus.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import 'album_screen.dart';
 import 'artist_screen.dart';
-import 'player_screen.dart';
 
 /// Shows Add to Playlist bottom sheet
 void showAddToPlaylist(BuildContext context, {Map<String, dynamic>? track}) {
@@ -364,6 +364,18 @@ class _ShareTrackSheetState extends State<_ShareTrackSheet> {
     _snack('Copied to clipboard');
   }
 
+  Future<void> _systemShare() async {
+    final title = widget.track?['title']?.toString() ??
+        widget.track?['trackName']?.toString() ??
+        'Unknown';
+    final artist = widget.track?['artist']?.toString() ??
+        widget.track?['artistName']?.toString() ??
+        '';
+    final text =
+        artist.isNotEmpty ? 'Listen to $title by $artist on MoodWave' : 'Listen to $title on MoodWave';
+    await Share.share(text, subject: 'MoodWave track');
+  }
+
   Future<void> _sendToMatch(int matchId, String name) async {
     final title = widget.track?['title']?.toString() ??
         widget.track?['trackName']?.toString() ?? 'Unknown';
@@ -534,15 +546,11 @@ class _ShareTrackSheetState extends State<_ShareTrackSheet> {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
             child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-              _ShareApp('💬', 'WhatsApp', const LinearGradient(colors: [Color(0xFF075e54), Color(0xFF25d366)]),
-                  onTap: () => _snack('WhatsApp sharing coming soon')),
-              _ShareApp('📘', 'Messenger', const LinearGradient(colors: [Color(0xFF1877f2), Color(0xFF42a5f5)]),
-                  onTap: () => _snack('Messenger sharing coming soon')),
-              _ShareApp('✈️', 'Telegram', const LinearGradient(colors: [Color(0xFF0088cc), Color(0xFF29b6f6)]),
-                  onTap: () => _snack('Telegram sharing coming soon')),
-              _ShareApp('📸', 'Instagram', const LinearGradient(colors: [Color(0xFFe1306c), Color(0xFFfd1d1d), Color(0xFFf56040)]),
-                  onTap: () => _snack('Instagram sharing coming soon')),
+              _ShareApp('↗', 'System', const LinearGradient(colors: [AppColors.purple, AppColors.pink]),
+                  onTap: _systemShare),
               _ShareApp('💌', 'In Chat', null, onTap: _showMatchPicker),
+              _ShareApp('📋', 'Copy', const LinearGradient(colors: [Color(0xFF334155), Color(0xFF64748b)]),
+                  onTap: _copyLink),
             ]),
           ),
           // Actions

@@ -4,8 +4,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/auth_provider.dart';
+import '../../providers/player_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/media_url.dart';
 import '../../widgets/common_widgets.dart';
 import '../album_screen.dart';
 import '../artist_screen.dart';
@@ -15,6 +17,8 @@ import '../notifications_screen.dart';
 import '../player_screen.dart';
 import '../playlist_screen.dart';
 import '../profile_tab_screen.dart';
+import '../social_activity_screen.dart';
+import '../user_profile_screen.dart';
 import '../weather_screen.dart';
 
 class HomeTab extends StatefulWidget {
@@ -42,10 +46,52 @@ class _HomeTabState extends State<HomeTab> {
   bool _playingWeather = false;
   bool _chartsAreCityData = false;
 
+  PlayerProvider? _playerProvider;
+  String? _lastKnownTrackId;
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final player = context.read<PlayerProvider>();
+    if (_playerProvider != player) {
+      _playerProvider?.removeListener(_onPlayerChanged);
+      _playerProvider = player;
+      player.addListener(_onPlayerChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    _playerProvider?.removeListener(_onPlayerChanged);
+    super.dispose();
+  }
+
+  void _onPlayerChanged() {
+    final track = _playerProvider?.track;
+    if (track == null) return;
+    final id =
+        (track['spotify_id'] ?? track['track_id'] ?? '').toString().trim();
+    final title =
+        (track['title'] ?? track['trackName'] ?? '').toString().trim();
+    final artist =
+        (track['artist'] ?? track['artistName'] ?? '').toString().trim();
+    final compositeId = id.isNotEmpty ? id : '$title|$artist';
+    if (compositeId.isEmpty || compositeId == '|') return;
+    if (_lastKnownTrackId == compositeId) return;
+    _lastKnownTrackId = compositeId;
+    if (!mounted) return;
+    setState(() {
+      _recentlyPlayed = [
+        Map<String, dynamic>.from(track),
+        ..._recentlyPlayed,
+      ];
+    });
   }
 
   Future<void> _load() async {
@@ -151,28 +197,19 @@ class _HomeTabState extends State<HomeTab> {
     void add(String type, dynamic value) {
       if (value is! Map) return;
       final item = Map<String, dynamic>.from(value);
-      final id = (item['id'] ??
-              item['album_id'] ??
-              item['playlist_id'] ??
-              item['spotify_id'] ??
-              item['track_id'] ??
-              item['title'] ??
-              item['name'] ??
-              item['username'])
-          .toString();
+      final id =
+          (item['id'] ?? item['album_id'] ?? item['spotify_id'] ?? item['name'])
+              .toString();
       final key = '$type:$id';
       if (id.isEmpty || seen.contains(key)) return;
       seen.add(key);
       items.add({'type': type, 'data': item});
     }
 
-    for (var i = 0; i < 8; i++) {
+    // Only artists and albums — no random tracks, playlists, users or this_is
+    for (var i = 0; i < 12; i++) {
       if (i < artists.length) add('artist', artists[i]);
-      if (i < tracks.length) add('track', tracks[i]);
       if (i < albums.length) add('album', albums[i]);
-      if (i < playlists.length) add('playlist', playlists[i]);
-      if (i < people.length) add('user', people[i]);
-      if (i < artists.length) add('this_is', artists[i]);
     }
     return items.take(18).toList();
   }
@@ -288,19 +325,105 @@ class _HomeTabState extends State<HomeTab> {
     return 'Because you listened to $title';
   }
 
+  List<dynamic> get _recentlyPlayedForHome {
+    final seen = <String>{};
+    final seenAlbums = <String>{};
+    final deduped = <dynamic>[];
+    for (final raw in _recentlyPlayed) {
+      if (raw is! Map) continue;
+      final track = Map<String, dynamic>.from(raw);
+      final spotifyId =
+          (track['spotify_id'] ?? track['track_id'] ?? '').toString().trim();
+      final title = (track['title'] ?? track['trackName'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      final artist = (track['artist'] ?? track['artistName'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      final key = spotifyId.isNotEmpty ? spotifyId : '$title|$artist';
+      if (key.isEmpty || key == '|') continue;
+      if (!seen.add(key)) continue;
+      final albumKey = _albumDedupeKey(track);
+      if (albumKey.isNotEmpty && !seenAlbums.add(albumKey)) continue;
+      deduped.add(track);
+    }
+    return deduped;
+  }
+
+  String _trackDedupeKey(Map<String, dynamic> track) {
+    final spotifyId =
+        (track['spotify_id'] ?? track['track_id'] ?? '').toString().trim();
+    if (spotifyId.isNotEmpty) return 'id:$spotifyId';
+    final title = (track['title'] ?? track['trackName'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final artist = (track['artist'] ?? track['artistName'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    return '$title|$artist';
+  }
+
+  String _albumDedupeKey(Map<String, dynamic> track) {
+    final albumId =
+        (track['album_id'] ?? track['collectionId'] ?? '').toString().trim();
+    if (albumId.isNotEmpty) return 'album:$albumId';
+    final album =
+        (track['album'] ?? track['album_name'] ?? track['collectionName'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+    final artist = (track['artist'] ?? track['artistName'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (album.isNotEmpty) return 'album:$album|$artist';
+    final cover =
+        (track['cover_url'] ?? track['artworkUrl100'] ?? '').toString().trim();
+    return cover.isNotEmpty ? 'cover:$cover' : '';
+  }
+
+  List<dynamic> _dedupeTracks(List<dynamic> tracks,
+      {bool onePerAlbum = false}) {
+    final seen = <String>{};
+    final seenAlbums = <String>{};
+    final result = <dynamic>[];
+    for (final raw in tracks) {
+      if (raw is! Map) continue;
+      final track = Map<String, dynamic>.from(raw);
+      final key = _trackDedupeKey(track);
+      if (key.isEmpty || key == '|') continue;
+      if (!seen.add(key)) continue;
+      if (onePerAlbum) {
+        final albumKey = _albumDedupeKey(track);
+        if (albumKey.isNotEmpty && !seenAlbums.add(albumKey)) continue;
+      }
+      result.add(track);
+    }
+    return result;
+  }
+
   List<Map<String, dynamic>> get _friendItems {
     final live = (_friendsActivity['live'] as List? ?? const [])
         .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item));
+        .map((item) =>
+            Map<String, dynamic>.from(item)..['activity_status'] = 'live');
     final recent = (_friendsActivity['recent'] as List? ?? const [])
         .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item));
+        .map((item) =>
+            Map<String, dynamic>.from(item)..['activity_status'] = 'recent');
     final seen = <String>{};
     final merged = <Map<String, dynamic>>[];
     for (final item in [...live, ...recent]) {
       final id =
           (item['id'] ?? item['username'] ?? item['display_name']).toString();
+      final now = (item['now_playing'] as Map?)?.cast<String, dynamic>();
+      final title = (now?['title'] ?? now?['track_title'] ?? '').toString();
       if (id.isEmpty || seen.contains(id)) continue;
+      if (title.trim().isEmpty) continue;
       seen.add(id);
       merged.add(item);
     }
@@ -662,7 +785,7 @@ class _HomeTabState extends State<HomeTab> {
               ),
 
               // ─── Recently Played ───────────────────────────────
-              if (_recentlyPlayed.isNotEmpty) ...[
+              if (_recentlyPlayedForHome.isNotEmpty) ...[
                 const SizedBox(height: 22),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -691,7 +814,9 @@ class _HomeTabState extends State<HomeTab> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                _RecentHorizontal(tracks: _recentlyPlayed.take(10).toList()),
+                _RecentHorizontal(
+                  tracks: _recentlyPlayedForHome.take(10).toList(),
+                ),
               ],
 
               // ─── You Might Like ───────────────────────────────
@@ -810,41 +935,6 @@ class _HomeTabState extends State<HomeTab> {
                 ),
               ],
 
-              // ─── Following ────────────────────────────────────
-              const SizedBox(height: 22),
-              SectionHeader(
-                title: 'Following',
-                action: _followedArtists.isEmpty ? null : 'See all →',
-                onAction: _followedArtists.isEmpty
-                    ? null
-                    : () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => _ArtistGridScreen(
-                              title: 'Following',
-                              artists: _followedArtists,
-                            ),
-                          ),
-                        ),
-              ),
-              const SizedBox(height: 12),
-              if (_followedArtists.isEmpty)
-                const _FindArtistsCard()
-              else
-                SizedBox(
-                  height: 110,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    itemCount: _followedArtists.length.clamp(0, 10),
-                    itemBuilder: (context, i) {
-                      final artist =
-                          _followedArtists[i] as Map<String, dynamic>;
-                      return _FollowingItem(artist: artist);
-                    },
-                  ),
-                ),
-
               ..._buildMoodSection(),
 
               // ─── Top in City ───────────────────────────────────
@@ -920,15 +1010,12 @@ class _HomeTabState extends State<HomeTab> {
               if (_freshWave.isNotEmpty) ...[
                 const SizedBox(height: 22),
                 SectionHeader(
-                  title: 'Fresh Wave 🌊',
+                  title: 'New Releases 🆕',
                   action: 'See all →',
                   onAction: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) => _TrackListScreen(
-                                title: 'Fresh Wave',
-                                tracks: _freshWave,
-                              ))),
+                          builder: (_) => const DiscoverScreen(initialTab: 2))),
                 ),
                 const SizedBox(height: 12),
                 SizedBox(
@@ -936,9 +1023,10 @@ class _HomeTabState extends State<HomeTab> {
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.only(left: 20),
-                    itemCount: _freshWave.length.clamp(0, 10),
+                    itemCount: _dedupeTracks(_freshWave).length.clamp(0, 10),
                     itemBuilder: (context, i) {
-                      final track = _freshWave[i] as Map<String, dynamic>;
+                      final track =
+                          _dedupeTracks(_freshWave)[i] as Map<String, dynamic>;
                       return _TrackCard(track: track);
                     },
                   ),
@@ -974,11 +1062,11 @@ class _HomeTabState extends State<HomeTab> {
                 const SizedBox(height: 22),
                 SectionHeader(
                   title: 'Hot Right Now 🔥',
-                  action: 'Charts →',
+                  action: 'Discover →',
                   onAction: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) => const CityChartsScreen())),
+                          builder: (_) => const DiscoverScreen())),
                 ),
                 const SizedBox(height: 12),
                 SizedBox(
@@ -986,9 +1074,13 @@ class _HomeTabState extends State<HomeTab> {
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.only(left: 20),
-                    itemCount: _hotRightNow.length.clamp(0, 10),
+                    itemCount: _dedupeTracks(_hotRightNow, onePerAlbum: true)
+                        .length
+                        .clamp(0, 10),
                     itemBuilder: (ctx, i) {
-                      final t = _hotRightNow[i] as Map<String, dynamic>;
+                      final t =
+                          _dedupeTracks(_hotRightNow, onePerAlbum: true)[i]
+                              as Map<String, dynamic>;
                       return _HotTrackCard(track: t);
                     },
                   ),
@@ -998,10 +1090,19 @@ class _HomeTabState extends State<HomeTab> {
               // ─── Live Rooms ───────────────────────────────────
               if (_liveRooms.isNotEmpty) ...[
                 const SizedBox(height: 22),
-                const SectionHeader(title: 'Live Rooms 🎙'),
+                SectionHeader(
+                  title: 'Live Rooms 🎙',
+                  action: 'See all →',
+                  onAction: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const BrowseRoomsScreen(),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 12),
                 SizedBox(
-                  height: 110,
+                  height: 132,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -1023,15 +1124,13 @@ class _HomeTabState extends State<HomeTab> {
                   onAction: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => _FriendsListeningScreen(
-                        friends: _friendItems,
-                      ),
+                      builder: (_) => const SocialActivityScreen(),
                     ),
                   ),
                 ),
                 const SizedBox(height: 12),
                 SizedBox(
-                  height: 122,
+                  height: 92,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.only(left: 20),
@@ -1213,6 +1312,17 @@ class _RecommendationCard extends StatelessWidget {
   }
 
   String _recommendationImage(String type, Map<String, dynamic> data) {
+    if (type == 'artist') {
+      return (data['picture_xl'] ??
+              data['picture_big'] ??
+              data['picture_medium'] ??
+              data['photo_url'] ??
+              data['image_url'] ??
+              data['cover_url'] ??
+              data['avatar_url'] ??
+              '')
+          .toString();
+    }
     return (data['cover_url'] ??
             data['artworkUrl100'] ??
             data['cover_xl'] ??
@@ -1345,7 +1455,29 @@ Future<void> _openThisIs(
       ?.toString();
   final id = artist['id']?.toString();
   try {
-    final tracks = await ApiService().searchTracksWithFallback(name, limit: 35);
+    List<Map<String, dynamic>> tracks = const [];
+
+    // Prefer real top tracks from the artist profile; fall back to text search
+    if (id != null && id.isNotEmpty) {
+      try {
+        final profile = await ApiService().getArtistProfile(id);
+        final topTracks = (profile['top_tracks'] as List?) ?? const [];
+        if (topTracks.isNotEmpty) {
+          tracks = topTracks
+              .whereType<Map>()
+              .map((t) => Map<String, dynamic>.from(t))
+              .toList();
+        }
+      } catch (_) {}
+    }
+    if (tracks.isEmpty) {
+      final raw = await ApiService().searchTracksWithFallback(name, limit: 35);
+      tracks = raw
+          .whereType<Map>()
+          .map((t) => Map<String, dynamic>.from(t))
+          .toList();
+    }
+
     if (!context.mounted) return;
     Navigator.push(
       context,
@@ -1555,7 +1687,13 @@ class _RecentHorizontal extends StatelessWidget {
         padding: const EdgeInsets.only(left: 20),
         itemCount: tracks.length,
         itemBuilder: (ctx, i) {
-          final track = tracks[i] as Map<String, dynamic>;
+          final queue = tracks
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item))
+              .toList();
+          final track = Map<String, dynamic>.from(tracks[i] as Map)
+            ..['queue'] = queue
+            ..['queue_context'] = 'Recently Played';
           final title =
               (track['title'] ?? track['trackName'] ?? 'Unknown').toString();
           final artist = (track['artist'] ?? '').toString();
@@ -1621,10 +1759,10 @@ class _RecentHorizontal extends StatelessWidget {
   }
 }
 
-Widget _recentFallback(String title) {
+Widget _recentFallback(String title, {double size = 96}) {
   return Container(
-    width: 96,
-    height: 96,
+    width: size,
+    height: size,
     decoration: BoxDecoration(
       gradient: AppColors.gradMixed,
       borderRadius: BorderRadius.circular(10),
@@ -1632,11 +1770,101 @@ Widget _recentFallback(String title) {
     child: Center(
       child: Text(
         title.isNotEmpty ? title[0].toUpperCase() : '♪',
-        style: const TextStyle(
-            fontSize: 32, fontWeight: FontWeight.w800, color: Colors.white),
+        style: TextStyle(
+            fontSize: size * 0.33,
+            fontWeight: FontWeight.w800,
+            color: Colors.white),
       ),
     ),
   );
+}
+
+class _RecentAlbumCard extends StatelessWidget {
+  final Map<String, dynamic> entry;
+  const _RecentAlbumCard({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final title = (entry['album'] ?? 'Album').toString();
+    final artist = (entry['artist'] ?? '').toString();
+    final coverUrl = (entry['cover_url'] ?? '').toString();
+    final count = (entry['track_count'] as num?)?.toInt() ?? 0;
+    final tracks = (entry['tracks'] as List?) ?? const [];
+    final firstTrack = tracks.whereType<Map>().isNotEmpty
+        ? Map<String, dynamic>.from(tracks.whereType<Map>().first)
+        : null;
+
+    return GestureDetector(
+      onTap: () {
+        if (firstTrack != null) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => PlayerScreen(track: firstTrack)),
+          );
+        } else {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const RecentHistoryScreen()),
+          );
+        }
+      },
+      child: Container(
+        width: 178,
+        margin: const EdgeInsets.only(right: 14),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppColors.purpleLight.withOpacity(0.24)),
+        ),
+        child: Row(children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: coverUrl.isNotEmpty
+                ? CachedNetworkImage(
+                    imageUrl: coverUrl,
+                    width: 58,
+                    height: 58,
+                    fit: BoxFit.cover,
+                    errorWidget: (_, __, ___) =>
+                        _recentFallback(title, size: 58),
+                  )
+                : _recentFallback(title, size: 58),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Spacer(),
+              Text(title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.outfit(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.text)),
+              const SizedBox(height: 3),
+              Text(
+                'Played $count tracks',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3),
+              ),
+              if (artist.isNotEmpty)
+                Text(
+                  'Album · $artist',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style:
+                      GoogleFonts.outfit(fontSize: 10, color: AppColors.text3),
+                ),
+              const Spacer(),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
 }
 
 // ─── For You / Fresh Wave card ────────────────────────────────────────────────
@@ -2638,93 +2866,159 @@ class _FriendListeningCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final name =
         (friend['display_name'] ?? friend['username'] ?? 'Friend').toString();
-    final avatar = (friend['avatar_url'] ?? '').toString();
+    final userId =
+        (friend['id'] as num?)?.toInt() ?? (friend['user_id'] as num?)?.toInt();
     final now = (friend['now_playing'] as Map?)?.cast<String, dynamic>();
     final track =
         (now?['title'] ?? now?['track_title'] ?? 'Listening now').toString();
     final artist = (now?['artist'] ?? now?['track_artist'] ?? '').toString();
-    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final cover = buildMediaUrl(
+      (now?['cover_url'] ??
+              now?['image'] ??
+              now?['thumbnail_url'] ??
+              now?['track_cover_url'] ??
+              now?['album_cover_url'] ??
+              now?['artworkUrl100'] ??
+              now?['picture_medium'] ??
+              friend['cover_url'] ??
+              friend['track_cover_url'] ??
+              friend['album_cover_url'] ??
+              '')
+          .toString(),
+    );
+    final avatarGradients = const [
+      AppColors.gradPurple,
+      AppColors.gradTeal,
+      AppColors.gradMixed,
+      LinearGradient(colors: [Color(0xFFfb7185), Color(0xFFf97316)]),
+    ];
+    final avatarGradient =
+        avatarGradients[name.hashCode.abs() % avatarGradients.length];
+    final isLive = (friend['activity_status'] ?? '').toString() == 'live';
+    final dotColor = isLive ? AppColors.green : const Color(0xFFFBBF24);
+    final dotLabel = isLive ? 'listening now' : 'listened recently';
 
-    return Container(
-      width: wide ? double.infinity : 196,
-      margin: wide ? EdgeInsets.zero : const EdgeInsets.only(right: 12),
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(children: [
-        Container(
-          width: 48,
-          height: 48,
-          decoration: const BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: AppColors.gradTeal,
-          ),
-          child: avatar.isNotEmpty
-              ? ClipOval(
-                  child: CachedNetworkImage(
-                    imageUrl: avatar,
-                    fit: BoxFit.cover,
-                    errorWidget: (_, __, ___) => Center(
-                      child: Text(initial,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800)),
-                    ),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: userId == null
+          ? null
+          : () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => UserProfileScreen(
+                    userId: userId,
+                    initialUser: friend,
                   ),
-                )
-              : Center(
-                  child: Text(initial,
-                      style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w800)),
                 ),
+              ),
+      child: Container(
+        width: wide ? double.infinity : 206,
+        margin: wide ? EdgeInsets.zero : const EdgeInsets.only(right: 10),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.white.withOpacity(0.06)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.14),
+              blurRadius: 14,
+              offset: const Offset(0, 7),
+            ),
+          ],
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Row(children: [
-                Flexible(
-                  child: Text(name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.outfit(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.text)),
-                ),
-                const SizedBox(width: 6),
-                Container(
-                  width: 7,
-                  height: 7,
-                  decoration: const BoxDecoration(
-                    color: AppColors.green,
-                    shape: BoxShape.circle,
+        child: Row(
+          children: [
+            Container(
+              width: 60,
+              height: 60,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: AppColors.glass,
+                border: Border.all(color: Colors.white.withOpacity(0.1)),
+              ),
+              child: cover.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: cover,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) => Container(
+                        decoration: BoxDecoration(gradient: avatarGradient),
+                      ),
+                    )
+                  : Container(
+                      decoration: BoxDecoration(gradient: avatarGradient),
+                    ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.outfit(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Tooltip(
+                        message: dotLabel,
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: dotColor,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: dotColor.withOpacity(0.36),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ]),
-              const SizedBox(height: 3),
-              Text(track,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.outfit(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.text2)),
-              if (artist.isNotEmpty)
-                Text(artist,
+                  const SizedBox(height: 5),
+                  Text(
+                    track,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.outfit(
-                        fontSize: 11, color: AppColors.text3)),
-            ],
-          ),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                  if (artist.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.outfit(
+                        fontSize: 12,
+                        color: Colors.white.withOpacity(0.76),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ),
-      ]),
+      ),
     );
   }
 }
@@ -2892,8 +3186,22 @@ class _LiveRoomCard extends StatelessWidget {
     final hostName =
         (host['first_name'] ?? host['username'] ?? 'Host').toString();
     final track = (room['current_track'] as Map?)?.cast<String, dynamic>();
-    final coverUrl = track?['track_cover_url']?.toString();
+    final rawBackground =
+        (room['background_url'] ?? room['room_background_url'] ?? '')
+            .toString();
+    final backgroundUrl =
+        rawBackground.isNotEmpty ? buildMediaUrl(rawBackground) : null;
+    final rawTrackCover =
+        (track?['track_cover_url'] ?? track?['cover_url'] ?? '').toString();
+    final trackCoverUrl =
+        rawTrackCover.isNotEmpty ? buildMediaUrl(rawTrackCover) : null;
     final count = room['participant_count'] ?? 0;
+    final state = (room['state'] ?? 'live').toString();
+    final badge = state == 'draft'
+        ? 'WAITING'
+        : state == 'paused'
+            ? 'PAUSED'
+            : 'LIVE';
 
     return GestureDetector(
       onTap: () {
@@ -2905,78 +3213,159 @@ class _LiveRoomCard extends StatelessWidget {
         );
       },
       child: Container(
-        width: 160,
+        width: 188,
         margin: const EdgeInsets.only(right: 12),
-        padding: const EdgeInsets.all(12),
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF1a063d), Color(0xFF0d1a3d)],
-          ),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.purpleLight.withOpacity(0.2)),
+          color: AppColors.surface,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.18),
+              blurRadius: 18,
+              offset: const Offset(0, 10),
+            ),
+          ],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Stack(
           children: [
-            Row(children: [
-              Container(
-                width: 32,
-                height: 32,
+            Positioned.fill(
+              child: backgroundUrl != null && backgroundUrl.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: backgroundUrl,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => const SizedBox(),
+                      errorWidget: (_, __, ___) => Container(
+                        decoration:
+                            BoxDecoration(gradient: AppColors.gradPurple),
+                      ),
+                    )
+                  : Container(
+                      decoration: BoxDecoration(gradient: AppColors.gradPurple),
+                    ),
+            ),
+            Positioned.fill(
+              child: DecoratedBox(
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  gradient: AppColors.gradMixed,
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withOpacity(0.12),
+                      Colors.black.withOpacity(0.68),
+                    ],
+                  ),
                 ),
-                child: coverUrl != null
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: CachedNetworkImage(
-                            imageUrl: coverUrl,
-                            fit: BoxFit.cover,
-                            placeholder: (_, __) => const SizedBox(),
-                            errorWidget: (_, __, ___) => const Center(
-                                child: Text('🎵',
-                                    style: TextStyle(fontSize: 14)))))
-                    : const Center(
-                        child: Text('🎙', style: TextStyle(fontSize: 16))),
               ),
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                    color: AppColors.pink.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(100),
-                    border: Border.all(color: AppColors.pink.withOpacity(0.3))),
-                child: Text('LIVE',
-                    style: GoogleFonts.outfit(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.pink)),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.pink.withOpacity(0.18),
+                        borderRadius: BorderRadius.circular(999),
+                        border:
+                            Border.all(color: AppColors.pink.withOpacity(0.35)),
+                      ),
+                      child: Text(badge,
+                          style: GoogleFonts.outfit(
+                              fontSize: 8,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.pink)),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.22),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.headphones_rounded,
+                              size: 11, color: Colors.white70),
+                          const SizedBox(width: 3),
+                          Text('$count',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white70)),
+                        ],
+                      ),
+                    ),
+                  ]),
+                  const Spacer(),
+                  if (track != null) ...[
+                    Row(children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: trackCoverUrl != null &&
+                                  trackCoverUrl.isNotEmpty
+                              ? CachedNetworkImage(
+                                  imageUrl: trackCoverUrl,
+                                  fit: BoxFit.cover,
+                                  errorWidget: (_, __, ___) =>
+                                      Container(color: AppColors.purpleDark),
+                                )
+                              : Container(color: AppColors.purpleDark),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              (track['track_title'] ?? 'Waiting for music')
+                                  .toString(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.outfit(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white),
+                            ),
+                            Text(
+                              (track['track_artist'] ?? '').toString(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.outfit(
+                                  fontSize: 9,
+                                  color: Colors.white.withOpacity(0.72)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ]),
+                    const SizedBox(height: 6),
+                  ],
+                  Text(name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.outfit(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white)),
+                  const SizedBox(height: 2),
+                  Text('Hosted by $hostName',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.outfit(
+                          fontSize: 10, color: Colors.white70)),
+                ],
               ),
-            ]),
-            const SizedBox(height: 8),
-            Text(name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.outfit(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white)),
-            Text(hostName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style:
-                    GoogleFonts.outfit(fontSize: 10, color: AppColors.text3)),
-            const Spacer(),
-            Row(children: [
-              const Icon(Icons.headphones_rounded,
-                  size: 12, color: AppColors.text3),
-              const SizedBox(width: 3),
-              Text('$count',
-                  style:
-                      GoogleFonts.outfit(fontSize: 10, color: AppColors.text3)),
-            ]),
+            ),
           ],
         ),
       ),

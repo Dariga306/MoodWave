@@ -232,6 +232,9 @@ class SkipTrackRequest(BaseModel):
 class ProgressUpdateRequest(BaseModel):
     progress_ms: int = Field(default=0, ge=0)
     completed: bool = False
+    title: Optional[str] = None
+    artist: Optional[str] = None
+    cover_url: Optional[str] = None
 
 
 def _extract_genres(track: Optional[TrackCache]) -> list[str]:
@@ -862,7 +865,7 @@ async def play_track(
         "spotify_id": spotify_id,
         "title": track.title if track else (body.title or ""),
         "artist": track.artist if track else (body.artist or ""),
-        "cover_url": track.cover_url if track else None,
+        "cover_url": (track.cover_url if track else None) or body.cover_url,
         "played_at": datetime.now(timezone.utc).isoformat(),
     }
     redis = request.app.state.redis
@@ -1253,6 +1256,7 @@ async def get_album_tracks(
 async def update_track_progress(
     spotify_id: str,
     body: ProgressUpdateRequest = Body(default_factory=ProgressUpdateRequest),
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1269,5 +1273,44 @@ async def update_track_progress(
     )
     if latest:
         latest.time_listened_ms = body.progress_ms
+    track = await db.scalar(select(TrackCache).where(TrackCache.spotify_id == spotify_id))
+    if not track and (body.title or body.artist or body.cover_url):
+        track = await _ensure_track_cached(
+            db,
+            spotify_id,
+            body.title,
+            body.artist,
+            None,
+            body.cover_url,
+        )
+    elif track and body.cover_url and not track.cover_url:
+        track.cover_url = body.cover_url
+    if request is not None and not body.completed:
+        previous = None
+        try:
+            raw_previous = await request.app.state.redis.get(f"now_playing:{current_user.id}")
+            previous = json.loads(raw_previous) if raw_previous else None
+        except Exception:
+            previous = None
+        previous_cover = (
+            previous.get("cover_url")
+            or previous.get("track_cover_url")
+            or previous.get("album_cover_url")
+            if isinstance(previous, dict)
+            else None
+        )
+        now_playing = {
+            "spotify_id": spotify_id,
+            "title": (track.title if track else "") or body.title or (previous.get("title") if isinstance(previous, dict) else ""),
+            "artist": (track.artist if track else "") or body.artist or (previous.get("artist") if isinstance(previous, dict) else ""),
+            "cover_url": (track.cover_url if track else None) or body.cover_url or previous_cover,
+            "track_cover_url": (track.cover_url if track else None) or body.cover_url or previous_cover,
+            "played_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await request.app.state.redis.setex(
+            f"now_playing:{current_user.id}",
+            NOW_PLAYING_TTL,
+            json.dumps(now_playing),
+        )
     await db.commit()
     return {"ok": True}

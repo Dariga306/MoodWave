@@ -1,13 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/media_url.dart';
 import '../chat_screen.dart';
 import '../group_chat_setup_screen.dart';
 import '../social_activity_screen.dart';
@@ -22,6 +25,7 @@ class _SocialTabState extends State<SocialTab>
     with SingleTickerProviderStateMixin {
   late final TabController _tab;
   int _liveActivityCount = 0;
+  final _chatsViewKey = GlobalKey<_ChatsViewState>();
 
   @override
   void initState() {
@@ -54,9 +58,9 @@ class _SocialTabState extends State<SocialTab>
             child: TabBarView(
               controller: _tab,
               physics: const BouncingScrollPhysics(),
-              children: const [
-                _ChatsView(),
-                _MatchView(),
+              children: [
+                _ChatsView(key: _chatsViewKey),
+                const _MatchView(),
               ],
             ),
           ),
@@ -71,7 +75,7 @@ class _SocialTabState extends State<SocialTab>
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -93,23 +97,34 @@ class _SocialTabState extends State<SocialTab>
                   _headerActionButton(
                     icon: Icons.edit_rounded,
                     iconSize: 20,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const _NewMessageScreen(),
-                      ),
-                    ),
+                    onTap: () async {
+                      final composeResult =
+                          await Navigator.push<Map<String, dynamic>?>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const _NewMessageScreen(),
+                        ),
+                      );
+                      final chat = composeResult?['chat'];
+                      if (chat is Map && mounted) {
+                        _chatsViewKey.currentState
+                            ?.upsertChat(Map<String, dynamic>.from(chat));
+                      }
+                      if (mounted) {
+                        _chatsViewKey.currentState?.refresh();
+                      }
+                    },
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               LayoutBuilder(
                 builder: (context, constraints) {
                   const outerPadding = 4.0;
                   final tabWidth =
                       (constraints.maxWidth - outerPadding * 2) / 2;
                   return Container(
-                    height: 50,
+                    height: 58,
                     padding: const EdgeInsets.all(outerPadding),
                     decoration: BoxDecoration(
                       color: AppColors.surface,
@@ -124,7 +139,7 @@ class _SocialTabState extends State<SocialTab>
                           left: _tab.index * tabWidth,
                           top: 0,
                           width: tabWidth,
-                          height: 42,
+                          height: 50,
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
@@ -183,8 +198,8 @@ class _SocialTabState extends State<SocialTab>
         clipBehavior: Clip.none,
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
               color: AppColors.glass,
               borderRadius: BorderRadius.circular(12),
@@ -368,16 +383,16 @@ class _SegTab extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: SizedBox(
-        height: 42,
+        height: 50,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon,
-                size: 15, color: active ? Colors.white : AppColors.text3),
-            const SizedBox(width: 6),
+                size: 17, color: active ? Colors.white : AppColors.text3),
+            const SizedBox(width: 8),
             Text(label,
                 style: GoogleFonts.outfit(
-                    fontSize: 13,
+                    fontSize: 14,
                     fontWeight: FontWeight.w700,
                     color: active ? Colors.white : AppColors.text3)),
           ],
@@ -1130,7 +1145,7 @@ class _MatchViewState extends State<_MatchView>
 // ─── Chats View ───────────────────────────────────────────────────────────────
 
 class _ChatsView extends StatefulWidget {
-  const _ChatsView();
+  const _ChatsView({super.key});
   @override
   State<_ChatsView> createState() => _ChatsViewState();
 }
@@ -1140,51 +1155,398 @@ class _ChatsViewState extends State<_ChatsView>
   @override
   bool get wantKeepAlive => true;
 
+  Timer? _refreshTimer;
   List<dynamic> _chats = [];
   List<Map<String, dynamic>> _liveList = [];
   Map<int, Map<String, dynamic>> _liveActivityByUser = {};
   final Set<String> _hiddenChatKeys = {};
   final Set<String> _mutedChatKeys = {};
+  final Set<String> _pinnedChatKeys = {};
+  Map<String, int> _unreadCounts = {};
+  static const _pinnedChatsKey = 'pinned_chats_v1';
+  static const _mutedChatsKey = 'muted_chat_threads_v1';
+  static const _lastReadKeyPrefix = 'last_read_v1_';
   bool _loading = true;
+  bool _refreshing = false;
+  int _consecutiveEmptyLoads = 0;
+  String _lastChatsSignature = '';
+  String _lastUnreadSignature = '';
+  DateTime _lastUnreadLoadedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static const _cachedChatsKey = 'social_cached_chats_v2';
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _bootstrap();
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _load(),
+    );
   }
 
-  Future<void> _load() async {
-    try {
-      final data = await ApiService().getChats();
-      Map<int, Map<String, dynamic>> liveMap = {};
-      List<Map<String, dynamic>> liveList = [];
-      try {
-        final activity = await ApiService().getFriendsActivity();
-        final live = (activity['live'] as List?) ?? const [];
-        for (final item in live.whereType<Map>()) {
-          final row = Map<String, dynamic>.from(item);
-          final id = (row['id'] as num?)?.toInt();
-          if (id != null) liveMap[id] = row;
-          liveList.add(row);
-        }
-      } catch (_) {}
+  Future<void> _bootstrap() async {
+    await Future.wait([
+      _loadPins(),
+      _loadMuted(),
+      _loadCachedChats(),
+    ]);
+    await _load();
+  }
 
-      if (!mounted) return;
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadPins() async {
+    final prefs = await SharedPreferences.getInstance();
+    final pins = prefs.getStringList(_pinnedChatsKey) ?? [];
+    if (!mounted) return;
+    setState(() => _pinnedChatKeys.addAll(pins));
+  }
+
+  Future<void> _loadMuted() async {
+    final prefs = await SharedPreferences.getInstance();
+    final muted = prefs.getStringList(_mutedChatsKey) ?? [];
+    if (!mounted) return;
+    setState(() => _mutedChatKeys.addAll(muted));
+  }
+
+  Future<void> _toggleMute(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      if (_mutedChatKeys.contains(key)) {
+        _mutedChatKeys.remove(key);
+      } else {
+        _mutedChatKeys.add(key);
+      }
+    });
+    await prefs.setStringList(_mutedChatsKey, _mutedChatKeys.toList());
+  }
+
+  Future<void> _loadCachedChats() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_cachedChatsKey);
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List || decoded.isEmpty || !mounted) return;
       setState(() {
-        _chats = data;
-        _liveActivityByUser = liveMap;
-        _liveList = liveList;
+        _chats = decoded;
         _loading = false;
       });
+    } catch (_) {}
+  }
+
+  Future<void> _saveCachedChats(List<dynamic> chats) async {
+    if (chats.whereType<Map>().isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_cachedChatsKey, jsonEncode(chats));
+  }
+
+  void _showFloatingNotice(String text, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        margin: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+        padding: EdgeInsets.zero,
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            gradient: error
+                ? const LinearGradient(
+                    colors: [Color(0xFF7F1D1D), Color(0xFFDC2626)],
+                  )
+                : AppColors.gradPurple,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                error ? Icons.error_outline_rounded : Icons.check_rounded,
+                size: 18,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  text,
+                  style: GoogleFonts.outfit(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _togglePin(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      if (_pinnedChatKeys.contains(key)) {
+        _pinnedChatKeys.remove(key);
+      } else if (_pinnedChatKeys.length < 5) {
+        _pinnedChatKeys.add(key);
+      }
+    });
+    await prefs.setStringList(_pinnedChatsKey, _pinnedChatKeys.toList());
+  }
+
+  Future<void> _hideChat(String key) async {
+    final previousChats = List<dynamic>.from(_chats);
+    setState(() {
+      _hiddenChatKeys.add(key);
+      _chats = _chats.where((raw) {
+        if (raw is! Map) return true;
+        return _chatKey(Map<String, dynamic>.from(raw)) != key;
+      }).toList();
+      _unreadCounts.remove(key);
+    });
+    await _saveCachedChats(_chats);
+    try {
+      await ApiService().deleteChat(key);
+      await _load();
+    } catch (_) {
+      try {
+        await ApiService().hideChat(key);
+        await _load();
+        return;
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() {
+        _hiddenChatKeys.remove(key);
+        _chats = previousChats;
+      });
+      _showFloatingNotice('Could not delete chat', error: true);
+    }
+  }
+
+  Future<void> _leaveGroup(String key, int groupChatId) async {
+    final previousChats = List<dynamic>.from(_chats);
+    setState(() {
+      _hiddenChatKeys.add(key);
+      _chats = _chats.where((raw) {
+        if (raw is! Map) return true;
+        return _chatKey(Map<String, dynamic>.from(raw)) != key;
+      }).toList();
+      _unreadCounts.remove(key);
+    });
+    await _saveCachedChats(_chats);
+    try {
+      await ApiService().leaveGroupChat(groupChatId);
+      await _load();
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _chats = [];
+        _hiddenChatKeys.remove(key);
+        _chats = previousChats;
+      });
+      _showFloatingNotice('Could not leave group', error: true);
+    }
+  }
+
+  void refresh() {
+    _consecutiveEmptyLoads = 0;
+    _refreshing = false;
+    _load();
+  }
+
+  void upsertChat(Map<String, dynamic> incoming) {
+    final nextChat = {
+      ...incoming,
+      'created_at':
+          (incoming['created_at'] ?? DateTime.now().toUtc().toIso8601String())
+              .toString(),
+      'updated_at':
+          (incoming['updated_at'] ?? DateTime.now().toUtc().toIso8601String())
+              .toString(),
+    };
+    final key = _chatKey(nextChat);
+    final nextChats = List<dynamic>.from(_chats);
+    final index = nextChats.indexWhere((raw) {
+      if (raw is! Map) return false;
+      return _chatKey(Map<String, dynamic>.from(raw)) == key;
+    });
+    if (index >= 0) {
+      final existing = Map<String, dynamic>.from(nextChats[index] as Map);
+      nextChats[index] = {...existing, ...nextChat};
+    } else {
+      nextChats.insert(0, nextChat);
+    }
+    if (!mounted) return;
+    setState(() {
+      _hiddenChatKeys.remove(key);
+      _chats = nextChats;
+      _loading = false;
+    });
+    unawaited(_saveCachedChats(nextChats));
+  }
+
+  Future<void> _load() async {
+    if (_refreshing) return;
+    if (!await ApiService().hasToken()) {
+      if (mounted) {
+        if (_chats.isEmpty) await _loadCachedChats();
+        if (mounted) setState(() => _loading = false);
+      }
+      return;
+    }
+    _refreshing = true;
+    try {
+      unawaited(ApiService().sendPresenceHeartbeat());
+      final data = await ApiService().getChats();
+      final dataHasChats = data.whereType<Map>().isNotEmpty;
+      if (!dataHasChats && _chats.isNotEmpty) {
+        _consecutiveEmptyLoads += 1;
+        if (mounted) {
+          setState(() => _loading = false);
+        }
+        return;
+      }
+      if (!dataHasChats) {
+        _consecutiveEmptyLoads += 1;
+        if (_consecutiveEmptyLoads < 3) {
+          if (_chats.isEmpty) await _loadCachedChats();
+          if (mounted) setState(() => _loading = false);
+          return;
+        }
+      }
+      _consecutiveEmptyLoads = dataHasChats ? 0 : _consecutiveEmptyLoads + 1;
+      Map<int, Map<String, dynamic>> liveMap = {};
+      List<Map<String, dynamic>> liveList = [];
+      Map<String, dynamic> activity = const {};
+      try {
+        activity = await ApiService().getFriendsActivity();
+      } catch (_) {
+        activity = const {};
+      }
+      final live = (activity['live'] as List?) ?? const [];
+      final recent = (activity['recent'] as List?) ?? const [];
+      for (final item in live.whereType<Map>()) {
+        final row = Map<String, dynamic>.from(item);
+        final id = (row['id'] as num?)?.toInt();
+        if (id != null) liveMap[id] = row;
+        liveList.add(row);
+      }
+      for (final item in recent.whereType<Map>()) {
+        final row = Map<String, dynamic>.from(item);
+        final id = (row['id'] as num?)?.toInt();
+        if (id != null) liveMap.putIfAbsent(id, () => row);
+      }
+
+      if (!mounted) return;
+      final incomingChatKeys = data
+          .whereType<Map>()
+          .map((item) => _chatKey(Map<String, dynamic>.from(item)))
+          .toSet();
+      _hiddenChatKeys.removeWhere(incomingChatKeys.contains);
+      final nextSignature = [
+        for (final rawChat in data.whereType<Map>())
+          _chatSignature(Map<String, dynamic>.from(rawChat)),
+        '|live|',
+        for (final item in liveList) _liveSignature(item),
+        '|presence|',
+        for (final item in liveMap.values) _liveSignature(item),
+      ].join('||');
+      final chatsChanged = nextSignature != _lastChatsSignature;
+      if (_loading || chatsChanged) {
+        _lastChatsSignature = nextSignature;
+        setState(() {
+          _chats = data;
+          _liveActivityByUser = liveMap;
+          _liveList = liveList;
+          _loading = false;
+        });
+        unawaited(_saveCachedChats(data));
+      } else if (_loading) {
+        setState(() => _loading = false);
+      }
+      _loadUnreadCounts(force: chatsChanged);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
         _liveActivityByUser = {};
         _liveList = [];
         _loading = false;
       });
+    } finally {
+      _refreshing = false;
     }
+  }
+
+  String _chatSignature(Map<String, dynamic> chat) {
+    final partner =
+        (chat['partner'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return [
+      _chatKey(chat),
+      (chat['firebase_chat_id'] ?? '').toString(),
+      (chat['updated_at'] ?? '').toString(),
+      (chat['last_message_at'] ?? '').toString(),
+      (chat['last_message_type'] ?? '').toString(),
+      (chat['last_message_preview'] ?? '').toString(),
+      (partner['display_name'] ?? '').toString(),
+      (partner['avatar_url'] ?? '').toString(),
+      (chat['member_count'] ?? '').toString(),
+    ].join('|');
+  }
+
+  String _liveSignature(Map<String, dynamic> item) => [
+        (item['id'] ?? '').toString(),
+        (item['display_name'] ?? '').toString(),
+        (item['avatar_url'] ?? '').toString(),
+        ((item['now_playing'] as Map?)?['title'] ?? '').toString(),
+        ((item['now_playing'] as Map?)?['artist'] ?? '').toString(),
+        ((item['now_playing'] as Map?)?['cover_url'] ?? '').toString(),
+        ((item['now_playing'] as Map?)?['track_cover_url'] ?? '').toString(),
+        ((item['now_playing'] as Map?)?['album_cover_url'] ?? '').toString(),
+        (item['activity_status'] ?? '').toString(),
+        (item['presence_status'] ?? '').toString(),
+        (item['last_seen_at'] ?? '').toString(),
+      ].join('|');
+
+  Future<void> _loadUnreadCounts({bool force = false}) async {
+    if (!force &&
+        DateTime.now().difference(_lastUnreadLoadedAt) <
+            const Duration(seconds: 10)) {
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final requests = <Map<String, String>>[];
+    for (final rawChat in _chats) {
+      final chat = Map<String, dynamic>.from(rawChat as Map);
+      final key = _chatKey(chat);
+      final firebaseId = (chat['firebase_chat_id'] as String?) ?? '';
+      if (firebaseId.isEmpty) continue;
+      final lastRead = prefs.getString('$_lastReadKeyPrefix$key');
+      requests.add({
+        'key': key,
+        'firebase_chat_id': firebaseId,
+        'since': lastRead ??
+            DateTime.fromMillisecondsSinceEpoch(0).toUtc().toIso8601String()
+      });
+    }
+    if (requests.isEmpty) return;
+    try {
+      final counts = await ApiService().getUnreadCounts(requests);
+      if (!mounted) return;
+      final orderedKeys = counts.keys.toList()..sort();
+      final signature = orderedKeys.map((k) => '$k:${counts[k]}').join('|');
+      _lastUnreadLoadedAt = DateTime.now();
+      if (signature != _lastUnreadSignature) {
+        _lastUnreadSignature = signature;
+        setState(() => _unreadCounts = counts);
+      }
+    } catch (_) {}
   }
 
   String _chatKey(Map<String, dynamic> chat) {
@@ -1205,9 +1567,16 @@ class _ChatsViewState extends State<_ChatsView>
               strokeWidth: 2, color: AppColors.purpleLight));
     }
     final visibleChats = _chats
-        .where((c) => !_hiddenChatKeys.contains(
-            _chatKey(Map<String, dynamic>.from(c as Map))))
-        .toList();
+        .where((c) => !_hiddenChatKeys
+            .contains(_chatKey(Map<String, dynamic>.from(c as Map))))
+        .toList()
+      ..sort((a, b) {
+        final aKey = _chatKey(Map<String, dynamic>.from(a as Map));
+        final bKey = _chatKey(Map<String, dynamic>.from(b as Map));
+        final aPinned = _pinnedChatKeys.contains(aKey) ? 0 : 1;
+        final bPinned = _pinnedChatKeys.contains(bKey) ? 0 : 1;
+        return aPinned.compareTo(bPinned);
+      });
     if (visibleChats.isEmpty && _liveList.isEmpty) {
       return Center(
         child: Padding(
@@ -1279,7 +1648,7 @@ class _ChatsViewState extends State<_ChatsView>
                     ]),
                     const SizedBox(height: 10),
                     SizedBox(
-                      height: 72,
+                      height: 92,
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
                         itemCount: _liveList.length,
@@ -1307,17 +1676,27 @@ class _ChatsViewState extends State<_ChatsView>
                   final key = _chatKey(chat);
                   return _ChatItem(
                     chat: chat,
-                    activity:
-                        partnerId == null ? null : _liveActivityByUser[partnerId],
+                    activity: partnerId == null
+                        ? null
+                        : _liveActivityByUser[partnerId],
                     isMuted: _mutedChatKeys.contains(key),
-                    onHide: () => setState(() => _hiddenChatKeys.add(key)),
-                    onToggleMute: () => setState(() {
-                      if (_mutedChatKeys.contains(key)) {
-                        _mutedChatKeys.remove(key);
-                      } else {
-                        _mutedChatKeys.add(key);
+                    isPinned: _pinnedChatKeys.contains(key),
+                    unreadCount: _unreadCounts[key] ?? 0,
+                    onHide: () => _hideChat(key),
+                    onLeaveGroup: (groupId) => _leaveGroup(key, groupId),
+                    onToggleMute: () => _toggleMute(key),
+                    onTogglePin: () => _togglePin(key),
+                    canPin: !_pinnedChatKeys.contains(key) &&
+                            _pinnedChatKeys.length >= 5
+                        ? false
+                        : true,
+                    onReturn: (result) {
+                      final returnedChat = result?['chat'];
+                      if (returnedChat is Map) {
+                        upsertChat(Map<String, dynamic>.from(returnedChat));
                       }
-                    }),
+                      _load();
+                    },
                   );
                 },
                 childCount: visibleChats.length,
@@ -1334,14 +1713,26 @@ class _ChatItem extends StatelessWidget {
   final Map<String, dynamic> chat;
   final Map<String, dynamic>? activity;
   final bool isMuted;
+  final bool isPinned;
+  final bool canPin;
+  final int unreadCount;
   final VoidCallback? onHide;
+  final void Function(int groupChatId)? onLeaveGroup;
   final VoidCallback? onToggleMute;
+  final VoidCallback? onTogglePin;
+  final void Function(Map<String, dynamic>? result)? onReturn;
   const _ChatItem({
     required this.chat,
     this.activity,
     this.isMuted = false,
+    this.isPinned = false,
+    this.canPin = true,
+    this.unreadCount = 0,
     this.onHide,
+    this.onLeaveGroup,
     this.onToggleMute,
+    this.onTogglePin,
+    this.onReturn,
   });
 
   static String _cleanPreview(String? raw, String? type, String? timeStr) {
@@ -1350,10 +1741,16 @@ class _ChatItem extends StatelessWidget {
     }
     if (type == 'track') return raw;
     final t = raw.trim();
-    if (t.startsWith('💬') || t.contains('создал') || t.contains('group chat') || t.contains('created a group')) {
+    if (t.startsWith('💬') ||
+        t.contains('создал') ||
+        t.contains('group chat') ||
+        t.contains('created a group')) {
       return '💬 Group invite';
     }
-    if (t.contains('Listening room') || t.contains('MW-') || t.contains('Invite code')) {
+    if (t.contains('Listening room') ||
+        t.contains('Live Room') ||
+        t.contains('MW-') ||
+        t.contains('Invite code')) {
       return '🎵 Room invite';
     }
     return raw;
@@ -1372,6 +1769,14 @@ class _ChatItem extends StatelessWidget {
         partner['first_name'] ??
         partner['username'] ??
         'User';
+    final avatarVersion = chatKind == 'group'
+        ? (chat['updated_at']?.toString() ??
+            chat['last_message_at']?.toString())
+        : null;
+    final avatarUrl = buildMediaUrl(
+      (partner['avatar_url'] ?? '').toString(),
+      version: avatarVersion,
+    );
     final city = (partner['city'] as String?) ?? '';
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
     final preview = chat['last_message_preview'] as String?;
@@ -1380,32 +1785,75 @@ class _ChatItem extends StatelessWidget {
         chat['last_message_at'] as String? ?? chat['created_at'] as String?;
     final nowPlaying =
         (activity?['now_playing'] as Map?)?.cast<String, dynamic>() ?? {};
-    final isLiveNow = nowPlaying.isNotEmpty;
+    final activityStatus = (activity?['activity_status'] ?? '').toString();
+    final isLiveNow = activityStatus == 'live' && nowPlaying.isNotEmpty;
+    final isRecentListen =
+        activityStatus == 'recent' && nowPlaying.isNotEmpty;
     final liveTitle = (nowPlaying['title'] ?? '').toString().trim();
     final liveArtist = (nowPlaying['artist'] ?? '').toString().trim();
+    final isOnline = activity?['is_online'] == true;
+    final lastSeenAt = (activity?['last_seen_at'] ?? '').toString();
+    final lastSeenLabel = lastSeenAt.isNotEmpty ? _relTime(lastSeenAt) : '';
+    final statusText = isLiveNow
+        ? 'Listening now'
+        : isRecentListen
+            ? 'Listened recently'
+            : isOnline
+                ? 'Online'
+        : lastSeenLabel.isNotEmpty
+            ? (lastSeenLabel == 'now'
+                ? 'Last seen just now'
+                : 'Last seen $lastSeenLabel ago')
+            : '';
 
     final previewText = _ChatItem._cleanPreview(preview, previewType, timeStr);
     final isTrackPreview = previewType == 'track';
+    final accentColor = AppColors.purpleLight;
+    final tileDecoration = isLiveNow || isRecentListen
+        ? BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            color: AppColors.surface.withOpacity(0.34),
+            border: Border.all(color: AppColors.purpleLight.withOpacity(0.16)),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.purpleDark.withOpacity(0.12),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          )
+        : const BoxDecoration(
+            border: Border(bottom: BorderSide(color: Color(0x0DFFFFFF))),
+          );
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-              builder: (_) => ChatScreen(
-                  matchId: matchId,
-                  chatId: chatId,
-                  groupChatId: groupChatId,
-                  partnerName: name,
-                  partnerId: partner['id'] as int? ?? 0,
-                  partnerAvatarUrl: (partner['avatar_url'] ?? '').toString()))),
-      onLongPress: () => _showChatOptions(context, name),
+      onTap: () async {
+        final result = await Navigator.push<Map<String, dynamic>?>(
+            context,
+            MaterialPageRoute(
+                builder: (_) => ChatScreen(
+                    matchId: matchId,
+                    chatId: chatId,
+                    groupChatId: groupChatId,
+                    partnerName: name,
+                    partnerId: partner['id'] as int? ?? 0,
+                    partnerAvatarUrl: avatarUrl,
+                    firebaseChatId:
+                        (chat['firebase_chat_id'] as String?) ?? '')));
+        onReturn?.call(result);
+      },
+      onLongPress: () =>
+          _showChatOptions(context, name, chatKind, groupChatId),
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.only(bottom: 8),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 2),
-          decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: Color(0x0DFFFFFF)))),
+          constraints: const BoxConstraints(minHeight: 94),
+          padding: EdgeInsets.symmetric(
+            vertical: 13,
+            horizontal: (isLiveNow || isRecentListen) ? 12 : 2,
+          ),
+          decoration: tileDecoration,
           child: Row(children: [
             // Avatar with optional glow for new chats
             Container(
@@ -1413,7 +1861,8 @@ class _ChatItem extends StatelessWidget {
               height: 54,
               clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
-                gradient: AppColors.gradMixed,
+                color: avatarUrl.isNotEmpty ? Colors.transparent : null,
+                gradient: avatarUrl.isNotEmpty ? null : AppColors.gradMixed,
                 shape: BoxShape.circle,
                 border: Border.all(
                     color: Colors.white.withOpacity(0.08), width: 1.5),
@@ -1423,11 +1872,20 @@ class _ChatItem extends StatelessWidget {
                       blurRadius: 12)
                 ],
               ),
-              child: (partner['avatar_url']?.toString().isNotEmpty ?? false)
-                  ? Image.network(
-                      partner['avatar_url'].toString(),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Center(
+              child: avatarUrl.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: avatarUrl,
+                      imageBuilder: (_, imageProvider) => Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          image: DecorationImage(
+                            image: imageProvider,
+                            fit: BoxFit.cover,
+                            alignment: Alignment.center,
+                          ),
+                        ),
+                      ),
+                      errorWidget: (_, __, ___) => Center(
                         child: Text(initial,
                             style: GoogleFonts.outfit(
                                 fontSize: 20,
@@ -1442,7 +1900,7 @@ class _ChatItem extends StatelessWidget {
                               fontWeight: FontWeight.w700,
                               color: Colors.white))),
             ),
-            if (isLiveNow)
+            if (isLiveNow || isRecentListen)
               Transform.translate(
                 offset: const Offset(-14, 16),
                 child: Container(
@@ -1452,22 +1910,30 @@ class _ChatItem extends StatelessWidget {
                     color: AppColors.surface,
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: AppColors.purple.withOpacity(0.45),
+                      color: (isLiveNow
+                              ? AppColors.green
+                              : const Color(0xFFFACC15))
+                          .withOpacity(0.55),
                       width: 1.2,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: AppColors.purple.withOpacity(0.22),
+                      color: (isLiveNow
+                              ? AppColors.green
+                              : const Color(0xFFFACC15))
+                          .withOpacity(0.22),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                       ),
                     ],
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Icon(
                       Icons.graphic_eq_rounded,
                       size: 12,
-                      color: AppColors.purpleLight,
+                      color: isLiveNow
+                          ? AppColors.green
+                          : const Color(0xFFFACC15),
                     ),
                   ),
                 ),
@@ -1489,18 +1955,31 @@ class _ChatItem extends StatelessWidget {
                         style: GoogleFonts.outfit(
                             fontSize: 11, color: AppColors.text3),
                       )
+                    else if (statusText.isNotEmpty)
+                      Text(statusText,
+                          style: GoogleFonts.outfit(
+                              fontSize: 11,
+                              color: isLiveNow
+                                  ? AppColors.green
+                                  : isRecentListen
+                                      ? const Color(0xFFFACC15)
+                                      : isOnline
+                                          ? AppColors.purpleLight
+                                          : AppColors.text3))
                     else if (city.isNotEmpty)
                       Text(city,
                           style: GoogleFonts.outfit(
                               fontSize: 11, color: AppColors.text3)),
                     const SizedBox(height: 3),
-                    if (isLiveNow)
+                    if (isLiveNow || isRecentListen)
                       Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.graphic_eq_rounded,
                             size: 12,
-                            color: AppColors.purpleLight,
+                            color: isLiveNow
+                                ? AppColors.green
+                                : const Color(0xFFFACC15),
                           ),
                           const SizedBox(width: 4),
                           Expanded(
@@ -1519,7 +1998,7 @@ class _ChatItem extends StatelessWidget {
                               style: GoogleFonts.outfit(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
-                                color: AppColors.purpleLight,
+                                color: accentColor,
                               ),
                             ),
                           ),
@@ -1532,30 +2011,63 @@ class _ChatItem extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.outfit(
                             fontSize: 13,
-                            color: isTrackPreview
-                                ? AppColors.purpleLight
-                                : AppColors.text3),
+                            color:
+                                isTrackPreview ? accentColor : AppColors.text3),
                       ),
-                    if (isLiveNow) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        previewText,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.outfit(
-                          fontSize: 12,
-                          color: AppColors.text3,
-                        ),
-                      ),
-                    ],
                   ]),
             ),
-            // Time
-            if (timeStr != null) ...[
+            // Time + indicators
+            if (timeStr != null || isMuted || isPinned || unreadCount > 0) ...[
               const SizedBox(width: 8),
-              Text(_relTime(timeStr),
-                  style:
-                      GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isPinned)
+                        const Icon(Icons.push_pin_rounded,
+                            size: 12, color: AppColors.purpleLight),
+                      if (isPinned && isMuted) const SizedBox(width: 4),
+                      if (isMuted)
+                        const Icon(Icons.notifications_off_rounded,
+                            size: 12, color: AppColors.text3),
+                    ],
+                  ),
+                  if (timeStr != null)
+                    Text(
+                      _relTime(timeStr),
+                      style: GoogleFonts.outfit(
+                          fontSize: 11, color: AppColors.text3),
+                    ),
+                  if (unreadCount > 0) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      constraints:
+                          const BoxConstraints(minWidth: 18, maxWidth: 30),
+                      height: 18,
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      decoration: BoxDecoration(
+                        gradient: isMuted ? null : AppColors.gradPurple,
+                        color: isMuted ? AppColors.glass : null,
+                        borderRadius: BorderRadius.circular(9),
+                        border: isMuted
+                            ? Border.all(color: AppColors.border)
+                            : null,
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        unreadCount > 99 ? '99+' : unreadCount.toString(),
+                        style: GoogleFonts.outfit(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: isMuted ? AppColors.text3 : Colors.white),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ],
           ]),
         ),
@@ -1563,7 +2075,12 @@ class _ChatItem extends StatelessWidget {
     );
   }
 
-  void _showChatOptions(BuildContext context, String chatName) {
+  void _showChatOptions(
+    BuildContext context,
+    String chatName,
+    String chatKind,
+    int? groupChatId,
+  ) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1594,8 +2111,22 @@ class _ChatItem extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
+            if (isPinned || canPin) ...[
+              _sheetOption(
+                icon:
+                    isPinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
+                label: isPinned ? 'Unpin chat' : 'Pin chat',
+                color: AppColors.purpleLight,
+                onTap: () {
+                  Navigator.pop(context);
+                  onTogglePin?.call();
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
             _sheetOption(
-              icon: isMuted ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+              icon:
+                  isMuted ? Icons.volume_up_rounded : Icons.volume_off_rounded,
               label: isMuted ? 'Unmute' : 'Mute',
               color: AppColors.text,
               onTap: () {
@@ -1604,6 +2135,18 @@ class _ChatItem extends StatelessWidget {
               },
             ),
             const SizedBox(height: 8),
+            if (chatKind == 'group' && groupChatId != null) ...[
+              _sheetOption(
+                icon: Icons.logout_rounded,
+                label: 'Leave group',
+                color: const Color(0xFFFACC15),
+                onTap: () {
+                  Navigator.pop(context);
+                  onLeaveGroup?.call(groupChatId);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
             _sheetOption(
               icon: Icons.delete_outline_rounded,
               label: 'Delete chat',
@@ -1682,12 +2225,19 @@ class _LiveMiniCard extends StatelessWidget {
     final nowPlaying =
         (friend['now_playing'] as Map?)?.cast<String, dynamic>() ?? {};
     final title = (nowPlaying['title'] ?? '').toString().trim();
+    final rawCover =
+        (nowPlaying['cover_url'] ?? nowPlaying['track_cover_url'] ?? '')
+            .toString()
+            .trim();
+    final coverUrl =
+        rawCover.startsWith('http') ? rawCover : buildMediaUrl(rawCover);
 
     return Container(
       width: 62,
       margin: const EdgeInsets.only(right: 12),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Stack(
             clipBehavior: Clip.none,
@@ -1697,40 +2247,24 @@ class _LiveMiniCard extends StatelessWidget {
                 height: 42,
                 decoration: BoxDecoration(
                   gradient: AppColors.gradMixed,
-                  shape: BoxShape.circle,
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: AppColors.purpleLight.withOpacity(0.5),
                     width: 1.5,
                   ),
                 ),
-                child: avatar.isNotEmpty
-                    ? ClipOval(
+                child: coverUrl.isNotEmpty
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
                         child: CachedNetworkImage(
-                          imageUrl: avatar,
+                          imageUrl: coverUrl,
                           fit: BoxFit.cover,
                           placeholder: (_, __) => const SizedBox(),
-                          errorWidget: (_, __, ___) => Center(
-                            child: Text(
-                              initial,
-                              style: GoogleFonts.outfit(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
+                          errorWidget: (_, __, ___) =>
+                              _avatarFallback(avatar, initial),
                         ),
                       )
-                    : Center(
-                        child: Text(
-                          initial,
-                          style: GoogleFonts.outfit(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
+                    : _avatarFallback(avatar, initial),
               ),
               Positioned(
                 bottom: 0,
@@ -1772,6 +2306,31 @@ class _LiveMiniCard extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+
+  Widget _avatarFallback(String avatar, String initial) {
+    if (avatar.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: CachedNetworkImage(
+          imageUrl: buildMediaUrl(avatar),
+          fit: BoxFit.cover,
+          placeholder: (_, __) => const SizedBox(),
+          errorWidget: (_, __, ___) => Center(
+            child: Text(initial,
+                style: GoogleFonts.outfit(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white)),
+          ),
+        ),
+      );
+    }
+    return Center(
+      child: Text(initial,
+          style: GoogleFonts.outfit(
+              fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white)),
     );
   }
 }
@@ -1916,7 +2475,7 @@ class _NewMessageScreenState extends State<_NewMessageScreen> {
           result['partner']?['username']?.toString() ??
           (user['display_name'] ?? user['username'] ?? 'User').toString();
       final avatarUrl = result['partner']?['avatar_url']?.toString();
-      Navigator.pushReplacement(
+      final chatResult = await Navigator.push<Map<String, dynamic>?>(
         context,
         MaterialPageRoute(
           builder: (_) => ChatScreen(
@@ -1927,6 +2486,17 @@ class _NewMessageScreenState extends State<_NewMessageScreen> {
           ),
         ),
       );
+      if (!mounted) return;
+      Navigator.pop(
+          context,
+          chatResult ??
+              {
+                'chat': {
+                  ...result,
+                  'created_at': DateTime.now().toUtc().toIso8601String(),
+                  'updated_at': DateTime.now().toUtc().toIso8601String(),
+                }
+              });
     } catch (e) {
       if (!mounted) return;
       setState(() => _openingUserId = null);
@@ -2053,13 +2623,6 @@ class _NewMessageScreenState extends State<_NewMessageScreen> {
                     ),
                   ),
                 ),
-                if (_searchCtrl.text.trim().isEmpty && _recommended.isNotEmpty)
-                  _RecommendationSection(
-                    title: 'Recommendations',
-                    users: _recommended,
-                    openingUserId: _openingUserId,
-                    onTap: _openChat,
-                  ),
                 _RecommendationSection(
                   title: _searchCtrl.text.trim().isEmpty
                       ? 'People you follow'
@@ -2068,6 +2631,13 @@ class _NewMessageScreenState extends State<_NewMessageScreen> {
                   openingUserId: _openingUserId,
                   onTap: _openChat,
                 ),
+                if (_searchCtrl.text.trim().isEmpty && _recommended.isNotEmpty)
+                  _RecommendationSection(
+                    title: 'Recommendations',
+                    users: _recommended,
+                    openingUserId: _openingUserId,
+                    onTap: _openChat,
+                  ),
               ],
             ),
           ),

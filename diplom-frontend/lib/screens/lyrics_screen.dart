@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 
+import '../utils/lyrics_matcher.dart';
+
 class SyncedLine {
   final int timeMs;
   final String text;
@@ -125,6 +127,19 @@ class _LyricsScreenState extends State<LyricsScreen> {
     }
     return variants;
   }
+
+  LyricsMatchContext get _lyricsMatchContext => LyricsMatchContext(
+        titleVariants: buildTitleVariants(
+          _cleanTitle.isNotEmpty ? _cleanTitle : widget.title,
+        ),
+        artistVariants: buildArtistVariants(
+          widget.artist,
+          primaryArtist: _primaryArtist,
+          extraArtists: _artistVariants,
+        ),
+        albumName: widget.album,
+        durationSeconds: widget.duration.inSeconds,
+      );
 
   // Extrapolates current position using wall-clock time since last update.
   // Capped at 1500 ms to stay responsive while avoiding running far ahead.
@@ -261,11 +276,11 @@ class _LyricsScreenState extends State<LyricsScreen> {
         }
       }
 
-      candidates.sort((a, b) => _lyricsScore(b).compareTo(_lyricsScore(a)));
+      candidates.sort((a, b) =>
+          _lyricsMatchContext.score(b).compareTo(_lyricsMatchContext.score(a)));
 
-      // Pass 1: strict match + synced lyrics
       for (final map in candidates) {
-        if (!_looksLikeRequestedSong(map, strict: true)) continue;
+        if (!_lyricsMatchContext.acceptsCandidate(map)) continue;
         final syncedLyrics = map['syncedLyrics'] as String?;
         if (syncedLyrics == null || syncedLyrics.isEmpty) continue;
         final lines = _parseSyncedLyrics(syncedLyrics);
@@ -280,26 +295,8 @@ class _LyricsScreenState extends State<LyricsScreen> {
         return;
       }
 
-      // Pass 2: relaxed match (title only, no artist requirement) + synced lyrics
       for (final map in candidates) {
-        if (!_looksLikeRequestedSong(map, strict: false)) continue;
-        final syncedLyrics = map['syncedLyrics'] as String?;
-        if (syncedLyrics == null || syncedLyrics.isEmpty) continue;
-        final lines = _parseSyncedLyrics(syncedLyrics);
-        if (lines.isEmpty) continue;
-        if (!mounted) return;
-        setState(() {
-          _syncedLines = lines;
-          _lyricsLines = lines.map((line) => line.text).toList();
-          _loading = false;
-        });
-        _startTicker();
-        return;
-      }
-
-      // Pass 3: relaxed match + plain lyrics with approximate sync
-      for (final map in candidates) {
-        if (!_looksLikeRequestedSong(map, strict: false)) continue;
+        if (!_lyricsMatchContext.acceptsCandidate(map)) continue;
         final plainLyrics = map['plainLyrics'] as String?;
         if (plainLyrics == null || plainLyrics.isEmpty) continue;
         final lines = plainLyrics
@@ -353,125 +350,34 @@ class _LyricsScreenState extends State<LyricsScreen> {
     setState(() => _loading = false);
   }
 
-  int _lyricsScore(Map item) {
-    final itemTitle = (item['trackName'] ?? item['name'] ?? '').toString();
-    final itemArtist = (item['artistName'] ?? item['artist'] ?? '').toString();
-    final itemAlbum = (item['albumName'] ?? '').toString();
-    final titleTokens =
-        _tokens(_cleanTitle.isNotEmpty ? _cleanTitle : widget.title);
-    final artistTokens = _tokens(_primaryArtist);
-    final itemTitleTokens = _tokens(itemTitle);
-    final itemArtistTokens = _tokens(itemArtist);
-    final synced =
-        (item['syncedLyrics'] as String?)?.isNotEmpty == true ? 1000 : 0;
-    final plain =
-        (item['plainLyrics'] as String?)?.isNotEmpty == true ? 100 : 0;
-    final titleMatches = titleTokens.intersection(itemTitleTokens).length;
-    final artistMatches = artistTokens.intersection(itemArtistTokens).length;
-    final exactTitleBonus = _strongTitleMatch(
-            itemTitle, _cleanTitle.isNotEmpty ? _cleanTitle : widget.title)
-        ? 600
-        : -1200;
-    final exactArtistBonus =
-        _artistVariants.any((artist) => _strongTitleMatch(itemArtist, artist))
-            ? 480
-            : -900;
-    final durationSeconds = widget.duration.inSeconds;
-    final itemDuration = (item['duration'] as num?)?.toInt() ?? durationSeconds;
-    final durationPenalty =
-        durationSeconds > 0 ? (durationSeconds - itemDuration).abs() * 3 : 0;
-    final albumBonus = widget.album.isNotEmpty &&
-            _normalize(itemAlbum) == _normalize(widget.album)
-        ? 80
-        : 0;
-    return synced +
-        plain +
-        titleMatches * 120 +
-        artistMatches * 140 +
-        exactTitleBonus +
-        exactArtistBonus +
-        albumBonus -
-        durationPenalty;
-  }
-
-  bool _looksLikeRequestedSong(Map item, {bool strict = true}) {
-    final itemTitle = (item['trackName'] ?? item['name'] ?? '').toString();
-    final itemArtist = (item['artistName'] ?? item['artist'] ?? '').toString();
-    final wantedTitle = _cleanTitle.isNotEmpty ? _cleanTitle : widget.title;
-    if (!_strongTitleMatch(itemTitle, wantedTitle)) {
-      return false;
-    }
-    if (strict) {
-      final artistMatch = _artistVariants.any(
-        (artist) => _strongTitleMatch(itemArtist, artist),
-      );
-      if (itemArtist.isNotEmpty && !artistMatch) {
-        return false;
-      }
-    }
-    final durationSeconds = widget.duration.inSeconds;
-    final itemDuration = (item['duration'] as num?)?.toInt() ?? 0;
-    final maxDiff = strict ? 8 : 20;
-    if (durationSeconds > 0 &&
-        itemDuration > 0 &&
-        (durationSeconds - itemDuration).abs() > maxDiff) {
-      return false;
-    }
-    return true;
-  }
-
-  String _normalize(String value) {
-    return value
-        .toLowerCase()
-        .replaceAll('&', ' and ')
-        .replaceAll(RegExp(r'\((official|audio|lyrics?|video|live).*?\)'), ' ')
-        .replaceAll(RegExp(r'\[(official|audio|lyrics?|video|live).*?\]'), ' ')
-        .replaceAll(RegExp(r'[^a-z0-9а-яё]+'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-  }
-
-  Set<String> _tokens(String value) =>
-      _normalize(value).split(' ').where((token) => token.isNotEmpty).toSet();
-
-  bool _strongTitleMatch(String candidate, String wantedRaw) {
-    final wanted = _normalize(wantedRaw);
-    final normalizedCandidate = _normalize(candidate);
-    if (wanted.isEmpty || normalizedCandidate.isEmpty) return false;
-    if (wanted == normalizedCandidate ||
-        wanted.contains(normalizedCandidate) ||
-        normalizedCandidate.contains(wanted)) {
-      return true;
-    }
-    final wantedTokens = _tokens(wanted);
-    final candidateTokens = _tokens(normalizedCandidate);
-    if (wantedTokens.isEmpty || candidateTokens.isEmpty) return false;
-    final overlap = wantedTokens.intersection(candidateTokens).length;
-    return overlap / wantedTokens.length >= 0.75;
-  }
-
   List<SyncedLine> _parseSyncedLyrics(String raw) {
-    final regex = RegExp(r'^\[(\d+):(\d+)[.:](\d+)\]\s*(.*)$');
     final lines = <SyncedLine>[];
 
     for (final entry in raw.split('\n')) {
-      final match = regex.firstMatch(entry.trim());
-      if (match == null) continue;
-
-      final minutes = int.parse(match.group(1)!);
-      final seconds = int.parse(match.group(2)!);
-      final hundredths = int.parse(match.group(3)!);
-      final text = match.group(4)!.trim();
+      final trimmed = entry.trim();
+      if (trimmed.isEmpty) continue;
+      final timeMatches =
+          RegExp(r'\[(\d+):(\d+)(?:[.:](\d+))?\]').allMatches(trimmed).toList();
+      if (timeMatches.isEmpty) continue;
+      final text = trimmed
+          .replaceAll(RegExp(r'\[(\d+):(\d+)(?:[.:](\d+))?\]'), '')
+          .trim();
       if (text.isEmpty) continue;
-
-      lines.add(
-        SyncedLine(
-          timeMs: (minutes * 60000) + (seconds * 1000) + (hundredths * 10),
-          text: text,
-        ),
-      );
+      for (final match in timeMatches) {
+        final minutes = int.parse(match.group(1)!);
+        final seconds = int.parse(match.group(2)!);
+        final hundredths =
+            int.parse((match.group(3) ?? '0').padRight(2, '0').substring(0, 2));
+        lines.add(
+          SyncedLine(
+            timeMs: (minutes * 60000) + (seconds * 1000) + (hundredths * 10),
+            text: text,
+          ),
+        );
+      }
     }
 
+    lines.sort((a, b) => a.timeMs.compareTo(b.timeMs));
     return lines;
   }
 
@@ -489,7 +395,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
     if (_syncedLines.isEmpty) return;
 
     final posMs = _interpolatedPositionMs;
-    int nextIndex = -1;
+    int nextIndex = posMs < _syncedLines.first.timeMs ? 0 : -1;
     for (int i = 0; i < _syncedLines.length; i++) {
       if (_syncedLines[i].timeMs <= posMs) {
         nextIndex = i;
@@ -564,7 +470,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            'Lyrics not found',
+                            'Нет субтитров',
                             style: GoogleFonts.outfit(
                               fontSize: 16,
                               color: Colors.white60,
@@ -573,76 +479,80 @@ class _LyricsScreenState extends State<LyricsScreen> {
                         ],
                       ),
                     )
-                  : ListView.builder(
-                      controller: _scrollController,
-                      padding: EdgeInsets.symmetric(
-                        vertical: MediaQuery.of(context).size.height * 0.42,
-                      ),
-                      itemCount: _lyricsLines.length,
-                      itemBuilder: (context, index) {
-                        final isActive = _syncedLines.isNotEmpty &&
-                            index == _activeIndex &&
-                            _activeIndex >= 0;
-                        final canSeek =
-                            _syncedLines.isNotEmpty && widget.onSeek != null;
-
-                        return GestureDetector(
-                          key: isActive ? _activeKey : null,
-                          onTap: canSeek ? () => _seekToLine(index) : null,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 5,
-                            ),
-                            child: AnimatedDefaultTextStyle(
-                              duration: const Duration(milliseconds: 250),
-                              style: GoogleFonts.outfit(
-                                fontSize: 17,
-                                fontWeight: isActive
-                                    ? FontWeight.w700
-                                    : FontWeight.w400,
-                                color: isActive
-                                    ? Colors.white
-                                    : Colors.white.withOpacity(0.5),
-                                height: 1.7,
+                  : Column(
+                      children: [
+                        if (widget.approximateSync)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
-                                _lyricsLines[index],
+                                'Approximate timing — tap to seek unavailable',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 11,
+                                  color: Colors.white54,
+                                ),
                                 textAlign: TextAlign.center,
                               ),
                             ),
                           ),
-                        );
-                      },
+                        Expanded(
+                          child: ListView.builder(
+                            controller: _scrollController,
+                            padding: EdgeInsets.symmetric(
+                              vertical:
+                                  MediaQuery.of(context).size.height * 0.34,
+                            ),
+                            itemCount: _lyricsLines.length,
+                            itemBuilder: (context, index) {
+                              final isActive = _syncedLines.isNotEmpty &&
+                                  index == _activeIndex &&
+                                  _activeIndex >= 0;
+                              // Seek is only meaningful for exact (non-approximate) sync
+                              final canSeek = _syncedLines.isNotEmpty &&
+                                  widget.onSeek != null &&
+                                  !widget.approximateSync;
+
+                              return GestureDetector(
+                                key: isActive ? _activeKey : null,
+                                onTap: canSeek ? () => _seekToLine(index) : null,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                    vertical: 5,
+                                  ),
+                                  child: AnimatedDefaultTextStyle(
+                                    duration: const Duration(milliseconds: 250),
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 17,
+                                      fontWeight: isActive
+                                          ? FontWeight.w700
+                                          : FontWeight.w400,
+                                      color: isActive
+                                          ? Colors.white
+                                          : Colors.white.withOpacity(0.5),
+                                      height: 1.7,
+                                    ),
+                                    child: Text(
+                                      _lyricsLines[index],
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ),
         ),
       ),
-      bottomNavigationBar: widget.approximateSync && _lyricsLines.isNotEmpty
-          ? SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: Text(
-                    'Tap any line to jump. Timing is approximate for this song.',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.outfit(
-                      fontSize: 12,
-                      color: Colors.white70,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            )
-          : null,
+      bottomNavigationBar: null,
     );
   }
 }

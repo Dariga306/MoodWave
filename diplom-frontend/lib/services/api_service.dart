@@ -37,11 +37,11 @@ class ApiService {
 
       return localApi;
     }
-    if (defaultTargetPlatform == TargetPlatform.android) {
+    if (defaultTargetPlatform == TargetPlatform.android && kDebugMode) {
       return 'http://10.0.2.2:8000';
     }
-      return 'http://localhost:8000';
-    }
+    return 'http://localhost:8000';
+  }
 
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
@@ -55,7 +55,7 @@ class ApiService {
       baseUrl: ApiService.baseUrl,
       connectTimeout: const Duration(seconds: 35),
       receiveTimeout: const Duration(seconds: 35),
-      sendTimeout: const Duration(seconds: 30),
+      sendTimeout: const Duration(seconds: 35),
       headers: {'Content-Type': 'application/json'},
     ));
 
@@ -67,7 +67,12 @@ class ApiService {
         }
         handler.next(options);
       },
-      onError: (error, handler) {
+      onError: (error, handler) async {
+        final path = error.requestOptions.path;
+        if (error.response?.statusCode == 401 &&
+            (path.contains('/auth/me') || path.endsWith('/me'))) {
+          await clearTokens();
+        }
         handler.next(error);
       },
     ));
@@ -85,6 +90,11 @@ class ApiService {
     final stored = await _storage.read(key: 'access_token');
     _cachedToken = stored;
     return stored;
+  }
+
+  Future<bool> hasToken() async {
+    final token = await getToken();
+    return token != null && token.isNotEmpty;
   }
 
   Future<void> saveTokens(String access, String refresh) async {
@@ -109,22 +119,38 @@ class ApiService {
 
   Map<String, dynamic> _normalizeTrack(Map raw) {
     final track = Map<String, dynamic>.from(raw);
+    final nestedTrack = track['track'];
+    if (nestedTrack is Map) {
+      track.addAll(Map<String, dynamic>.from(nestedTrack));
+    }
     final resolvedId = track['spotify_id'] ??
+        track['spotify_track_id'] ??
+        track['track_spotify_id'] ??
         track['deezer_id'] ??
+        track['deezer_track_id'] ??
         track['track_id'] ??
-        track['trackId'];
+        track['trackId'] ??
+        track['id'];
 
-    if (resolvedId != null && resolvedId.toString().isNotEmpty) {
+    if (resolvedId != null &&
+        resolvedId.toString().isNotEmpty &&
+        resolvedId.toString() != 'null') {
       track['spotify_id'] ??= resolvedId.toString();
       track['track_id'] ??= resolvedId.toString();
     }
     if ((track['title'] == null || track['title'].toString().isEmpty) &&
-        track['trackName'] != null) {
-      track['title'] = track['trackName'].toString();
+        (track['trackName'] != null || track['track_title'] != null)) {
+      track['title'] = (track['trackName'] ?? track['track_title']).toString();
     }
     if ((track['artist'] == null || track['artist'].toString().isEmpty) &&
-        track['artistName'] != null) {
-      track['artist'] = track['artistName'].toString();
+        (track['artistName'] != null || track['track_artist'] != null)) {
+      track['artist'] =
+          (track['artistName'] ?? track['track_artist']).toString();
+    }
+    final artistMap = track['artist'];
+    if (artistMap is Map) {
+      final name = artistMap['name'] ?? artistMap['title'];
+      if (name != null) track['artist'] = name.toString();
     }
     final rawArtists = track['artists'];
     if (rawArtists is List) {
@@ -141,13 +167,34 @@ class ApiService {
       }
     }
     if ((track['cover_url'] == null || track['cover_url'].toString().isEmpty) &&
-        track['artworkUrl100'] != null) {
-      track['cover_url'] = track['artworkUrl100'].toString();
+        (track['artworkUrl100'] != null ||
+            track['track_cover_url'] != null ||
+            track['cover'] != null ||
+            track['album_cover_url'] != null ||
+            track['picture_medium'] != null ||
+            track['picture_big'] != null ||
+            track['image_url'] != null)) {
+      track['cover_url'] = (track['artworkUrl100'] ??
+              track['track_cover_url'] ??
+              track['cover'] ??
+              track['album_cover_url'] ??
+              track['picture_medium'] ??
+              track['picture_big'] ??
+              track['image_url'])
+          .toString();
     }
     if ((track['preview_url'] == null ||
             track['preview_url'].toString().isEmpty) &&
         track['previewUrl'] != null) {
       track['preview_url'] = track['previewUrl'].toString();
+    }
+    final duration = track['duration_ms'] ??
+        track['trackTimeMillis'] ??
+        track['durationMillis'] ??
+        track['duration'];
+    if (duration is num) {
+      track['duration_ms'] =
+          duration > 1000 ? duration.toInt() : (duration * 1000).toInt();
     }
     return track;
   }
@@ -347,29 +394,49 @@ class ApiService {
   Future<List<dynamic>> searchTracks(String q, {int limit = 20}) async {
     final resp = await _dio
         .get('/tracks/search', queryParameters: {'q': q, 'limit': limit});
-    return resp.data as List;
+    final data = resp.data;
+    if (data is List) return data;
+    // Wrapped response e.g. {"tracks": [...]}
+    if (data is Map) {
+      final inner = data['tracks'] ?? data['results'] ?? data['items'];
+      if (inner is List) return inner;
+    }
+    return [];
   }
 
+  /// Returns empty list on genuine "no results", throws [Exception] on network/server error.
   Future<List<Map<String, dynamic>>> searchTracksWithFallback(
     String q, {
     int limit = 20,
   }) async {
+    Object? lastError;
     try {
       final primary = _normalizeTrackList(await searchTracks(q, limit: limit));
-      if (primary.isNotEmpty) {
-        return primary;
-      }
-    } catch (_) {}
+      if (primary.isNotEmpty) return primary;
+    } catch (e) {
+      lastError = e;
+    }
 
     try {
-      final fallback = await globalSearch(q, type: 'tracks');
+      final fallback = await globalSearch(q, type: 'tracks', limit: limit);
       final tracks =
           _normalizeTrackList((fallback['tracks'] as List?) ?? const []);
-      if (tracks.isNotEmpty) {
-        return tracks.take(limit).toList();
-      }
-    } catch (_) {}
+      if (tracks.isNotEmpty) return tracks.take(limit).toList();
+    } catch (e) {
+      lastError = e;
+    }
 
+    try {
+      final fallback = await globalSearch(q, type: 'all', limit: limit);
+      final tracks =
+          _normalizeTrackList((fallback['tracks'] as List?) ?? const []);
+      if (tracks.isNotEmpty) return tracks.take(limit).toList();
+    } catch (e) {
+      lastError = e;
+    }
+
+    // Re-throw if every attempt threw (network/server error)
+    if (lastError != null) throw lastError;
     return [];
   }
 
@@ -748,9 +815,9 @@ class ApiService {
 
   // Search
   Future<Map<String, dynamic>> globalSearch(String q,
-      {String type = 'all'}) async {
-    final resp =
-        await _dio.get('/search', queryParameters: {'q': q, 'type': type});
+      {String type = 'all', int limit = 20}) async {
+    final resp = await _dio.get('/search',
+        queryParameters: {'q': q, 'type': type, 'limit': limit});
     return resp.data;
   }
 
@@ -875,7 +942,28 @@ class ApiService {
 
   Future<Map<String, dynamic>> getFriendsActivity() async {
     final resp = await _dio.get('/friends/activity');
-    return resp.data as Map<String, dynamic>;
+    final data = Map<String, dynamic>.from(resp.data as Map);
+    for (final key in const ['live', 'recent']) {
+      final items = data[key];
+      if (items is! List) continue;
+      data[key] = items.whereType<Map>().map((raw) {
+        final item = Map<String, dynamic>.from(raw);
+        final now = item['now_playing'];
+        if (now is Map) {
+          item['now_playing'] = _normalizeTrack(now);
+        }
+        return item;
+      }).toList();
+    }
+    return data;
+  }
+
+  Future<void> sendPresenceHeartbeat() async {
+    try {
+      await _dio.post('/presence/heartbeat');
+    } catch (_) {
+      // Presence must never block UI/network flows.
+    }
   }
 
   // Weather
@@ -1000,14 +1088,98 @@ class ApiService {
     return (data as Map<String, dynamic>?)?['chats'] as List? ?? [];
   }
 
+  Future<void> hideChat(String chatKey) async {
+    await _dio.delete('/chats/hide', data: {'chat_key': chatKey});
+  }
+
+  Future<Map<String, dynamic>> deleteChat(String chatKey) async {
+    final resp =
+        await _dio.delete('/chats/delete', data: {'chat_key': chatKey});
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<List<dynamic>> getPinnedMessages(String firebaseChatId) async {
+    final resp = await _dio.get('/chats/pinned',
+        queryParameters: {'firebase_chat_id': firebaseChatId});
+    return (resp.data as Map)['pinned'] as List? ?? [];
+  }
+
+  Future<void> pinMessage(
+      String firebaseChatId, String messageId, String preview) async {
+    await _dio.post('/chats/pin',
+        queryParameters: {'firebase_chat_id': firebaseChatId},
+        data: {'message_id': messageId, 'preview': preview});
+  }
+
+  Future<void> unpinMessage(String firebaseChatId, String messageId) async {
+    await _dio.delete('/chats/pin', queryParameters: {
+      'firebase_chat_id': firebaseChatId,
+      'message_id': messageId,
+    });
+  }
+
+  Future<Map<String, int>> getUnreadCounts(
+      List<Map<String, String>> chats) async {
+    final resp =
+        await _dio.post('/chats/unread-counts', data: {'chats': chats});
+    final raw = resp.data as Map? ?? {};
+    return raw.map((k, v) => MapEntry(k.toString(), (v as num? ?? 0).toInt()));
+  }
+
   Future<List<dynamic>> getChatMessages(int matchId, {int limit = 50}) async {
     final resp = await _dio
         .get('/chats/$matchId/messages', queryParameters: {'limit': limit});
     return resp.data['messages'] ?? [];
   }
 
-  Future<void> sendTextMessage(int matchId, String text) async {
-    await _dio.post('/chats/$matchId/send-text', data: {'text': text});
+  Future<Map<String, dynamic>> sendTextMessage(int matchId, String text) async {
+    final resp =
+        await _dio.post('/chats/$matchId/send-text', data: {'text': text});
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Map<String, dynamic> _roomInvitePayload(Map<String, dynamic> room,
+      {String inviteRole = 'listener'}) {
+    final settings = (room['settings'] as Map?)?.cast<String, dynamic>() ?? {};
+    return {
+      'room_id': (room['room_id'] as num?)?.toInt() ?? 0,
+      'invite_code': (room['invite_code'] ?? '').toString(),
+      'room_title': (room['name'] ?? 'Live Room').toString(),
+      'room_description':
+          (room['description'] ?? settings['description'] ?? '').toString(),
+      'room_background_url':
+          (room['background_url'] ?? settings['background_url'] ?? '')
+              .toString(),
+      'invite_role': inviteRole,
+      'is_public': room['is_public'] == true || settings['is_public'] == true,
+    };
+  }
+
+  Future<Map<String, dynamic>> sendRoomInviteMessage({
+    int? matchId,
+    int? chatId,
+    int? groupChatId,
+    required Map<String, dynamic> room,
+    String inviteRole = 'listener',
+  }) async {
+    final data = _roomInvitePayload(room, inviteRole: inviteRole);
+    if ((data['room_id'] as int) <= 0 ||
+        data['invite_code'].toString().isEmpty) {
+      throw ArgumentError('Room invite is missing room id or invite code');
+    }
+    late final Response resp;
+    if (groupChatId != null) {
+      resp = await _dio.post('/chats/groups/$groupChatId/send-room-invite',
+          data: data);
+    } else if (chatId != null) {
+      resp =
+          await _dio.post('/chats/thread/$chatId/send-room-invite', data: data);
+    } else if (matchId != null) {
+      resp = await _dio.post('/chats/$matchId/send-room-invite', data: data);
+    } else {
+      throw ArgumentError('No chat target for room invite');
+    }
+    return Map<String, dynamic>.from(resp.data as Map);
   }
 
   // Auth — password management
@@ -1168,6 +1340,18 @@ class ApiService {
     }
   }
 
+  Future<List<dynamic>> getRoomHistory({int limit = 30}) async {
+    try {
+      final resp =
+          await _dio.get('/rooms/history', queryParameters: {'limit': limit});
+      final data = resp.data;
+      if (data is Map) return (data['rooms'] as List?) ?? [];
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<Map<String, dynamic>> getRoomDetails(int roomId) async {
     final resp = await _dio.get('/rooms/$roomId');
     return Map<String, dynamic>.from(resp.data as Map);
@@ -1175,28 +1359,200 @@ class ApiService {
 
   Future<Map<String, dynamic>> createListeningRoom({
     String? name,
+    String? description,
+    String? backgroundUrl,
+    String? backgroundDataUrl,
     bool isPublic = false,
     int maxGuests = 10,
+    bool? requireApproval,
+    bool allowTrackSuggestions = true,
+    bool allowChat = true,
+    bool quietMode = false,
+    bool democraticQueue = false,
   }) async {
     final resp = await _dio.post('/rooms/create', data: {
       if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
+      if (description != null && description.trim().isNotEmpty)
+        'description': description.trim(),
+      if (backgroundUrl != null && backgroundUrl.trim().isNotEmpty)
+        'background_url': backgroundUrl.trim(),
+      if (backgroundDataUrl != null && backgroundDataUrl.isNotEmpty)
+        'background_data_url': backgroundDataUrl,
       'is_public': isPublic,
       'max_guests': maxGuests,
+      if (requireApproval != null) 'require_approval': requireApproval,
+      'allow_track_suggestions': allowTrackSuggestions,
+      'allow_chat': allowChat,
+      'quiet_mode': quietMode,
+      'democratic_queue': democraticQueue,
     });
     return Map<String, dynamic>.from(resp.data as Map);
   }
 
-  Future<void> sendJoinRequest(int roomId) async {
-    await _dio.post('/rooms/$roomId/join-request');
+  Future<void> forwardMessages({
+    required String sourceFirebaseChatId,
+    required List<String> messageIds,
+    required String targetKind,
+    required int targetId,
+  }) async {
+    await _dio.post('/chats/forward', data: {
+      'source_firebase_chat_id': sourceFirebaseChatId,
+      'message_ids': messageIds,
+      'target_kind': targetKind,
+      'target_id': targetId,
+    });
+  }
+
+  Future<Map<String, dynamic>> sendJoinRequest(int roomId) async {
+    final resp = await _dio.post('/rooms/$roomId/join-request');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<Map<String, dynamic>> joinRoom(int roomId) async {
+    final resp = await _dio.post('/rooms/$roomId/join');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<List<dynamic>> getRoomParticipants(int roomId) async {
+    final resp = await _dio.get('/rooms/$roomId/participants');
+    return (resp.data['participants'] as List?) ?? [];
+  }
+
+  Future<List<dynamic>> getRoomJoinRequests(int roomId) async {
+    final resp = await _dio.get('/rooms/$roomId/join-requests');
+    return (resp.data['requests'] as List?) ?? [];
+  }
+
+  Future<void> approveRoomJoinRequest(int roomId, int userId) async {
+    await _dio.post('/rooms/$roomId/join-approve', data: {'user_id': userId});
+  }
+
+  Future<void> declineRoomJoinRequest(int roomId, int userId) async {
+    await _dio.post('/rooms/$roomId/join-decline', data: {'user_id': userId});
+  }
+
+  Future<void> heartbeatRoom(int roomId) async {
+    await _dio.post('/rooms/$roomId/heartbeat');
+  }
+
+  Future<void> leaveRoom(int roomId) async {
+    await _dio.post('/rooms/$roomId/leave');
+  }
+
+  Future<void> closeRoom(int roomId) async {
+    await _dio.post('/rooms/$roomId/close');
+  }
+
+  Future<void> deleteRoom(int roomId) async {
+    await _dio.delete('/rooms/$roomId');
+  }
+
+  Future<Map<String, dynamic>> updateRoomSettings(
+      int roomId, Map<String, dynamic> data) async {
+    final resp = await _dio.patch('/rooms/$roomId/settings', data: data);
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<void> setRoomParticipantRole(
+      int roomId, int userId, String role) async {
+    await _dio
+        .post('/rooms/$roomId/participants/$userId/role', data: {'role': role});
+  }
+
+  Future<void> kickRoomParticipant(int roomId, int userId) async {
+    await _dio.post('/rooms/$roomId/participants/$userId/kick');
+  }
+
+  Future<void> banRoomParticipant(int roomId, int userId) async {
+    await _dio.post('/rooms/$roomId/participants/$userId/ban');
+  }
+
+  Future<void> muteRoomParticipant(int roomId, int userId) async {
+    await _dio.post('/rooms/$roomId/participants/$userId/mute');
+  }
+
+  Future<void> unmuteRoomParticipant(int roomId, int userId) async {
+    await _dio.delete('/rooms/$roomId/participants/$userId/mute');
+  }
+
+  Future<Map<String, dynamic>> updateRoomPlayback(
+    int roomId,
+    Map<String, dynamic> payload,
+  ) async {
+    final resp = await _dio.post('/rooms/$roomId/playback', data: payload);
+    return Map<String, dynamic>.from(resp.data as Map);
   }
 
   Future<List<dynamic>> getRoomMessages(int roomId, {int limit = 50}) async {
-    final resp = await _dio.get('/rooms/$roomId/messages', queryParameters: {'limit': limit});
+    final resp = await _dio
+        .get('/rooms/$roomId/messages', queryParameters: {'limit': limit});
     return (resp.data['messages'] as List?) ?? [];
   }
 
-  Future<void> sendRoomMessage(int roomId, String text) async {
-    await _dio.post('/rooms/$roomId/messages', data: {'text': text});
+  Future<Map<String, dynamic>> sendRoomMessage(int roomId, String text) async {
+    final resp =
+        await _dio.post('/rooms/$roomId/messages', data: {'text': text});
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<List<dynamic>> getRoomPinnedMessages(int roomId) async {
+    final resp = await _dio.get('/rooms/$roomId/pinned');
+    return (resp.data['pinned'] as List?) ?? [];
+  }
+
+  Future<List<dynamic>> pinRoomMessage(
+      int roomId, String messageId, String preview) async {
+    final resp = await _dio.post('/rooms/$roomId/pinned',
+        data: {'message_id': messageId, 'preview': preview});
+    return (resp.data['pinned'] as List?) ?? [];
+  }
+
+  Future<List<dynamic>> unpinRoomMessage(int roomId, String messageId) async {
+    final resp = await _dio.delete('/rooms/$roomId/pinned/$messageId');
+    return (resp.data['pinned'] as List?) ?? [];
+  }
+
+  Future<List<dynamic>> deleteRoomMessage(int roomId, String messageId) async {
+    final resp = await _dio.delete('/rooms/$roomId/messages/$messageId');
+    return (resp.data['pinned'] as List?) ?? [];
+  }
+
+  Future<Map<String, dynamic>> updateRoomMessage(
+    int roomId,
+    String messageId,
+    String text,
+  ) async {
+    final resp = await _dio.patch(
+      '/rooms/$roomId/messages/$messageId',
+      data: {'text': text},
+    );
+    return Map<String, dynamic>.from(resp.data['message'] as Map);
+  }
+
+  Future<Map<String, dynamic>?> getRoomPoll(int roomId) async {
+    final resp = await _dio.get('/rooms/$roomId/poll');
+    final poll = resp.data['poll'];
+    return poll is Map ? Map<String, dynamic>.from(poll) : null;
+  }
+
+  Future<Map<String, dynamic>?> createRoomPoll(
+      int roomId, String question, List<String> options) async {
+    final resp = await _dio.post('/rooms/$roomId/poll',
+        data: {'question': question, 'options': options});
+    final poll = resp.data['poll'];
+    return poll is Map ? Map<String, dynamic>.from(poll) : null;
+  }
+
+  Future<Map<String, dynamic>?> voteRoomPoll(
+      int roomId, int optionIndex) async {
+    final resp = await _dio
+        .post('/rooms/$roomId/poll/vote', data: {'option_index': optionIndex});
+    final poll = resp.data['poll'];
+    return poll is Map ? Map<String, dynamic>.from(poll) : null;
+  }
+
+  Future<void> closeRoomPoll(int roomId) async {
+    await _dio.delete('/rooms/$roomId/poll');
   }
 
   Future<List<dynamic>> getRoomQueue(int roomId) async {
@@ -1204,12 +1560,54 @@ class ApiService {
     return (resp.data['queue'] as List?) ?? [];
   }
 
-  Future<void> addToRoomQueue(int roomId, Map<String, dynamic> track) async {
-    await _dio.post('/rooms/$roomId/queue', data: track);
+  Future<Map<String, dynamic>> addToRoomQueue(
+      int roomId, Map<String, dynamic> track) async {
+    final resp = await _dio.post('/rooms/$roomId/queue', data: track);
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<Map<String, dynamic>> addBulkToRoomQueue(
+      int roomId, List<Map<String, dynamic>> tracks) async {
+    final resp =
+        await _dio.post('/rooms/$roomId/queue/bulk', data: {'tracks': tracks});
+    return Map<String, dynamic>.from(resp.data as Map);
   }
 
   Future<void> removeFromRoomQueue(int roomId, int index) async {
     await _dio.delete('/rooms/$roomId/queue/$index');
+  }
+
+  Future<Map<String, dynamic>> playRoomQueueItem(int roomId, int index) async {
+    final resp = await _dio.post('/rooms/$roomId/queue/$index/play');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<void> reorderRoomQueue(int roomId, int fromIndex, int toIndex) async {
+    await _dio.post('/rooms/$roomId/queue/reorder',
+        data: {'from_index': fromIndex, 'to_index': toIndex});
+  }
+
+  Future<Map<String, dynamic>> approveRoomQueueItem(
+      int roomId, int index) async {
+    final resp = await _dio.post('/rooms/$roomId/queue/$index/approve');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<Map<String, dynamic>> rejectRoomQueueItem(
+      int roomId, int index) async {
+    final resp = await _dio.delete('/rooms/$roomId/queue/$index/suggestion');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<Map<String, dynamic>> voteRoomQueueItem(int roomId, int index) async {
+    final resp = await _dio.post('/rooms/$roomId/queue/$index/vote');
+    return Map<String, dynamic>.from(resp.data as Map);
+  }
+
+  Future<Map<String, dynamic>> unvoteRoomQueueItem(
+      int roomId, int index) async {
+    final resp = await _dio.delete('/rooms/$roomId/queue/$index/vote');
+    return Map<String, dynamic>.from(resp.data as Map);
   }
 
   // Notifications
@@ -1463,8 +1861,11 @@ class ApiService {
     return resp.data['messages'] ?? [];
   }
 
-  Future<void> sendDirectTextMessage(int chatId, String text) async {
-    await _dio.post('/chats/thread/$chatId/send-text', data: {'text': text});
+  Future<Map<String, dynamic>> sendDirectTextMessage(
+      int chatId, String text) async {
+    final resp = await _dio
+        .post('/chats/thread/$chatId/send-text', data: {'text': text});
+    return Map<String, dynamic>.from(resp.data as Map);
   }
 
   Future<void> sendTrackInChat(
@@ -1646,6 +2047,11 @@ class ApiService {
     return Map<String, dynamic>.from(resp.data as Map);
   }
 
+  Future<List<dynamic>> getGroupChatAvatarHistory(int groupChatId) async {
+    final resp = await _dio.get('/chats/groups/$groupChatId/avatars');
+    return (resp.data['avatars'] as List?) ?? [];
+  }
+
   Future<List<dynamic>> getGroupChatMessages(int groupChatId,
       {int limit = 50}) async {
     final resp = await _dio.get(
@@ -1655,9 +2061,11 @@ class ApiService {
     return resp.data['messages'] ?? [];
   }
 
-  Future<void> sendGroupTextMessage(int groupChatId, String text) async {
-    await _dio
+  Future<Map<String, dynamic>> sendGroupTextMessage(
+      int groupChatId, String text) async {
+    final resp = await _dio
         .post('/chats/groups/$groupChatId/send-text', data: {'text': text});
+    return Map<String, dynamic>.from(resp.data as Map);
   }
 
   Future<void> sendTrackInGroupChat(
@@ -1762,10 +2170,12 @@ class ApiService {
   }
 
   Future<void> transferGroupChatOwner(int groupChatId, int newOwnerId) async {
-    await _dio.post('/chats/groups/$groupChatId/transfer-owner', data: {'new_owner_id': newOwnerId});
+    await _dio.post('/chats/groups/$groupChatId/transfer-owner',
+        data: {'new_owner_id': newOwnerId});
   }
 
-  Future<Map<String, dynamic>> updateGroupChat(int groupChatId, {String? title, String? avatarUrl}) async {
+  Future<Map<String, dynamic>> updateGroupChat(int groupChatId,
+      {String? title, String? avatarUrl}) async {
     final data = <String, dynamic>{};
     if (title != null) data['title'] = title;
     if (avatarUrl != null) data['avatar_url'] = avatarUrl;
@@ -1781,6 +2191,22 @@ class ApiService {
     await _dio.delete('/chats/groups/$groupChatId/members/$userId/admin');
   }
 
+  Future<String> uploadGroupChatAvatar(
+    int groupChatId,
+    Uint8List bytes,
+    String filename,
+  ) async {
+    final formData = FormData.fromMap({
+      'avatar': MultipartFile.fromBytes(bytes, filename: filename),
+    });
+    final resp = await _dio.post(
+      '/chats/groups/$groupChatId/avatar',
+      data: formData,
+      options: Options(contentType: 'multipart/form-data'),
+    );
+    return (resp.data as Map)['avatar_url'] as String;
+  }
+
   Future<Map<String, dynamic>?> getUserNowPlaying(int userId) async {
     try {
       final resp = await _dio.get('/users/$userId/now-playing');
@@ -1793,11 +2219,23 @@ class ApiService {
   // ─── Progress heartbeat ───────────────────────────────────────────────────
 
   Future<void> updateTrackProgress(
-      String trackId, int progressMs, bool completed) async {
+    String trackId,
+    int progressMs,
+    bool completed, {
+    String? title,
+    String? artist,
+    String? coverUrl,
+  }) async {
     try {
       await _dio.post(
         '/tracks/$trackId/progress',
-        data: {'progress_ms': progressMs, 'completed': completed},
+        data: {
+          'progress_ms': progressMs,
+          'completed': completed,
+          if (title != null && title.isNotEmpty) 'title': title,
+          if (artist != null && artist.isNotEmpty) 'artist': artist,
+          if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+        },
       );
     } catch (_) {}
   }

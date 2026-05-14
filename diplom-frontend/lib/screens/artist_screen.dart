@@ -919,7 +919,7 @@ class _DiscographyAllScreenState extends State<_DiscographyAllScreen>
         crossAxisCount: 3,
         mainAxisSpacing: 16,
         crossAxisSpacing: 12,
-        childAspectRatio: 0.72,
+        childAspectRatio: 0.62,
       ),
       itemCount: items.length,
       itemBuilder: (ctx, i) {

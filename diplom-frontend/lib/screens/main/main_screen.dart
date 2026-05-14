@@ -22,8 +22,9 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   int _socialBadge = 0;
-  DateTime? _lastSeenSocial;
   Timer? _badgePollTimer;
+  static const _lastReadKeyPrefix = 'last_read_v1_';
+  static const _mutedChatsKey = 'muted_chat_threads_v1';
 
   late final List<Widget?> _tabs =
       List<Widget?>.filled(4, null, growable: false)..[0] = const HomeTab();
@@ -42,50 +43,48 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _initBadge() async {
-    final prefs = await SharedPreferences.getInstance();
-    final str = prefs.getString('last_seen_social');
-    if (str != null) {
-      _lastSeenSocial = DateTime.tryParse(str)?.toLocal();
-    } else {
-      _lastSeenSocial = DateTime.now();
-      await prefs.setString('last_seen_social', _lastSeenSocial!.toIso8601String());
-    }
     _pollBadge();
   }
 
   Future<void> _pollBadge() async {
-    if (_currentIndex == 2 || _lastSeenSocial == null) return;
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final muted = (prefs.getStringList(_mutedChatsKey) ?? const []).toSet();
       final chats = await ApiService().getChats();
-      int count = 0;
+      final requests = <Map<String, String>>[];
       for (final raw in chats) {
-        final chat = raw as Map;
-        final lastAt = chat['last_message_at'] as String?;
-        if (lastAt == null) continue;
-        final normalized = lastAt.endsWith('Z') || lastAt.contains('+') ? lastAt : '${lastAt}Z';
-        final dt = DateTime.tryParse(normalized)?.toLocal();
-        if (dt != null && dt.isAfter(_lastSeenSocial!)) count++;
+        final chat = Map<String, dynamic>.from(raw as Map);
+        final key = _chatKey(chat);
+        if (muted.contains(key)) continue;
+        final firebaseId = (chat['firebase_chat_id'] ?? '').toString();
+        if (firebaseId.isEmpty) continue;
+        final since = prefs.getString('$_lastReadKeyPrefix$key') ??
+            DateTime.fromMillisecondsSinceEpoch(0).toUtc().toIso8601String();
+        requests.add({'key': key, 'firebase_chat_id': firebaseId, 'since': since});
       }
-      if (mounted) setState(() => _socialBadge = count);
+      final counts = requests.isEmpty
+          ? <String, int>{}
+          : await ApiService().getUnreadCounts(requests);
+      final total = counts.values.fold<int>(0, (sum, item) => sum + item);
+      if (mounted) setState(() => _socialBadge = total);
     } catch (_) {}
   }
 
-  Future<void> _clearSocialBadge() async {
-    final prefs = await SharedPreferences.getInstance();
-    final now = DateTime.now();
-    await prefs.setString('last_seen_social', now.toIso8601String());
-    if (mounted) setState(() {
-      _socialBadge = 0;
-      _lastSeenSocial = now;
-    });
+  String _chatKey(Map<String, dynamic> chat) {
+    final gid = chat['group_chat_id'];
+    final cid = chat['chat_id'];
+    final mid = chat['match_id'];
+    if (gid != null) return 'g:$gid';
+    if (cid != null) return 'c:$cid';
+    return 'm:$mid';
   }
 
   void _onTabTap(int i) {
-    if (i == 2 && _currentIndex != 2) {
-      _clearSocialBadge();
-    }
     _tabs[i] ??= _buildTab(i);
     setState(() => _currentIndex = i);
+    if (i == 2) {
+      Future.delayed(const Duration(milliseconds: 500), _pollBadge);
+    }
   }
 
   Widget _buildTab(int index) {

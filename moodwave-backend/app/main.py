@@ -34,47 +34,68 @@ UPLOADS_DIR = Path(__file__).resolve().parents[1] / "uploads"
 LISTENING_HISTORY_TTL_DAYS = 60
 
 
+async def _create_redis_client():
+    try:
+        client = aioredis.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+        await client.ping()
+        logger.info("Connected to Redis at %s", settings.REDIS_URL)
+        return client
+    except Exception as exc:
+        logger.warning(
+            "Redis unavailable at %s, using in-memory fakeredis fallback: %s",
+            settings.REDIS_URL,
+            exc,
+        )
+        from fakeredis.aioredis import FakeRedis
+
+        return FakeRedis(decode_responses=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    app.state.redis = await aioredis.from_url(
-        settings.REDIS_URL,
-        decode_responses=True,
-        socket_connect_timeout=2,
-        socket_timeout=2,
-    )
+    app.state.redis = await _create_redis_client()
     app.state.firebase_ready = firebase_svc.init_firebase()
     app.state.limiter = limiter
     if not scheduler.running:
         scheduler.add_job(
-            func=lambda: asyncio.create_task(_run_daily_recalculate(app)),
+            func=_run_daily_recalculate,
+            args=[app],
             trigger=CronTrigger(hour=3, minute=0),
             id="daily_taste_vector_recalculate",
             replace_existing=True,
         )
         scheduler.add_job(
-            func=lambda: asyncio.create_task(_run_auto_delete(app)),
+            func=_run_auto_delete,
+            args=[app],
             trigger=CronTrigger(minute=0),  # every hour
             id="auto_delete_expired_accounts",
             replace_existing=True,
         )
         scheduler.add_job(
-            func=lambda: asyncio.create_task(_run_history_cleanup()),
+            func=_run_history_cleanup,
             trigger=CronTrigger(minute=15),
             id="cleanup_old_listening_history",
             replace_existing=True,
         )
         scheduler.add_job(
-            func=lambda: asyncio.create_task(_run_trending_cleanup(app)),
+            func=_run_trending_cleanup,
+            args=[app],
             trigger=CronTrigger(hour=3, minute=30),
             id="trending_cleanup",
             replace_existing=True,
         )
         scheduler.add_job(
-            func=lambda: asyncio.create_task(_run_trending_trim(app)),
+            func=_run_trending_trim,
+            args=[app],
             trigger=CronTrigger(minute=30),
             id="trending_trim",
             replace_existing=True,

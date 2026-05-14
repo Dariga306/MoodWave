@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../utils/lyrics_matcher.dart';
 import 'artist_screen.dart';
 import 'lyrics_screen.dart';
 import 'modals.dart';
@@ -27,29 +28,34 @@ class _LrcLine {
 
 List<_LrcLine> _parseLrc(String lrc) {
   final lines = <_LrcLine>[];
-  final regex = RegExp(r'\[(\d+):(\d+)[.:](\d+)\]\s*(.*)');
   for (final raw in lrc.split('\n')) {
-    final match = regex.firstMatch(raw.trim());
-    if (match == null) continue;
-
-    final mins = int.parse(match.group(1)!);
-    final secs = int.parse(match.group(2)!);
-    final csRaw = match.group(3)!.padRight(2, '0').substring(0, 2);
-    final centiseconds = int.parse(csRaw);
-    final text = match.group(4)!.trim();
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) continue;
+    final timeMatches =
+        RegExp(r'\[(\d+):(\d+)(?:[.:](\d+))?\]').allMatches(trimmed).toList();
+    if (timeMatches.isEmpty) continue;
+    final text =
+        trimmed.replaceAll(RegExp(r'\[(\d+):(\d+)(?:[.:](\d+))?\]'), '').trim();
     if (text.isEmpty) continue;
-
-    lines.add(
-      _LrcLine(
-        time: Duration(
-          minutes: mins,
-          seconds: secs,
-          milliseconds: centiseconds * 10,
+    for (final match in timeMatches) {
+      final mins = int.parse(match.group(1)!);
+      final secs = int.parse(match.group(2)!);
+      final fractionRaw =
+          (match.group(3) ?? '0').padRight(2, '0').substring(0, 2);
+      final centiseconds = int.parse(fractionRaw);
+      lines.add(
+        _LrcLine(
+          time: Duration(
+            minutes: mins,
+            seconds: secs,
+            milliseconds: centiseconds * 10,
+          ),
+          text: text,
         ),
-        text: text,
-      ),
-    );
+      );
+    }
   }
+  lines.sort((a, b) => a.time.compareTo(b.time));
   return lines;
 }
 
@@ -94,44 +100,6 @@ List<_LrcLine> _buildApproximateLyricsTiming(
   });
 }
 
-String _normalizeLookupText(String value) {
-  return value
-      .toLowerCase()
-      .replaceAll('&', ' and ')
-      .replaceAll(RegExp(r'\((official|audio|lyrics?|video|live).*?\)'), ' ')
-      .replaceAll(RegExp(r'\[(official|audio|lyrics?|video|live).*?\]'), ' ')
-      .replaceAll(RegExp(r'[^a-z0-9а-яё]+'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-}
-
-Set<String> _lookupTokens(String value) {
-  return _normalizeLookupText(value)
-      .split(' ')
-      .where((token) => token.isNotEmpty)
-      .toSet();
-}
-
-String _stripTrackVersion(String value) {
-  return value
-      .replaceAll(RegExp(r'\((feat|ft|with).*?\)', caseSensitive: false), ' ')
-      .replaceAll(RegExp(r'\[(feat|ft|with).*?\]', caseSensitive: false), ' ')
-      .replaceAll(
-          RegExp(r'\((live|remaster(ed)?|sped up|slowed|version).*?\)',
-              caseSensitive: false),
-          ' ')
-      .replaceAll(
-          RegExp(r'\[(live|remaster(ed)?|sped up|slowed|version).*?\]',
-              caseSensitive: false),
-          ' ')
-      .replaceAll(
-          RegExp(r'\s+-\s+(live|remaster(ed)?|sped up|slowed).*$',
-              caseSensitive: false),
-          ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-}
-
 class PlayerScreen extends StatefulWidget {
   final Map<String, dynamic>? track;
 
@@ -162,7 +130,6 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _lyricsSynced = false;
   bool _lyricsHasExactSync = false;
   List<_LrcLine> _lrcLines = [];
-  int _currentLyricIdx = -1;
   String _lyricsTrackKey = '';
   int _lyricsLookupDurationSeconds = 0;
   int _lyricsRequestNonce = 0;
@@ -232,43 +199,51 @@ class _PlayerScreenState extends State<PlayerScreen>
       : _artist;
 
   List<String> get _titleVariants {
-    final variants = <String>{};
-    final raw = _title.trim();
-    if (raw.isNotEmpty) {
-      variants.add(raw);
-      final stripped = _stripTrackVersion(raw);
-      if (stripped.isNotEmpty) {
-        variants.add(stripped);
-      }
-    }
-    return variants.where((value) => value.isNotEmpty).toList();
+    return buildTitleVariants(_title);
   }
 
   List<String> get _artistVariants {
-    final variants = <String>{};
-    final full = _artist.trim();
-    if (full.isNotEmpty) {
-      variants.add(full);
-    }
-    final primary = _primaryArtist.trim();
-    if (primary.isNotEmpty) {
-      variants.add(primary);
-    }
-    for (final artist in _artistEntries) {
-      final name = (artist['name'] ?? '').toString().trim();
-      if (name.isNotEmpty) {
-        variants.add(name);
-      }
-    }
-    return variants.toList();
+    return buildArtistVariants(
+      _artist,
+      primaryArtist: _primaryArtist,
+      extraArtists: _artistEntries
+          .map((artist) => (artist['name'] ?? '').toString())
+          .toList(),
+    );
   }
 
-  String? get _currentLyricLine {
-    if (!_lyricsHasExactSync || _lrcLines.isEmpty) return null;
-    if (_currentLyricIdx < 0 || _currentLyricIdx >= _lrcLines.length) {
-      return null;
+  LyricsMatchContext get _lyricsMatchContext => LyricsMatchContext(
+        titleVariants: _titleVariants,
+        artistVariants: _artistVariants,
+        albumName: _album.trim(),
+        durationSeconds: _seekableDuration.inSeconds > 0
+            ? _seekableDuration.inSeconds
+            : (((_track['duration_ms'] as int?) ?? 0) ~/ 1000),
+      );
+
+  int get _activeLyricIndex {
+    if (_lrcLines.isEmpty) return -1;
+    final currentMs = _position.inMilliseconds;
+    if (currentMs < _lrcLines.first.time.inMilliseconds) {
+      return 0;
     }
-    return _lrcLines[_currentLyricIdx].text;
+    var index = 0;
+    for (var i = 0; i < _lrcLines.length; i++) {
+      if (_lrcLines[i].time.inMilliseconds <= currentMs) {
+        index = i;
+      } else {
+        break;
+      }
+    }
+    return index.clamp(0, _lrcLines.length - 1);
+  }
+
+  String? get _inlineLyricLine {
+    if (_lyricsLoading || _lrcLines.isEmpty || !_lyricsSynced) return null;
+    final index = _activeLyricIndex;
+    if (index < 0 || index >= _lrcLines.length) return _lrcLines.first.text;
+    final line = _lrcLines[index].text.trim();
+    return line.isEmpty ? null : line;
   }
 
   @override
@@ -379,10 +354,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _lrcLines = [];
         _lyricsSynced = false;
         _lyricsHasExactSync = false;
-        _currentLyricIdx = -1;
         _lyricsLoading = true;
-      } else {
-        _updateLyricIdx(_position);
       }
     });
 
@@ -409,7 +381,6 @@ class _PlayerScreenState extends State<PlayerScreen>
       _lrcLines = [];
       _lyricsSynced = false;
       _lyricsHasExactSync = false;
-      _currentLyricIdx = -1;
       _lyricsLoading = true;
     });
     final requestNonce = _lyricsRequestNonce;
@@ -421,59 +392,6 @@ class _PlayerScreenState extends State<PlayerScreen>
         requestNonce == _lyricsRequestNonce &&
         requestKey == _lyricsTrackKey &&
         requestKey == _trackStateKey(_track);
-  }
-
-  String _normalizeLyricLookup(String value) {
-    return value
-        .toLowerCase()
-        .replaceAll('&', ' and ')
-        .replaceAll(RegExp(r'\((feat|ft|with).*?\)', caseSensitive: false), ' ')
-        .replaceAll(RegExp(r'\[(feat|ft|with).*?\]', caseSensitive: false), ' ')
-        .replaceAll(RegExp(r'[^a-z0-9а-яё]+'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-  }
-
-  bool _strongTitleMatch(String candidateTitle) {
-    final candidate = _normalizeLyricLookup(candidateTitle);
-    if (candidate.isEmpty) return false;
-    for (final title in _titleVariants) {
-      final wanted = _normalizeLyricLookup(title);
-      if (wanted.isEmpty) continue;
-      if (candidate == wanted ||
-          candidate.contains(wanted) ||
-          wanted.contains(candidate)) {
-        return true;
-      }
-      final wantedTokens = _lookupTokens(wanted);
-      final candidateTokens = _lookupTokens(candidate);
-      if (wantedTokens.isEmpty || candidateTokens.isEmpty) continue;
-      final overlap = wantedTokens.intersection(candidateTokens).length;
-      final ratio = overlap / wantedTokens.length;
-      if (ratio >= 0.75) return true;
-    }
-    return false;
-  }
-
-  bool _strongArtistMatch(String candidateArtist) {
-    final candidate = _normalizeLyricLookup(candidateArtist);
-    if (candidate.isEmpty) return false;
-    for (final artist in _artistVariants) {
-      final wanted = _normalizeLyricLookup(artist);
-      if (wanted.isEmpty) continue;
-      if (candidate == wanted ||
-          candidate.contains(wanted) ||
-          wanted.contains(candidate)) {
-        return true;
-      }
-      final wantedTokens = _lookupTokens(wanted);
-      final candidateTokens = _lookupTokens(candidate);
-      if (wantedTokens.isEmpty || candidateTokens.isEmpty) continue;
-      final overlap = wantedTokens.intersection(candidateTokens).length;
-      final ratio = overlap / wantedTokens.length;
-      if (ratio >= 0.6) return true;
-    }
-    return false;
   }
 
   bool _sameTrack(Map<String, dynamic> a, Map<String, dynamic> b) {
@@ -504,18 +422,17 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_isCurrentLyricsRequest(requestKey, requestNonce)) {
       setState(() => _lyricsLoading = true);
     }
-    final durationSeconds = _duration.inSeconds > 0
-        ? _duration.inSeconds
-        : (((_track['duration_ms'] as int?) ?? 0) ~/ 1000);
+    final lyricsContext = _lyricsMatchContext;
+    final durationSeconds = lyricsContext.durationSeconds;
     _lyricsLookupDurationSeconds = durationSeconds;
-    final albumName = _album.trim();
     final queries = <Map<String, String>>[];
     for (final title in _titleVariants) {
       for (final artist in _artistVariants) {
         queries.add({
           'title': title,
           'artist': artist,
-          if (albumName.isNotEmpty) 'album': albumName,
+          if (lyricsContext.albumName.isNotEmpty)
+            'album': lyricsContext.albumName,
         });
       }
     }
@@ -523,7 +440,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       queries.add({
         'title': _title,
         'artist': _primaryArtist,
-        if (albumName.isNotEmpty) 'album': albumName,
+        if (lyricsContext.albumName.isNotEmpty)
+          'album': lyricsContext.albumName,
       });
     }
 
@@ -582,86 +500,11 @@ class _PlayerScreenState extends State<PlayerScreen>
         }
       }
       if (candidates.isNotEmpty) {
-        int score(Map<String, dynamic> item) {
-          final itemTitle =
-              (item['trackName'] ?? item['name'] ?? item['track_name'] ?? '')
-                  .toString();
-          final itemArtist = (item['artistName'] ??
-                  item['artist'] ??
-                  item['artist_name'] ??
-                  '')
-              .toString();
-          final synced =
-              (item['syncedLyrics'] as String?)?.isNotEmpty == true ? 1000 : 0;
-          final plain =
-              (item['plainLyrics'] as String?)?.isNotEmpty == true ? 250 : 0;
-          final itemTitleTokens = _lookupTokens(itemTitle);
-          final itemArtistTokens = _lookupTokens(itemArtist);
-          final titleScores = _titleVariants.map((title) {
-            final titleTokens = _lookupTokens(title);
-            final matches = titleTokens.intersection(itemTitleTokens).length;
-            return titleTokens.isNotEmpty
-                ? matches * 110 + (matches == titleTokens.length ? 260 : 0)
-                : 0;
-          });
-          final artistScores = _artistVariants.map((artist) {
-            final artistTokens = _lookupTokens(artist);
-            final matches = artistTokens.intersection(itemArtistTokens).length;
-            return artistTokens.isNotEmpty
-                ? matches * 130 + (matches == artistTokens.length ? 320 : 0)
-                : 0;
-          });
-          final titleBonus = titleScores.isEmpty
-              ? 0
-              : titleScores.reduce((a, b) => a > b ? a : b);
-          final artistBonus = artistScores.isEmpty
-              ? 0
-              : artistScores.reduce((a, b) => a > b ? a : b);
-          final exactTitleBonus = _strongTitleMatch(itemTitle) ? 600 : -1200;
-          final exactArtistBonus = _strongArtistMatch(itemArtist) ? 500 : -900;
-          final itemDuration =
-              (item['duration'] as num?)?.toInt() ?? durationSeconds;
-          final durationPenalty = durationSeconds > 0
-              ? (durationSeconds - itemDuration).abs() * 2
-              : 0;
-          final albumBonus = albumName.isNotEmpty &&
-                  (item['albumName']?.toString().toLowerCase() ==
-                      albumName.toLowerCase())
-              ? 80
-              : 0;
-          return synced +
-              plain +
-              titleBonus +
-              artistBonus +
-              exactTitleBonus +
-              exactArtistBonus +
-              albumBonus -
-              durationPenalty;
-        }
-
-        candidates.sort((a, b) => score(b).compareTo(score(a)));
+        candidates.sort(
+            (a, b) => lyricsContext.score(b).compareTo(lyricsContext.score(a)));
 
         for (final lyricsMap in candidates) {
-          final candidateTitle = (lyricsMap['trackName'] ??
-                  lyricsMap['name'] ??
-                  lyricsMap['track_name'] ??
-                  '')
-              .toString();
-          final candidateArtist = (lyricsMap['artistName'] ??
-                  lyricsMap['artist'] ??
-                  lyricsMap['artist_name'] ??
-                  '')
-              .toString();
-          final candidateDuration =
-              (lyricsMap['duration'] as num?)?.toInt() ?? 0;
-          final titleMatch = _strongTitleMatch(candidateTitle);
-          final artistMatch = _strongArtistMatch(candidateArtist);
-          if (!titleMatch || !artistMatch) {
-            continue;
-          }
-          if (durationSeconds > 0 &&
-              candidateDuration > 0 &&
-              (durationSeconds - candidateDuration).abs() > 10) {
+          if (!lyricsContext.acceptsCandidate(lyricsMap)) {
             continue;
           }
           if (await _applyLyricsPayload(
@@ -724,7 +567,6 @@ class _PlayerScreenState extends State<PlayerScreen>
               _lyricsHasExactSync = false;
               _lyricsLoading = false;
             });
-            _updateLyricIdx(_position);
             return;
           }
         }
@@ -754,7 +596,6 @@ class _PlayerScreenState extends State<PlayerScreen>
           _lyricsHasExactSync = true;
           _lyricsLoading = false;
         });
-        _updateLyricIdx(_position);
         return true;
       }
     }
@@ -771,26 +612,10 @@ class _PlayerScreenState extends State<PlayerScreen>
         _lyricsHasExactSync = false;
         _lyricsLoading = false;
       });
-      _updateLyricIdx(_position);
       return true;
     }
 
     return false;
-  }
-
-  void _updateLyricIdx(Duration position) {
-    if (!_lyricsSynced || _lrcLines.isEmpty) return;
-
-    int nextIndex = -1;
-    for (int i = 0; i < _lrcLines.length; i++) {
-      if (_lrcLines[i].time <= position) {
-        nextIndex = i;
-      } else {
-        break;
-      }
-    }
-
-    _currentLyricIdx = nextIndex;
   }
 
   Future<void> _togglePlayPause() async {
@@ -807,29 +632,34 @@ class _PlayerScreenState extends State<PlayerScreen>
     final synced = _playback.position;
     setState(() {
       _position = synced;
-      _updateLyricIdx(synced);
     });
   }
 
   Future<void> _toggleLike() async {
     if (_title.isEmpty) return;
+    final previous = _isLiked;
+    setState(() => _isLiked = !previous);
     try {
-      await ApiService().likeTrack(
-        _playbackLookupId,
-        title: _title,
-        artist: _artist,
-        genre: _track['genre']?.toString(),
-      );
-      if (!mounted) return;
-      setState(() => _isLiked = !_isLiked);
+      if (previous) {
+        await ApiService().unlikeTrack(_playbackLookupId);
+      } else {
+        await ApiService().likeTrack(
+          _playbackLookupId,
+          title: _title,
+          artist: _artist,
+          genre: _track['genre']?.toString(),
+        );
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Added to Liked Songs'),
+        SnackBar(
+          content: Text(
+              previous ? 'Removed from Liked Songs' : 'Added to Liked Songs'),
           duration: Duration(seconds: 1),
         ),
       );
     } catch (_) {
       if (!mounted) return;
+      setState(() => _isLiked = previous);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not like this track')),
       );
@@ -875,7 +705,12 @@ class _PlayerScreenState extends State<PlayerScreen>
           approximateSync: _lyricsSynced && !_lyricsHasExactSync,
           positionStream: _playback.positionStream,
           onSeek: (Duration pos) {
-            unawaited(_seekTo(pos));
+            unawaited(() async {
+              await _seekTo(pos);
+              if (!_playback.isPlaying) {
+                await _playback.resume();
+              }
+            }());
           },
         ),
       ),
@@ -892,86 +727,101 @@ class _PlayerScreenState extends State<PlayerScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF1A0240), Color(0xFF0D0D20), Color(0xFF001230)],
-            stops: [0.0, 0.4, 1.0],
+      body: LayoutBuilder(
+        builder: (context, constraints) => Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF1A0240), Color(0xFF0D0D20), Color(0xFF001230)],
+              stops: [0.0, 0.4, 1.0],
+            ),
           ),
-        ),
-        child: Stack(
-          children: [
-            Positioned(
-              top: 60,
-              left: -40,
-              child: _orb(200, AppColors.purple.withOpacity(0.3)),
-            ),
-            Positioned(
-              top: 120,
-              right: -20,
-              child: _orb(180, AppColors.pink.withOpacity(0.25)),
-            ),
-            Positioned(
-              bottom: 100,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: _orb(300, AppColors.blue.withOpacity(0.15)),
+          child: Stack(
+            children: [
+              Positioned(
+                top: 60,
+                left: -40,
+                child: _orb(200, AppColors.purple.withOpacity(0.3)),
               ),
-            ),
-            SafeArea(
-              child: SingleChildScrollView(
+              Positioned(
+                top: 120,
+                right: -20,
+                child: _orb(180, AppColors.pink.withOpacity(0.25)),
+              ),
+              Positioned(
+                bottom: 100,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: _orb(300, AppColors.blue.withOpacity(0.15)),
+                ),
+              ),
+              SafeArea(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
                   child: Column(
                     children: [
                       const SizedBox(height: 8),
                       _topBar(),
-                      const SizedBox(height: 28),
-                      _coverArtBox(),
-                      if (_currentLyricLine != null &&
-                          _currentLyricLine!.isNotEmpty)
-                        GestureDetector(
-                          onTap: _openLyricsScreen,
-                          onLongPress: _lyricsSynced && _currentLyricIdx >= 0
-                              ? () => _seekTo(_lrcLines[_currentLyricIdx].time)
-                              : null,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 8,
-                            ),
-                            child: Text(
-                              _currentLyricLine!,
-                              style: GoogleFonts.outfit(
-                                fontSize: 15,
-                                color: Colors.white.withOpacity(0.75),
-                                fontStyle: FontStyle.italic,
-                                height: 1.5,
+                      Expanded(
+                        child: Center(
+                          child: SingleChildScrollView(
+                            physics: const BouncingScrollPhysics(),
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                minHeight: constraints.maxHeight - 92,
                               ),
-                              textAlign: TextAlign.center,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  _coverArtBox(),
+                                  if (_inlineLyricLine != null)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 16),
+                                      child: GestureDetector(
+                                        onTap: _openLyricsScreen,
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 14,
+                                          ),
+                                          child: Text(
+                                            _inlineLyricLine!,
+                                            textAlign: TextAlign.center,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: GoogleFonts.outfit(
+                                              fontSize: 18,
+                                              fontStyle: FontStyle.italic,
+                                              height: 1.24,
+                                              color: Colors.white
+                                                  .withOpacity(0.94),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  const SizedBox(height: 18),
+                                  _titleRow(),
+                                  const SizedBox(height: 12),
+                                  _progressBar(),
+                                  const SizedBox(height: 34),
+                                  _controls(),
+                                  const SizedBox(height: 32),
+                                  _extraActions(),
+                                  const SizedBox(height: 24),
+                                ],
+                              ),
                             ),
                           ),
                         ),
-                      const SizedBox(height: 10),
-                      _titleRow(),
-                      const SizedBox(height: 12),
-                      _progressBar(),
-                      const SizedBox(height: 28),
-                      _controls(),
-                      const SizedBox(height: 28),
-                      _extraActions(),
-                      const SizedBox(height: 16),
+                      ),
                     ],
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -995,7 +845,6 @@ class _PlayerScreenState extends State<PlayerScreen>
             ? albumLabel
             : null;
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         GestureDetector(
           onTap: () => Navigator.of(context).maybePop(),
@@ -1014,81 +863,81 @@ class _PlayerScreenState extends State<PlayerScreen>
             ),
           ),
         ),
-        Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Now Playing',
-              style: GoogleFonts.outfit(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: AppColors.text,
-                letterSpacing: 0.2,
-              ),
-            ),
-            if (label != null)
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                'Now Playing',
                 style: GoogleFonts.outfit(
-                  fontSize: 11,
-                  color: AppColors.purpleLight.withOpacity(0.8),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.text,
+                  letterSpacing: 0.2,
                 ),
               ),
-          ],
+              if (label != null)
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.outfit(
+                    fontSize: 11,
+                    color: AppColors.purpleLight.withOpacity(0.8),
+                  ),
+                ),
+            ],
+          ),
         ),
-        const SizedBox(width: 40),
+        const SizedBox(width: 40, height: 40),
       ],
     );
   }
 
   Widget _coverArtBox() {
-    return AnimatedBuilder(
-      animation: _floatController,
-      builder: (_, __) => Transform.translate(
-        offset: Offset(0, -8 * _floatController.value),
-        child: Container(
-          width: 280,
-          height: 280,
-          decoration: BoxDecoration(
-            gradient: AppColors.gradMixed,
-            borderRadius: BorderRadius.circular(30),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.purpleDark.withOpacity(0.4),
-                blurRadius: 60,
-              ),
-              BoxShadow(
-                color: AppColors.pink.withOpacity(0.2),
-                blurRadius: 120,
-              ),
-              BoxShadow(
-                color: Colors.black.withOpacity(0.5),
-                blurRadius: 60,
-                offset: const Offset(0, 30),
-              ),
-            ],
+    final coverSize =
+        (MediaQuery.of(context).size.width - 48).clamp(304.0, 344.0) as double;
+    return Container(
+      width: coverSize,
+      height: coverSize,
+      decoration: BoxDecoration(
+        gradient: AppColors.gradMixed,
+        borderRadius: BorderRadius.circular(34),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.purpleDark.withOpacity(0.34),
+            blurRadius: 56,
           ),
-          child: _coverUrl != null && _coverUrl!.isNotEmpty
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(30),
-                  child: CachedNetworkImage(
-                    imageUrl: _coverUrl!,
-                    fit: BoxFit.cover,
-                    placeholder: (_, __) => const Center(
-                      child: Text('🌊', style: TextStyle(fontSize: 100)),
-                    ),
-                    errorWidget: (_, __, ___) => const Center(
-                      child: Text('🎵', style: TextStyle(fontSize: 100)),
-                    ),
-                  ),
-                )
-              : const Center(
+          BoxShadow(
+            color: AppColors.pink.withOpacity(0.16),
+            blurRadius: 110,
+          ),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.42),
+            blurRadius: 56,
+            offset: const Offset(0, 26),
+          ),
+        ],
+      ),
+      child: _coverUrl != null && _coverUrl!.isNotEmpty
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(34),
+              child: CachedNetworkImage(
+                imageUrl: _coverUrl!,
+                fit: BoxFit.cover,
+                placeholder: (_, __) => const Center(
                   child: Text('🌊', style: TextStyle(fontSize: 100)),
                 ),
-        ),
-      ),
+                errorWidget: (_, __, ___) => const Center(
+                  child: Text('🎵', style: TextStyle(fontSize: 100)),
+                ),
+              ),
+            )
+          : const Center(
+              child: Text('🌊', style: TextStyle(fontSize: 100)),
+            ),
     );
   }
 

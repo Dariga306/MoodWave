@@ -108,6 +108,7 @@ class UserResponse(BaseModel):
     show_followers: bool = True
     show_recently_played: bool = True
     hide_music_taste: bool = False
+    hide_forward_profile: bool = False
     is_verified: bool
     is_active: bool
     is_admin: bool = False

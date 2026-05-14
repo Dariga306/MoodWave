@@ -13,7 +13,8 @@ class PremiumScreen extends StatelessWidget {
         backgroundColor: AppColors.bg,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppColors.text, size: 20),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+              color: AppColors.text, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -42,7 +43,7 @@ class PremiumScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                'MoodWave gives you everything — music matching, listening rooms, AI recommendations, and more — at no cost. Enjoy the full experience.',
+                'MoodWave gives you everything — music matching, Live Rooms, AI recommendations, and more — at no cost. Enjoy the full experience.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.outfit(
                   fontSize: 15,
@@ -108,7 +109,8 @@ class _FreePerk extends StatelessWidget {
             color: AppColors.purple.withOpacity(0.12),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Center(child: Text(icon, style: const TextStyle(fontSize: 18))),
+          child:
+              Center(child: Text(icon, style: const TextStyle(fontSize: 18))),
         ),
         const SizedBox(width: 14),
         Text(
@@ -120,7 +122,8 @@ class _FreePerk extends StatelessWidget {
           ),
         ),
         const Spacer(),
-        const Icon(Icons.check_circle_rounded, color: Color(0xFF22c55e), size: 20),
+        const Icon(Icons.check_circle_rounded,
+            color: Color(0xFF22c55e), size: 20),
       ]),
     );
   }

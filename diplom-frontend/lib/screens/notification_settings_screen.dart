@@ -120,7 +120,7 @@ class _NotificationSettingsScreenState
                 _NotifTile(
                   emoji: '🎧',
                   title: 'Room Invites',
-                  subtitle: 'When a friend invites you to a listening room',
+                  subtitle: 'When a friend invites you to a Live Room',
                   value: _roomInvite,
                   saving: _saving,
                   onChanged: (v) {
@@ -195,18 +195,21 @@ class _NotifTile extends StatelessWidget {
             color: AppColors.surface3,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Center(child: Text(emoji, style: const TextStyle(fontSize: 18))),
+          child:
+              Center(child: Text(emoji, style: const TextStyle(fontSize: 18))),
         ),
         const SizedBox(width: 14),
         Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title,
                 style: GoogleFonts.outfit(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: AppColors.text)),
             Text(subtitle,
-                style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
+                style:
+                    GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
           ]),
         ),
         saving

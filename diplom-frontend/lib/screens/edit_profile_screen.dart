@@ -65,6 +65,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late bool _showActivity;
   late bool _showFollowers;
   late bool _hideMusicTaste;
+  late bool _hideForwardProfile;
   String? _gender;
   bool _saving = false;
   bool _showAvatarPicker = false;
@@ -88,6 +89,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _showActivity = widget.user['show_activity'] ?? true;
     _showFollowers = widget.user['show_followers'] ?? true;
     _hideMusicTaste = widget.user['hide_music_taste'] ?? false;
+    _hideForwardProfile = widget.user['hide_forward_profile'] ?? false;
     _gender = widget.user['gender'];
     _savedAvatarUrl = widget.user['avatar_url'] as String?;
     _savedBannerUrl = widget.user['banner_url'] as String?;
@@ -400,6 +402,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'show_activity': _showActivity,
         'show_followers': _showFollowers,
         'hide_music_taste': _hideMusicTaste,
+        'hide_forward_profile': _hideForwardProfile,
         if (_gender != null) 'gender': _gender,
       };
 
@@ -817,6 +820,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     Icons.music_note_rounded,
                     !_hideMusicTaste,
                     (v) => setState(() => _hideMusicTaste = !v),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildToggleRow(
+                    'Hide Forward Profile',
+                    'Forwarded messages will not link to your profile',
+                    Icons.forward_to_inbox_rounded,
+                    _hideForwardProfile,
+                    (v) => setState(() => _hideForwardProfile = v),
                   ),
                   const SizedBox(height: 32),
                 ]),

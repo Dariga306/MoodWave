@@ -66,12 +66,79 @@ def _normalize_now_playing(raw_value: str | None) -> dict | None:
     except (TypeError, json.JSONDecodeError):
         return None
 
+    played_at = payload.get("played_at")
+    if played_at:
+        try:
+            played_dt = datetime.fromisoformat(str(played_at).replace("Z", "+00:00")).replace(tzinfo=None)
+            if (datetime.utcnow() - played_dt).total_seconds() > 600:
+                return None
+        except Exception:
+            return None
+
     return {
         "track_id": payload.get("track_id") or payload.get("spotify_id"),
         "title": payload.get("title"),
         "artist": payload.get("artist"),
-        "played_at": payload.get("played_at"),
+        "cover_url": (
+            payload.get("cover_url")
+            or payload.get("track_cover_url")
+            or payload.get("album_cover_url")
+            or payload.get("artworkUrl100")
+            or payload.get("picture_medium")
+        ),
+        "track_cover_url": (
+            payload.get("track_cover_url")
+            or payload.get("cover_url")
+            or payload.get("album_cover_url")
+            or payload.get("artworkUrl100")
+            or payload.get("picture_medium")
+        ),
+        "album_cover_url": payload.get("album_cover_url"),
+        "played_at": played_at,
     }
+
+
+async def _touch_presence(redis, user_id: int) -> None:
+    now = datetime.utcnow().isoformat() + "Z"
+    try:
+        await redis.setex(
+            f"presence:{user_id}",
+            90,
+            json.dumps({"user_id": user_id, "last_seen_at": now}),
+        )
+        await redis.set(f"last_seen:{user_id}", now)
+    except Exception:
+        return
+
+
+async def _presence_payload(redis, user: User) -> dict:
+    payload = None
+    try:
+        raw = await redis.get(f"presence:{user.id}")
+        payload = json.loads(raw) if raw else None
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        last_seen_at = payload.get("last_seen_at")
+    else:
+        try:
+            last_seen_at = await redis.get(f"last_seen:{user.id}")
+        except Exception:
+            last_seen_at = None
+    return {
+        "is_online": bool(payload),
+        "presence_status": "online" if payload else "offline",
+        "last_seen_at": last_seen_at,
+    }
+
+
+@router.post("/presence/heartbeat")
+async def presence_heartbeat(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    await _touch_presence(request.app.state.redis, current_user.id)
+    return {"ok": True, "last_seen_at": datetime.utcnow().isoformat() + "Z"}
 
 
 async def _friend_rows(db: AsyncSession, current_user_id: int):
@@ -132,6 +199,8 @@ async def _latest_play_snapshot(db: AsyncSession, user_id: int) -> dict | None:
         "track_id": history.spotify_track_id,
         "title": title,
         "artist": artist,
+        "cover_url": track.cover_url if track else None,
+        "track_cover_url": track.cover_url if track else None,
         "played_at": history.created_at.isoformat() + "Z"
         if history.created_at
         else None,
@@ -178,6 +247,7 @@ async def friends_activity(
     current_user: User = Depends(get_current_user),
 ):
     redis = request.app.state.redis
+    await _touch_presence(redis, current_user.id)
     rows = await _friend_rows(db, current_user.id)
     following_rows = await _following_rows(db, current_user.id)
     live: list[dict] = []
@@ -196,11 +266,26 @@ async def friends_activity(
                 now_playing = _normalize_now_playing(
                     await redis.get(f"now_playing:{user.id}")
                 )
+                if now_playing and not now_playing.get("cover_url"):
+                    track_id = now_playing.get("track_id")
+                    if track_id:
+                        cached_track = await db.scalar(
+                            select(TrackCache).where(TrackCache.spotify_id == track_id)
+                        )
+                        if cached_track and cached_track.cover_url:
+                            now_playing["cover_url"] = cached_track.cover_url
+                            now_playing["track_cover_url"] = cached_track.cover_url
             except Exception:
                 now_playing = None
-            now_playing = now_playing or await _latest_play_snapshot(db, user.id)
-
-        friend_data = {**_friend_payload(user), "now_playing": now_playing}
+            if not now_playing:
+                now_playing = await _latest_play_snapshot(db, user.id)
+        activity_status = ""
+        friend_data = {
+            **_friend_payload(user),
+            **await _presence_payload(redis, user),
+            "now_playing": now_playing,
+            "activity_status": activity_status,
+        }
         seen_ids.add(user.id)
 
         if now_playing and now_playing.get("played_at"):
@@ -210,14 +295,19 @@ async def friends_activity(
                 ).replace(tzinfo=None)
                 age_secs = (now_utc - played_dt).total_seconds()
                 if age_secs <= 120:  # 2 minutes → live
+                    friend_data["activity_status"] = "live"
                     live.append(friend_data)
                 elif age_secs <= 600:  # 10 minutes → recent
+                    friend_data["activity_status"] = "recent"
                     recent.append(friend_data)
                 else:
-                    recent.append(friend_data)  # older but still show
+                    friend_data["now_playing"] = None
+                    recent.append(friend_data)
             except (ValueError, TypeError):
+                friend_data["now_playing"] = None
                 recent.append(friend_data)
         else:
+            friend_data["now_playing"] = None
             recent.append(friend_data)
 
     for _friendship, user in rows:
@@ -790,13 +880,35 @@ async def get_user_now_playing(
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    redis = request.app.state.redis
+    await _touch_presence(redis, current_user.id)
     now_playing = None
+    activity_status = ""
     if user.show_activity:
         try:
-            redis = request.app.state.redis
             now_playing = _normalize_now_playing(await redis.get(f"now_playing:{user_id}"))
         except Exception:
             pass
         if not now_playing:
             now_playing = await _latest_play_snapshot(db, user_id)
-    return {"now_playing": now_playing}
+    if now_playing and now_playing.get("played_at"):
+        try:
+            played_dt = datetime.fromisoformat(
+                now_playing["played_at"].replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+            age_secs = (datetime.utcnow() - played_dt).total_seconds()
+            if age_secs <= 120:
+                activity_status = "live"
+            elif age_secs <= 600:
+                activity_status = "recent"
+            else:
+                now_playing = None
+        except (ValueError, TypeError):
+            now_playing = None
+    else:
+        now_playing = None
+    return {
+        "now_playing": now_playing,
+        "activity_status": activity_status,
+        **await _presence_payload(redis, user),
+    }

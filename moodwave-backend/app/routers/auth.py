@@ -131,6 +131,7 @@ class UpdateProfileRequest(BaseModel):
     show_followers: Optional[bool] = None
     show_recently_played: Optional[bool] = None
     hide_music_taste: Optional[bool] = None
+    hide_forward_profile: Optional[bool] = None
 
 
 class FCMTokenRequest(BaseModel):
@@ -284,6 +285,7 @@ async def _parse_profile_update_request(request: Request) -> tuple[dict[str, obj
             "show_followers",
             "show_recently_played",
             "hide_music_taste",
+            "hide_forward_profile",
         ):
             value = form.get(key)
             if value is not None:
@@ -296,7 +298,7 @@ async def _parse_profile_update_request(request: Request) -> tuple[dict[str, obj
         if isinstance(banner_candidate, UploadFile) and banner_candidate.filename:
             banner_file = banner_candidate
 
-        for bool_key in ("is_public", "show_activity", "show_followers", "show_recently_played", "hide_music_taste"):
+        for bool_key in ("is_public", "show_activity", "show_followers", "show_recently_played", "hide_music_taste", "hide_forward_profile"):
             if bool_key in raw_data:
                 parsed = _coerce_bool(raw_data[bool_key])
                 if parsed is not None:
@@ -329,6 +331,7 @@ def _serialize_user(
     followers_count: int = 0,
     following_count: int = 0,
 ) -> UserResponse:
+    notif_settings = getattr(user, "notif_settings_json", None) or {}
     return UserResponse.model_validate({
         "id": user.id,
         "email": user.email,
@@ -349,6 +352,7 @@ def _serialize_user(
         "show_followers": getattr(user, "show_followers", True),
         "show_recently_played": getattr(user, "show_recently_played", True),
         "hide_music_taste": getattr(user, "hide_music_taste", False),
+        "hide_forward_profile": bool(notif_settings.get("hide_forward_profile")),
         "is_verified": user.is_verified,
         "is_active": user.is_active,
         "is_admin": getattr(user, "is_admin", False),
@@ -857,6 +861,11 @@ async def update_me(
             user_id=current_user.id,
             kind="banner",
         )
+
+    if "hide_forward_profile" in data:
+        settings = dict(getattr(current_user, "notif_settings_json", None) or {})
+        settings["hide_forward_profile"] = bool(data.pop("hide_forward_profile"))
+        current_user.notif_settings_json = settings
 
     for key, value in data.items():
         setattr(current_user, key, value)
@@ -1922,6 +1931,7 @@ async def get_privacy_settings(
         "show_activity": current_user.show_activity,
         "show_followers": getattr(current_user, "show_followers", True),
         "show_recently_played": getattr(current_user, "show_recently_played", True),
+        "hide_forward_profile": bool((getattr(current_user, "notif_settings_json", None) or {}).get("hide_forward_profile")),
     }
 
 
@@ -1930,6 +1940,7 @@ class PrivacySettingsRequest(BaseModel):
     show_activity: Optional[bool] = None
     show_followers: Optional[bool] = None
     show_recently_played: Optional[bool] = None
+    hide_forward_profile: Optional[bool] = None
 
 
 @router.put(
@@ -1943,6 +1954,10 @@ async def update_privacy_settings(
     current_user: User = Depends(get_current_user),
 ):
     data = body.model_dump(exclude_none=True)
+    if "hide_forward_profile" in data:
+        settings = dict(getattr(current_user, "notif_settings_json", None) or {})
+        settings["hide_forward_profile"] = bool(data.pop("hide_forward_profile"))
+        current_user.notif_settings_json = settings
     for key, value in data.items():
         setattr(current_user, key, value)
     await db.commit()
@@ -1951,6 +1966,7 @@ async def update_privacy_settings(
         "show_activity": current_user.show_activity,
         "show_followers": getattr(current_user, "show_followers", True),
         "show_recently_played": getattr(current_user, "show_recently_played", True),
+        "hide_forward_profile": bool((getattr(current_user, "notif_settings_json", None) or {}).get("hide_forward_profile")),
     }
 
 

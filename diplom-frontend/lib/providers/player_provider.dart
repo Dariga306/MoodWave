@@ -527,7 +527,14 @@ class PlayerProvider extends ChangeNotifier {
         final progressMs = _position.inMilliseconds;
         final completed = _duration.inMilliseconds > 0 &&
             progressMs >= _duration.inMilliseconds - 5000;
-        ApiService().updateTrackProgress(trackId, progressMs, completed);
+        ApiService().updateTrackProgress(
+          trackId,
+          progressMs,
+          completed,
+          title: title,
+          artist: artist,
+          coverUrl: coverUrl,
+        );
       }
     });
   }

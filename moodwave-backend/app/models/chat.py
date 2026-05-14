@@ -65,3 +65,20 @@ class GroupChatMember(Base):
         nullable=False,
     )
     joined_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class GroupChatAvatarHistory(Base):
+    __tablename__ = "group_chat_avatar_history"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_chat_id: Mapped[int] = mapped_column(
+        ForeignKey("group_chats.id", ondelete="CASCADE"),
+        index=True,
+    )
+    avatar_url: Mapped[str] = mapped_column(Text, nullable=False)
+    changed_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

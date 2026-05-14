@@ -5,6 +5,7 @@ alembic==1.13.3
 asyncpg==0.29.0
 psycopg2-binary==2.9.9
 redis==5.1.1
+fakeredis==2.35.1
 pydantic[email]==2.9.2
 pydantic-settings==2.5.2
 email-validator==2.2.0
