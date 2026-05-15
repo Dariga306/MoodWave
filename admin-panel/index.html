@@ -4,16 +4,64 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MoodWave Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
       *, *::before, *::after { box-sizing: border-box; }
-      html, body, #root { margin: 0; padding: 0; height: 100%; }
+      html, body, #root { margin: 0; padding: 0; height: 100%; background: #07070e; }
+      body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+
+      /* Autofill dark override */
       input:-webkit-autofill,
       input:-webkit-autofill:hover,
       input:-webkit-autofill:focus {
-        -webkit-box-shadow: 0 0 0px 1000px #1a1a28 inset !important;
+        -webkit-box-shadow: 0 0 0px 1000px #161623 inset !important;
         -webkit-text-fill-color: #e2e8f0 !important;
         caret-color: #e2e8f0;
       }
+
+      /* Scrollbar */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.3); border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.55); }
+
+      /* Ant table row hover */
+      .ant-table-tbody > tr.ant-table-row:hover > td {
+        background: rgba(124,58,237,0.06) !important;
+      }
+      .ant-table-tbody > tr > td {
+        border-color: rgba(255,255,255,0.05) !important;
+      }
+      .ant-table-thead > tr > th {
+        border-color: rgba(255,255,255,0.05) !important;
+      }
+
+      /* Select dropdown */
+      .ant-select-dropdown { background: #161623 !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 10px !important; }
+      .ant-select-item-option-active { background: rgba(124,58,237,0.12) !important; }
+      .ant-select-item-option-selected { background: rgba(124,58,237,0.2) !important; }
+
+      /* Modal */
+      .ant-modal-content { background: #0f0f1c !important; border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 16px !important; }
+      .ant-modal-header { background: #0f0f1c !important; border-bottom: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px 16px 0 0 !important; }
+      .ant-modal-close { color: #475569 !important; }
+      .ant-modal-close:hover { color: #e2e8f0 !important; background: rgba(255,255,255,0.06) !important; }
+
+      /* Popconfirm */
+      .ant-popover-inner { background: #161623 !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 12px !important; }
+
+      /* Message */
+      .ant-message-notice-content { background: #161623 !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 10px !important; }
+
+      /* Pagination */
+      .ant-pagination-item { background: #161623 !important; border-color: rgba(255,255,255,0.1) !important; border-radius: 8px !important; }
+      .ant-pagination-item a { color: #94a3b8 !important; }
+      .ant-pagination-item-active { border-color: #7c3aed !important; background: rgba(124,58,237,0.15) !important; }
+      .ant-pagination-item-active a { color: #a78bfa !important; }
+      .ant-pagination-prev .ant-pagination-item-link,
+      .ant-pagination-next .ant-pagination-item-link { background: #161623 !important; border-color: rgba(255,255,255,0.1) !important; border-radius: 8px !important; color: #94a3b8 !important; }
     </style>
   </head>
   <body>

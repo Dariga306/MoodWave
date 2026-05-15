@@ -21,22 +21,40 @@ export default function App() {
       theme={{
         algorithm: theme.darkAlgorithm,
         token: {
-          colorPrimary: '#7c3aed',
-          colorBgBase: '#0d0d14',
-          colorBgContainer: '#13131e',
-          colorBgElevated: '#1a1a28',
-          borderRadius: 10,
-          fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-          colorBorder: '#2a2a3e',
-          colorText: '#e2e8f0',
+          colorPrimary:       '#7c3aed',
+          colorBgBase:        '#07070e',
+          colorBgContainer:   '#0f0f1c',
+          colorBgElevated:    '#161623',
+          borderRadius:       10,
+          fontFamily:         "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+          colorBorder:        'rgba(255,255,255,0.1)',
+          colorText:          '#e2e8f0',
           colorTextSecondary: '#94a3b8',
+          colorTextPlaceholder: '#475569',
         },
         components: {
-          Table: { headerBg: '#1a1a28', rowHoverBg: '#1e1e30' },
-          Card:  { headerBg: '#1a1a28' },
-          Menu:  { darkItemBg: 'transparent', darkSubMenuItemBg: 'transparent' },
-          Modal: { contentBg: '#13131e', headerBg: '#13131e' },
-          Select: { optionSelectedBg: '#2a1a5e' },
+          Table: {
+            headerBg:   '#161623',
+            rowHoverBg: 'rgba(124,58,237,0.06)',
+            borderColor: 'rgba(255,255,255,0.06)',
+          },
+          Card: { headerBg: '#161623' },
+          Menu: { darkItemBg: 'transparent', darkSubMenuItemBg: 'transparent' },
+          Modal: {
+            contentBg: '#0f0f1c',
+            headerBg:  '#0f0f1c',
+          },
+          Select: {
+            optionSelectedBg: 'rgba(124,58,237,0.2)',
+            colorBgContainer: '#161623',
+          },
+          Input: {
+            colorBgContainer: '#161623',
+            activeBg:  '#161623',
+            hoverBg:   '#161623',
+          },
+          Spin: { colorPrimary: '#7c3aed' },
+          Badge: { colorBgContainer: '#0f0f1c' },
         },
       }}
     >

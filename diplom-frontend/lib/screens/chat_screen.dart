@@ -254,7 +254,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _loadDeletedForMe();
     _loadMessages();
     _loadPinned();
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 1200), (_) {
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 2000), (_) {
       _loadMessages();
       _pollCycle++;
       if (_pollCycle % 2 == 0) _loadPinned();
@@ -490,7 +490,7 @@ class _ChatScreenState extends State<ChatScreen> {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('social_cached_chats_v2', jsonEncode(fresh));
         }
-      }).catchError((_) => <dynamic>[]));
+      }).catchError((_) => null));
     }
     if (!mounted) return null;
     return showModalBottomSheet<_ForwardTarget>(
@@ -731,7 +731,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!await ApiService().hasToken()) return;
     _loadingMessages = true;
     try {
-      unawaited(ApiService().sendPresenceHeartbeat());
+      if (_pollCycle % 4 == 0) unawaited(ApiService().sendPresenceHeartbeat());
       final msgs = _isGroupChat
           ? await ApiService().getGroupChatMessages(widget.groupChatId!)
           : _usesDirectThread

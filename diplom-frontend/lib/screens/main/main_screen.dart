@@ -23,6 +23,7 @@ class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   int _socialBadge = 0;
   Timer? _badgePollTimer;
+  Timer? _presenceTimer;
   static const _lastReadKeyPrefix = 'last_read_v1_';
   static const _mutedChatsKey = 'muted_chat_threads_v1';
 
@@ -32,14 +33,29 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    _initBadge();
-    _badgePollTimer = Timer.periodic(const Duration(seconds: 30), (_) => _pollBadge());
+    // Delay badge + presence so home tab critical content loads first
+    Future.delayed(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      _initBadge();
+      _sendPresenceHeartbeat();
+    });
+    _badgePollTimer =
+        Timer.periodic(const Duration(seconds: 30), (_) => _pollBadge());
+    _presenceTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _sendPresenceHeartbeat(),
+    );
   }
 
   @override
   void dispose() {
     _badgePollTimer?.cancel();
+    _presenceTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _sendPresenceHeartbeat() async {
+    await ApiService().sendPresenceHeartbeat();
   }
 
   Future<void> _initBadge() async {
@@ -60,7 +76,8 @@ class _MainScreenState extends State<MainScreen> {
         if (firebaseId.isEmpty) continue;
         final since = prefs.getString('$_lastReadKeyPrefix$key') ??
             DateTime.fromMillisecondsSinceEpoch(0).toUtc().toIso8601String();
-        requests.add({'key': key, 'firebase_chat_id': firebaseId, 'since': since});
+        requests
+            .add({'key': key, 'firebase_chat_id': firebaseId, 'since': since});
       }
       final counts = requests.isEmpty
           ? <String, int>{}

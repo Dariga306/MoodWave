@@ -432,7 +432,7 @@ async def _get_or_create_direct_chat(
 async def _messages_for_chat(chat: Chat, limit: int = 50) -> list[dict]:
     if not chat.firebase_chat_id:
         return []
-    return await firebase_svc.get_messages(chat.firebase_chat_id, limit=limit)
+    return await asyncio.to_thread(firebase_service.get_messages, chat.firebase_chat_id, limit)
 
 
 async def _send_push_in_background(
@@ -619,13 +619,10 @@ async def _send_payload(
     data: dict,
 ):
     sent_at = _now_iso()
-    message_id = firebase_service.write_message(
+    message_id = await asyncio.to_thread(
+        firebase_service.write_message,
         chat.firebase_chat_id or "",
-        {
-            **payload,
-            "sender_id": current_user.id,
-            "sent_at": sent_at,
-        },
+        {**payload, "sender_id": current_user.id, "sent_at": sent_at},
     )
     if not message_id:
         raise HTTPException(status_code=503, detail="Unable to send message")
@@ -724,23 +721,34 @@ async def list_chats(
         )
     ).all()
 
-    response: list[dict] = []
+    # Filter blocked chats first, then fetch Firebase previews concurrently
+    visible_rows: list[tuple] = []
     for chat, match, partner in rows:
         if _chat_hidden_key_for_chat(chat) in hidden_keys:
             continue
         if await users_are_blocked(db, current_user.id, partner.id):
             continue
+        visible_rows.append((chat, match, partner))
 
-        last_message_preview: Optional[str] = None
-        last_message_type: Optional[str] = None
-        if chat.firebase_chat_id:
-            try:
-                last_msg = firebase_service.get_last_message(chat.firebase_chat_id)
-                if last_msg:
-                    last_message_preview, last_message_type = _preview_for_message(last_msg)
-            except Exception:
-                pass
+    # Fetch all last-message previews concurrently (Firebase calls are blocking;
+    # running in threads prevents them from serialising on the event loop)
+    async def _fetch_preview(firebase_chat_id: str) -> tuple[Optional[str], Optional[str]]:
+        if not firebase_chat_id:
+            return None, None
+        try:
+            last_msg = await asyncio.to_thread(firebase_service.get_last_message, firebase_chat_id)
+            if last_msg:
+                return _preview_for_message(last_msg)
+        except Exception:
+            pass
+        return None, None
 
+    chat_previews = await asyncio.gather(
+        *[_fetch_preview(chat.firebase_chat_id or "") for chat, _, _ in visible_rows]
+    )
+
+    response: list[dict] = []
+    for (chat, match, partner), (last_message_preview, last_message_type) in zip(visible_rows, chat_previews):
         response.append(
             {
                 "chat_id": chat.id,
@@ -779,6 +787,7 @@ async def list_chats(
         )
     ).scalars().all()
 
+    visible_groups: list[tuple] = []
     for group in group_rows:
         if _chat_hidden_key_for_group(group.id) in hidden_keys:
             continue
@@ -800,16 +809,13 @@ async def list_chats(
             }
             for user in visible_members
         ]
-        last_message_preview: Optional[str] = None
-        last_message_type: Optional[str] = None
-        if group.firebase_chat_id:
-            try:
-                last_msg = firebase_service.get_last_message(group.firebase_chat_id)
-                if last_msg:
-                    last_message_preview, last_message_type = _preview_for_message(last_msg)
-            except Exception:
-                pass
+        visible_groups.append((group, members, member_payloads))
 
+    group_previews = await asyncio.gather(
+        *[_fetch_preview(group.firebase_chat_id or "") for group, _, _ in visible_groups]
+    )
+
+    for (group, members, member_payloads), (last_message_preview, last_message_type) in zip(visible_groups, group_previews):
         response.append(
             {
                 "chat_id": None,
@@ -968,7 +974,8 @@ async def _send_group_payload(
     db: AsyncSession,
 ) -> dict[str, str]:
     sent_at = _now_iso()
-    message_id = firebase_service.write_message(
+    message_id = await asyncio.to_thread(
+        firebase_service.write_message,
         group.firebase_chat_id or "",
         {
             **payload,
@@ -1982,7 +1989,7 @@ async def send_text(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if len(body.text) > 100:
+    if len(body.text) > 2000:
         raise HTTPException(status_code=400, detail="Text too long")
 
     match = await _get_match(match_id, current_user, db)
@@ -1992,14 +1999,10 @@ async def send_text(
 
     chat = await _get_or_create_chat(match, db)
     sent_at = _now_iso()
-    message_id = firebase_service.write_message(
+    message_id = await asyncio.to_thread(
+        firebase_service.write_message,
         chat.firebase_chat_id or "",
-        {
-            "type": "text",
-            "sender_id": current_user.id,
-            "text": body.text,
-            "sent_at": sent_at,
-        },
+        {"type": "text", "sender_id": current_user.id, "text": body.text, "sent_at": sent_at},
     )
     if not message_id:
         raise HTTPException(status_code=503, detail="Unable to send message")
@@ -2066,7 +2069,7 @@ async def send_text_to_thread(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if len(body.text) > 100:
+    if len(body.text) > 2000:
         raise HTTPException(status_code=400, detail="Text too long")
 
     chat = await _get_chat_by_id(chat_id, current_user, db)
@@ -2077,14 +2080,10 @@ async def send_text_to_thread(
         raise HTTPException(status_code=403, detail="User is blocked")
 
     sent_at = _now_iso()
-    message_id = firebase_service.write_message(
+    message_id = await asyncio.to_thread(
+        firebase_service.write_message,
         chat.firebase_chat_id or "",
-        {
-            "type": "text",
-            "sender_id": current_user.id,
-            "text": body.text,
-            "sent_at": sent_at,
-        },
+        {"type": "text", "sender_id": current_user.id, "text": body.text, "sent_at": sent_at},
     )
     if not message_id:
         raise HTTPException(status_code=503, detail="Unable to send message")

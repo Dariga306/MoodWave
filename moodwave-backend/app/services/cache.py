@@ -23,6 +23,13 @@ async def invalidate_match_candidates(redis, user_ids: Iterable[int]) -> None:
         return
 
 
+async def invalidate_all_match_candidates(redis) -> None:
+    try:
+        await _delete_by_patterns(redis, ["match_candidates:*"])
+    except Exception:
+        return
+
+
 async def invalidate_recommendations(redis, user_id: int) -> None:
     try:
         await _delete_by_patterns(redis, [f"recommendations:{int(user_id)}:*"])

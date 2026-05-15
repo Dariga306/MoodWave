@@ -285,6 +285,8 @@ async def _parse_profile_update_request(request: Request) -> tuple[dict[str, obj
             "show_followers",
             "show_recently_played",
             "hide_music_taste",
+            "matching_enabled",
+            "show_match_city",
             "hide_forward_profile",
         ):
             value = form.get(key)
@@ -298,7 +300,7 @@ async def _parse_profile_update_request(request: Request) -> tuple[dict[str, obj
         if isinstance(banner_candidate, UploadFile) and banner_candidate.filename:
             banner_file = banner_candidate
 
-        for bool_key in ("is_public", "show_activity", "show_followers", "show_recently_played", "hide_music_taste", "hide_forward_profile"):
+        for bool_key in ("is_public", "show_activity", "show_followers", "show_recently_played", "hide_music_taste", "matching_enabled", "show_match_city", "hide_forward_profile"):
             if bool_key in raw_data:
                 parsed = _coerce_bool(raw_data[bool_key])
                 if parsed is not None:
@@ -352,6 +354,8 @@ def _serialize_user(
         "show_followers": getattr(user, "show_followers", True),
         "show_recently_played": getattr(user, "show_recently_played", True),
         "hide_music_taste": getattr(user, "hide_music_taste", False),
+        "matching_enabled": notif_settings.get("matching_enabled", True),
+        "show_match_city": notif_settings.get("show_match_city", True),
         "hide_forward_profile": bool(notif_settings.get("hide_forward_profile")),
         "is_verified": user.is_verified,
         "is_active": user.is_active,
@@ -373,6 +377,7 @@ def _public_profile_payload(
     followers_count: int | None,
     following_count: int | None,
 ) -> dict[str, object]:
+    notif_settings = getattr(user, "notif_settings_json", None) or {}
     return {
         "id": user.id,
         "username": user.username,
@@ -392,6 +397,8 @@ def _public_profile_payload(
         "show_followers": getattr(user, "show_followers", True),
         "show_recently_played": getattr(user, "show_recently_played", True),
         "hide_music_taste": getattr(user, "hide_music_taste", False),
+        "matching_enabled": notif_settings.get("matching_enabled", True),
+        "show_match_city": notif_settings.get("show_match_city", True),
         "is_verified": user.is_verified,
         "is_active": user.is_active,
         "genres": genres,
@@ -832,6 +839,7 @@ async def update_me(
     current_user: User = Depends(get_current_user),
 ):
     data, avatar_file, banner_file = await _parse_profile_update_request(request)
+    incoming_keys = set(data.keys())
     if "username" in data and data["username"] != current_user.username:
         existing = await db.scalar(
             select(User).where(User.username == data["username"], User.id != current_user.id)
@@ -862,18 +870,46 @@ async def update_me(
             kind="banner",
         )
 
-    if "hide_forward_profile" in data:
+    if "hide_forward_profile" in data or "matching_enabled" in data or "show_match_city" in data:
         settings = dict(getattr(current_user, "notif_settings_json", None) or {})
-        settings["hide_forward_profile"] = bool(data.pop("hide_forward_profile"))
+        if "hide_forward_profile" in data:
+            settings["hide_forward_profile"] = bool(data.pop("hide_forward_profile"))
+        if "matching_enabled" in data:
+            settings["matching_enabled"] = bool(data.pop("matching_enabled"))
+        if "show_match_city" in data:
+            settings["show_match_city"] = bool(data.pop("show_match_city"))
         current_user.notif_settings_json = settings
 
     for key, value in data.items():
         setattr(current_user, key, value)
     await db.commit()
     await db.refresh(current_user)
-    if {"is_public", "username", "display_name"} & set(data.keys()):
+    if {"is_public", "username", "display_name", "avatar_url", "banner_url"} & incoming_keys or avatar_file is not None or banner_file is not None:
         try:
             await cache_svc.invalidate_all_search_results(request.app.state.redis)
+        except Exception:
+            pass
+    match_affecting_keys = {
+        "is_public",
+        "city",
+        "hide_music_taste",
+        "matching_enabled",
+        "show_match_city",
+        "avatar_url",
+        "banner_url",
+        "avatar_preset",
+        "banner_preset",
+        "display_name",
+        "username",
+    }
+    if match_affecting_keys & incoming_keys:
+        try:
+            await cache_svc.invalidate_all_match_candidates(request.app.state.redis)
+        except Exception:
+            pass
+    elif avatar_file is not None or banner_file is not None:
+        try:
+            await cache_svc.invalidate_all_match_candidates(request.app.state.redis)
         except Exception:
             pass
 
@@ -1926,12 +1962,15 @@ async def get_weekly_stats_recaps(
 async def get_privacy_settings(
     current_user: User = Depends(get_current_user),
 ):
+    settings = getattr(current_user, "notif_settings_json", None) or {}
     return {
         "is_public": current_user.is_public,
         "show_activity": current_user.show_activity,
         "show_followers": getattr(current_user, "show_followers", True),
         "show_recently_played": getattr(current_user, "show_recently_played", True),
-        "hide_forward_profile": bool((getattr(current_user, "notif_settings_json", None) or {}).get("hide_forward_profile")),
+        "matching_enabled": bool(settings.get("matching_enabled", True)),
+        "show_match_city": bool(settings.get("show_match_city", True)),
+        "hide_forward_profile": bool(settings.get("hide_forward_profile")),
     }
 
 
@@ -1940,6 +1979,8 @@ class PrivacySettingsRequest(BaseModel):
     show_activity: Optional[bool] = None
     show_followers: Optional[bool] = None
     show_recently_played: Optional[bool] = None
+    matching_enabled: Optional[bool] = None
+    show_match_city: Optional[bool] = None
     hide_forward_profile: Optional[bool] = None
 
 
@@ -1954,19 +1995,31 @@ async def update_privacy_settings(
     current_user: User = Depends(get_current_user),
 ):
     data = body.model_dump(exclude_none=True)
-    if "hide_forward_profile" in data:
+    if {
+        "hide_forward_profile",
+        "matching_enabled",
+        "show_match_city",
+    } & set(data.keys()):
         settings = dict(getattr(current_user, "notif_settings_json", None) or {})
-        settings["hide_forward_profile"] = bool(data.pop("hide_forward_profile"))
+        if "hide_forward_profile" in data:
+            settings["hide_forward_profile"] = bool(data.pop("hide_forward_profile"))
+        if "matching_enabled" in data:
+            settings["matching_enabled"] = bool(data.pop("matching_enabled"))
+        if "show_match_city" in data:
+            settings["show_match_city"] = bool(data.pop("show_match_city"))
         current_user.notif_settings_json = settings
     for key, value in data.items():
         setattr(current_user, key, value)
     await db.commit()
+    settings = getattr(current_user, "notif_settings_json", None) or {}
     return {
         "is_public": current_user.is_public,
         "show_activity": current_user.show_activity,
         "show_followers": getattr(current_user, "show_followers", True),
         "show_recently_played": getattr(current_user, "show_recently_played", True),
-        "hide_forward_profile": bool((getattr(current_user, "notif_settings_json", None) or {}).get("hide_forward_profile")),
+        "matching_enabled": bool(settings.get("matching_enabled", True)),
+        "show_match_city": bool(settings.get("show_match_city", True)),
+        "hide_forward_profile": bool(settings.get("hide_forward_profile")),
     }
 
 

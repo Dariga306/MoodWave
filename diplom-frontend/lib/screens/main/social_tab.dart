@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -208,7 +209,7 @@ class _SocialTabState extends State<SocialTab>
             child: Icon(
               icon,
               size: iconSize,
-              color: AppColors.purpleLight,
+              color: Colors.white,
             ),
           ),
           if (badgeText != null)
@@ -418,7 +419,14 @@ class _MatchViewState extends State<_MatchView>
   List<dynamic> _candidates = [];
   int _idx = 0;
   bool _loading = true;
-  bool _deciding = false;
+  String? _decidingAction;
+  bool _matchingEnabled = true;
+  bool _seedingDemo = false;
+  final TextEditingController _cityCtrl = TextEditingController();
+  bool _onlyOnline = false;
+  bool _onlyPublic = false;
+  bool _excludeHiddenTaste = true;
+  double _minSimilarity = 35;
 
   @override
   void initState() {
@@ -426,13 +434,26 @@ class _MatchViewState extends State<_MatchView>
     _load();
   }
 
+  @override
+  void dispose() {
+    _cityCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final data = await ApiService().getMatchCandidates();
+      final data = await ApiService().getMatchCandidates(
+        city: _cityCtrl.text,
+        onlyOnline: _onlyOnline,
+        onlyPublic: _onlyPublic,
+        excludeHiddenTaste: _excludeHiddenTaste,
+        minSimilarity: _minSimilarity.round(),
+      );
       if (!mounted) return;
       setState(() {
-        _candidates = data;
+        _matchingEnabled = data['matching_enabled'] as bool? ?? true;
+        _candidates = (data['candidates'] as List?) ?? [];
         _idx = 0;
         _loading = false;
       });
@@ -447,15 +468,43 @@ class _MatchViewState extends State<_MatchView>
           ? _candidates[_idx] as Map<String, dynamic>
           : null;
 
-  int get _remaining =>
-      _candidates.length > _idx + 1 ? _candidates.length - _idx - 1 : 0;
+  Future<void> _seedDemoProfiles() async {
+    if (_seedingDemo) return;
+    setState(() => _seedingDemo = true);
+    try {
+      await ApiService().seedDemoMatch();
+      _cityCtrl.clear();
+      _onlyOnline = false;
+      _onlyPublic = false;
+      _excludeHiddenTaste = false;
+      _minSimilarity = 0;
+      if (!mounted) return;
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not add demo profiles',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
+          ),
+          backgroundColor: const Color(0xFF3a1b2b),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _seedingDemo = false);
+      }
+    }
+  }
 
   Future<void> _decide(String decision) async {
-    if (_deciding || _current == null) return;
+    if (_decidingAction != null || _current == null) return;
     HapticFeedback.mediumImpact();
     final candidate = Map<String, dynamic>.from(_current!);
     final userId = candidate['user_id'] as int;
-    setState(() => _deciding = true);
+    setState(() => _decidingAction = decision);
     try {
       final result = await ApiService().decideMatch(userId, decision);
       if (!mounted) return;
@@ -465,7 +514,7 @@ class _MatchViewState extends State<_MatchView>
     } catch (_) {}
     if (!mounted) return;
     setState(() {
-      _deciding = false;
+      _decidingAction = null;
       _idx++;
     });
   }
@@ -642,6 +691,9 @@ class _MatchViewState extends State<_MatchView>
           child: CircularProgressIndicator(
               strokeWidth: 2, color: AppColors.purpleLight));
     }
+    if (!_matchingEnabled) {
+      return _buildDisabledState();
+    }
     if (_current == null) {
       return _buildEmpty();
     }
@@ -649,62 +701,373 @@ class _MatchViewState extends State<_MatchView>
   }
 
   Widget _buildEmpty() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(36),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      child: Column(
+        children: [
+          _buildFilters(),
+          const SizedBox(height: 18),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    gradient: AppColors.gradMixed,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                          color: AppColors.purple.withOpacity(0.4),
+                          blurRadius: 30)
+                    ],
+                  ),
+                  child: const Center(
+                      child: Text('🎵', style: TextStyle(fontSize: 34))),
+                ),
+                const SizedBox(height: 20),
+                Text('No matches right now',
+                    style: GoogleFonts.outfit(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.text)),
+                const SizedBox(height: 8),
+                Text(
+                    'Try lowering the minimum match, typing a city, or adding demo profiles.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                        fontSize: 14, color: AppColors.text2, height: 1.5)),
+                const SizedBox(height: 28),
+                Column(
+                  children: [
+                    GestureDetector(
+                      onTap: _load,
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 24, vertical: 14),
+                        decoration: BoxDecoration(
+                          gradient: AppColors.primaryBtn,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                                color: AppColors.purple.withOpacity(0.35),
+                                blurRadius: 18,
+                                offset: const Offset(0, 6))
+                          ],
+                        ),
+                        child: Center(
+                          child: Text('Refresh matches',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white)),
+                        ),
+                      ),
+                    ),
+                    if (kDebugMode) ...[
+                      const SizedBox(height: 10),
+                      GestureDetector(
+                        onTap: _seedingDemo ? null : _seedDemoProfiles,
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 18, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: AppColors.glass,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: _seedingDemo
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.purpleLight),
+                                )
+                              : Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(Icons.auto_awesome_rounded,
+                                        size: 16, color: AppColors.purpleLight),
+                                    const SizedBox(width: 8),
+                                    Text('Add demo profiles',
+                                        style: GoogleFonts.outfit(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
+                                            color: AppColors.text)),
+                                  ],
+                                ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                if (kDebugMode) ...[
+                  const SizedBox(height: 14),
+                  Text(
+                    'Demo profiles include different cities, bios, banners, private profiles, and hidden taste settings.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                        fontSize: 12, color: AppColors.text3, height: 1.5),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDisabledState() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+      child: Container(
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppColors.border),
+        ),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 80,
-              height: 80,
+              width: 72,
+              height: 72,
               decoration: BoxDecoration(
                 gradient: AppColors.gradMixed,
                 shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                      color: AppColors.purple.withOpacity(0.4), blurRadius: 30)
-                ],
               ),
               child: const Center(
-                  child: Text('🎵', style: TextStyle(fontSize: 34))),
+                child: Icon(Icons.favorite_outline_rounded,
+                    color: Colors.white, size: 30),
+              ),
             ),
-            const SizedBox(height: 20),
-            Text('No matches right now',
+            const SizedBox(height: 16),
+            Text('Music Match is hidden',
                 style: GoogleFonts.outfit(
                     fontSize: 20,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
                     color: AppColors.text)),
             const SizedBox(height: 8),
-            Text('Listen to more music to find people\nwith similar taste',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.outfit(
-                    fontSize: 14, color: AppColors.text2, height: 1.5)),
-            const SizedBox(height: 28),
-            GestureDetector(
-              onTap: _load,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                decoration: BoxDecoration(
-                  gradient: AppColors.primaryBtn,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                        color: AppColors.purple.withOpacity(0.35),
-                        blurRadius: 18,
-                        offset: const Offset(0, 6))
-                  ],
-                ),
-                child: Text('Try again',
-                    style: GoogleFonts.outfit(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white)),
-              ),
+            Text(
+              'Turn on “Appear in Music Match” in Edit Profile or Privacy to start discovering people with similar taste.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.outfit(
+                  fontSize: 14, color: AppColors.text2, height: 1.5),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildFilters() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('Music Match',
+                  style: GoogleFonts.outfit(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.text)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text('Find people by city, status, and music similarity.',
+              style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.bg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('How filters work',
+                    style: GoogleFonts.outfit(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.text)),
+                const SizedBox(height: 6),
+                Text(
+                  'Public only: show only open profiles. If it is off, private profiles can also appear if they allowed Music Match.',
+                  style: GoogleFonts.outfit(
+                      fontSize: 11.5, color: AppColors.text2, height: 1.45),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Hide hidden taste: hide people who do not show their music taste. Turn it off if you still want those profiles in results.',
+                  style: GoogleFonts.outfit(
+                      fontSize: 11.5, color: AppColors.text2, height: 1.45),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Leave city empty to search everywhere, or type a city name to narrow the results.',
+                  style: GoogleFonts.outfit(
+                      fontSize: 11.5, color: AppColors.text2, height: 1.45),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.bg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: TextField(
+              controller: _cityCtrl,
+              style: GoogleFonts.outfit(color: AppColors.text, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: 'Search by city',
+                hintStyle: GoogleFonts.outfit(color: AppColors.text3),
+                prefixIcon: const Icon(Icons.location_city_rounded,
+                    color: AppColors.text3),
+                border: InputBorder.none,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              ),
+              onChanged: (_) => _load(),
+              onSubmitted: (_) => _load(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _filterChip('Online only', _onlyOnline,
+                  () => setState(() => _onlyOnline = !_onlyOnline),
+                  autoLoad: true),
+              _filterChip('Public only', _onlyPublic,
+                  () => setState(() => _onlyPublic = !_onlyPublic),
+                  autoLoad: true),
+              _filterChip(
+                  'Hide hidden taste',
+                  _excludeHiddenTaste,
+                  () => setState(
+                      () => _excludeHiddenTaste = !_excludeHiddenTaste),
+                  autoLoad: true),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: Text('Minimum match ${_minSimilarity.round()}%',
+                    style: GoogleFonts.outfit(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.text)),
+              ),
+              Text('${_minSimilarity.round()}%',
+                  style: GoogleFonts.outfit(
+                      fontSize: 12, color: AppColors.purpleLight)),
+            ],
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              activeTrackColor: AppColors.purpleLight,
+              inactiveTrackColor: AppColors.border,
+              thumbColor: AppColors.purpleLight,
+              overlayColor: AppColors.purple.withOpacity(0.18),
+            ),
+            child: Slider(
+              value: _minSimilarity,
+              min: 0,
+              max: 100,
+              divisions: 20,
+              onChanged: (v) => setState(() => _minSimilarity = v),
+              onChangeEnd: (_) => _load(),
+            ),
+          ),
+          if (kDebugMode) ...[
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: _seedingDemo ? null : _seedDemoProfiles,
+              child: Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.glass,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (_seedingDemo)
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: AppColors.purpleLight),
+                      )
+                    else ...[
+                      const Icon(Icons.groups_rounded,
+                          size: 16, color: AppColors.purpleLight),
+                      const SizedBox(width: 8),
+                      Text('Add demo profiles',
+                          style: GoogleFonts.outfit(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.text)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _filterChip(String label, bool active, VoidCallback onTap,
+      {bool autoLoad = false}) {
+    return GestureDetector(
+      onTap: () {
+        onTap();
+        if (autoLoad) {
+          _load();
+        }
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          gradient: active ? AppColors.gradPurple : null,
+          color: active ? null : AppColors.bg,
+          borderRadius: BorderRadius.circular(999),
+          border:
+              Border.all(color: active ? Colors.transparent : AppColors.border),
+        ),
+        child: Text(label,
+            style: GoogleFonts.outfit(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: active ? Colors.white : AppColors.text2)),
       ),
     );
   }
@@ -714,9 +1077,26 @@ class _MatchViewState extends State<_MatchView>
     final city = (c['city'] as String?) ?? '';
     final similarity = c['similarity_pct'] ?? 0;
     final icebreaker = c['icebreaker'] ?? 'You have similar music taste!';
-    final genres = (c['top_genres'] as List?)?.cast<String>() ??
-        (c['genres'] as List?)?.cast<String>() ??
-        [];
+    final tasteSummary = (c['taste_summary'] ?? '').toString();
+    final bio = (c['bio'] ?? '').toString();
+    final mediaVersion = c['updated_at'];
+    final avatarUrl = buildMediaUrl(
+      (c['avatar_url'] ?? '').toString(),
+      version: mediaVersion,
+    );
+    final bannerUrl = buildMediaUrl(
+      (c['banner_url'] ?? '').toString(),
+      version: mediaVersion,
+    );
+    final isOnline = c['is_online'] == true;
+    final presence = (c['presence_status'] ?? '').toString();
+    final tasteVisible = c['music_taste_visible'] == true;
+    final isPublic = c['is_public'] != false;
+    final artistPreview = (c['artist_preview'] as List?)
+            ?.whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList() ??
+        const <Map<String, dynamic>>[];
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
 
     return SingleChildScrollView(
@@ -724,13 +1104,8 @@ class _MatchViewState extends State<_MatchView>
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
       child: Column(
         children: [
-          if (_remaining > 0)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Text('$_remaining more people waiting',
-                  style:
-                      GoogleFonts.outfit(fontSize: 13, color: AppColors.text3)),
-            ),
+          _buildFilters(),
+          const SizedBox(height: 18),
           // Main card
           Container(
             decoration: BoxDecoration(
@@ -752,15 +1127,15 @@ class _MatchViewState extends State<_MatchView>
               children: [
                 // Hero gradient section
                 Container(
-                  height: 210,
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
+                  height: 188,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
                         Color(0xFF1a0533),
                         Color(0xFF0d1a3d),
-                        Color(0xFF1a0533),
+                        Color(0xFF1a0533)
                       ],
                     ),
                     borderRadius: BorderRadius.only(
@@ -770,6 +1145,21 @@ class _MatchViewState extends State<_MatchView>
                   ),
                   child: Stack(
                     children: [
+                      if (bannerUrl.isNotEmpty)
+                        Positioned.fill(
+                          child: ClipRRect(
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(28),
+                              topRight: Radius.circular(28),
+                            ),
+                            child: CachedNetworkImage(
+                              imageUrl: bannerUrl,
+                              fit: BoxFit.cover,
+                              errorWidget: (_, __, ___) =>
+                                  const SizedBox.shrink(),
+                            ),
+                          ),
+                        ),
                       // Glow overlay
                       Positioned.fill(
                         child: Container(
@@ -819,14 +1209,54 @@ class _MatchViewState extends State<_MatchView>
                             ]),
                           ),
                         ),
+                      Positioned(
+                        top: 14,
+                        left: 14,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.28),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.12)),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  color: isOnline
+                                      ? const Color(0xFF22c55e)
+                                      : const Color(0xFFfacc15),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                isOnline
+                                    ? 'Online now'
+                                    : presence == 'offline'
+                                        ? 'Recently seen'
+                                        : 'Available',
+                                style: GoogleFonts.outfit(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                       // Avatar with glow ring
                       Center(
                         child: Stack(
                           alignment: Alignment.center,
                           children: [
                             Container(
-                              width: 108,
-                              height: 108,
+                              width: 94,
+                              height: 94,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 boxShadow: [
@@ -838,8 +1268,9 @@ class _MatchViewState extends State<_MatchView>
                               ),
                             ),
                             Container(
-                              width: 96,
-                              height: 96,
+                              width: 84,
+                              height: 84,
+                              clipBehavior: Clip.antiAlias,
                               decoration: BoxDecoration(
                                 gradient: AppColors.gradMixed,
                                 shape: BoxShape.circle,
@@ -847,13 +1278,25 @@ class _MatchViewState extends State<_MatchView>
                                     color: Colors.white.withOpacity(0.18),
                                     width: 3),
                               ),
-                              child: Center(
-                                child: Text(initial,
-                                    style: GoogleFonts.outfit(
-                                        fontSize: 38,
-                                        fontWeight: FontWeight.w800,
-                                        color: Colors.white)),
-                              ),
+                              child: avatarUrl.isNotEmpty
+                                  ? CachedNetworkImage(
+                                      imageUrl: avatarUrl,
+                                      fit: BoxFit.cover,
+                                      errorWidget: (_, __, ___) => Center(
+                                        child: Text(initial,
+                                            style: GoogleFonts.outfit(
+                                                fontSize: 30,
+                                                fontWeight: FontWeight.w800,
+                                                color: Colors.white)),
+                                      ),
+                                    )
+                                  : Center(
+                                      child: Text(initial,
+                                          style: GoogleFonts.outfit(
+                                              fontSize: 30,
+                                              fontWeight: FontWeight.w800,
+                                              color: Colors.white)),
+                                    ),
                             ),
                           ],
                         ),
@@ -863,7 +1306,7 @@ class _MatchViewState extends State<_MatchView>
                 ),
                 // Card body
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -878,9 +1321,41 @@ class _MatchViewState extends State<_MatchView>
                               children: [
                                 Text(name,
                                     style: GoogleFonts.outfit(
-                                        fontSize: 22,
+                                        fontSize: 20,
                                         fontWeight: FontWeight.w800,
                                         color: AppColors.text)),
+                                const SizedBox(height: 4),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: [
+                                    _profileModeChip(
+                                      isPublic
+                                          ? 'Public profile'
+                                          : 'Private profile',
+                                      isPublic
+                                          ? Icons.public_rounded
+                                          : Icons.lock_rounded,
+                                    ),
+                                    if (!tasteVisible)
+                                      _profileModeChip(
+                                        'Taste hidden',
+                                        Icons.visibility_off_rounded,
+                                      ),
+                                  ],
+                                ),
+                                if (bio.isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    bio,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.outfit(
+                                        fontSize: 12,
+                                        height: 1.45,
+                                        color: AppColors.text2),
+                                  ),
+                                ],
                                 if (city.isNotEmpty)
                                   Row(children: [
                                     const Icon(Icons.location_on_rounded,
@@ -919,7 +1394,7 @@ class _MatchViewState extends State<_MatchView>
                                   ]).createShader(b),
                                   child: Text('$similarity%',
                                       style: GoogleFonts.outfit(
-                                          fontSize: 22,
+                                          fontSize: 20,
                                           fontWeight: FontWeight.w800,
                                           color: Colors.white)),
                                 ),
@@ -931,10 +1406,10 @@ class _MatchViewState extends State<_MatchView>
                           ),
                         ],
                       ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 12),
                       // Icebreaker
                       Container(
-                        padding: const EdgeInsets.all(14),
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.04),
                           borderRadius: BorderRadius.circular(14),
@@ -949,47 +1424,199 @@ class _MatchViewState extends State<_MatchView>
                             Expanded(
                               child: Text(icebreaker,
                                   style: GoogleFonts.outfit(
-                                      fontSize: 13,
+                                      fontSize: 12.5,
                                       height: 1.55,
                                       color: AppColors.text2)),
                             ),
                           ],
                         ),
                       ),
-                      // Genre chips
-                      if (genres.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: genres.take(5).map((g) {
-                            return Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 5),
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              AppColors.purple.withOpacity(0.12),
+                              AppColors.pink.withOpacity(0.06),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: AppColors.purple.withOpacity(0.16)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 32,
+                              height: 32,
                               decoration: BoxDecoration(
-                                gradient: LinearGradient(colors: [
-                                  AppColors.purple.withOpacity(0.15),
-                                  AppColors.purpleDark.withOpacity(0.1),
-                                ]),
-                                borderRadius: BorderRadius.circular(100),
-                                border: Border.all(
-                                    color: AppColors.purple.withOpacity(0.25)),
+                                color: AppColors.purple.withOpacity(0.16),
+                                borderRadius: BorderRadius.circular(10),
                               ),
-                              child: Text(g,
-                                  style: GoogleFonts.outfit(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                      color: AppColors.purpleLight)),
-                            );
-                          }).toList(),
+                              child: const Icon(Icons.graphic_eq_rounded,
+                                  size: 18, color: AppColors.purpleLight),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Music taste',
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppColors.text)),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                      tasteVisible
+                                          ? (tasteSummary.isNotEmpty
+                                              ? tasteSummary
+                                              : 'Similar vibe detected')
+                                          : 'This person hides their detailed music taste',
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 12.5,
+                                          height: 1.45,
+                                          color: AppColors.text2)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (artistPreview.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.04),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.person_search_rounded,
+                                  size: 16, color: AppColors.pink),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Picked artists',
+                                      style: GoogleFonts.outfit(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppColors.text,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      children: artistPreview.map((artist) {
+                                        final artistName =
+                                            (artist['name'] ?? 'Artist')
+                                                .toString();
+                                        final artistImage = (artist['image_url'] ??
+                                                artist['picture_medium'] ??
+                                                artist['picture_big'] ??
+                                                '')
+                                            .toString();
+                                        return Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 6),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withOpacity(0.04),
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                            border: Border.all(
+                                                color: AppColors.border),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Container(
+                                                width: 22,
+                                                height: 22,
+                                                clipBehavior: Clip.antiAlias,
+                                                decoration: const BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  gradient:
+                                                      AppColors.gradMixed,
+                                                ),
+                                                child: artistImage.isNotEmpty
+                                                    ? CachedNetworkImage(
+                                                        imageUrl: artistImage,
+                                                        fit: BoxFit.cover,
+                                                        errorWidget: (_, __, ___) =>
+                                                            Center(
+                                                          child: Text(
+                                                            artistName.isNotEmpty
+                                                                ? artistName[0]
+                                                                    .toUpperCase()
+                                                                : 'A',
+                                                            style: GoogleFonts
+                                                                .outfit(
+                                                              fontSize: 10,
+                                                              fontWeight:
+                                                                  FontWeight.w700,
+                                                              color:
+                                                                  Colors.white,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      )
+                                                    : Center(
+                                                        child: Text(
+                                                          artistName.isNotEmpty
+                                                              ? artistName[0]
+                                                                  .toUpperCase()
+                                                              : 'A',
+                                                          style:
+                                                              GoogleFonts.outfit(
+                                                            fontSize: 10,
+                                                            fontWeight:
+                                                                FontWeight.w700,
+                                                            color: Colors.white,
+                                                          ),
+                                                        ),
+                                                      ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                artistName,
+                                                style: GoogleFonts.outfit(
+                                                  fontSize: 11.5,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppColors.text2,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 14),
                       // Action buttons
                       Row(children: [
                         Expanded(
                           child: GestureDetector(
-                            onTap: _deciding ? null : () => _decide('like'),
+                            onTap: _decidingAction != null
+                                ? null
+                                : () => _decide('like'),
                             child: Container(
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
@@ -1006,7 +1633,7 @@ class _MatchViewState extends State<_MatchView>
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  if (_deciding)
+                                  if (_decidingAction == 'like')
                                     const SizedBox(
                                         width: 18,
                                         height: 18,
@@ -1031,7 +1658,9 @@ class _MatchViewState extends State<_MatchView>
                         const SizedBox(width: 10),
                         Expanded(
                           child: GestureDetector(
-                            onTap: _deciding ? null : () => _decide('skip'),
+                            onTap: _decidingAction != null
+                                ? null
+                                : () => _decide('skip'),
                             child: Container(
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
@@ -1042,14 +1671,25 @@ class _MatchViewState extends State<_MatchView>
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  const Icon(Icons.close_rounded,
-                                      size: 18, color: Color(0xFFf87171)),
-                                  const SizedBox(width: 8),
-                                  Text('Pass',
-                                      style: GoogleFonts.outfit(
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w700,
-                                          color: AppColors.text)),
+                                  if (_decidingAction == 'skip')
+                                    const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppColors.purpleLight,
+                                      ),
+                                    )
+                                  else ...[
+                                    const Icon(Icons.close_rounded,
+                                        size: 18, color: Color(0xFFf87171)),
+                                    const SizedBox(width: 8),
+                                    Text('Pass',
+                                        style: GoogleFonts.outfit(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w700,
+                                            color: AppColors.text)),
+                                  ],
                                 ],
                               ),
                             ),
@@ -1062,26 +1702,6 @@ class _MatchViewState extends State<_MatchView>
               ],
             ),
           ),
-          // Hint row
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _hintChip('✕', false),
-              const SizedBox(width: 16),
-              Text('Tap to decide',
-                  style:
-                      GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-              const SizedBox(width: 16),
-              _hintChip('♥', true),
-            ],
-          ),
-          if (_remaining > 0) ...[
-            const SizedBox(height: 8),
-            Text('$_remaining more waiting...',
-                style:
-                    GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-          ],
           const SizedBox(height: 8),
           GestureDetector(
             onTap: _load,
@@ -1102,42 +1722,28 @@ class _MatchViewState extends State<_MatchView>
     );
   }
 
-  Widget _hintChip(String symbol, bool isLike) {
-    final color = isLike ? const Color(0xFF22c55e) : const Color(0xFFf87171);
-    return Row(
-      children: [
-        if (!isLike) ...[
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                shape: BoxShape.circle,
-                border: Border.all(color: color.withOpacity(0.2))),
-            child: Center(
-                child:
-                    Text(symbol, style: TextStyle(fontSize: 13, color: color))),
-          ),
+  Widget _profileModeChip(String label, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColors.bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: AppColors.purpleLight),
           const SizedBox(width: 5),
-          Text('Pass',
-              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
-        ] else ...[
-          Text('Like',
-              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
-          const SizedBox(width: 5),
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                shape: BoxShape.circle,
-                border: Border.all(color: color.withOpacity(0.2))),
-            child: Center(
-                child:
-                    Text(symbol, style: TextStyle(fontSize: 13, color: color))),
+          Text(
+            label,
+            style: GoogleFonts.outfit(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.text2),
           ),
         ],
-      ],
+      ),
     );
   }
 }
@@ -1165,6 +1771,7 @@ class _ChatsViewState extends State<_ChatsView>
   Map<String, int> _unreadCounts = {};
   static const _pinnedChatsKey = 'pinned_chats_v1';
   static const _mutedChatsKey = 'muted_chat_threads_v1';
+  static const _hiddenChatsKey = 'hidden_chats_v1';
   static const _lastReadKeyPrefix = 'last_read_v1_';
   bool _loading = true;
   bool _refreshing = false;
@@ -1188,6 +1795,7 @@ class _ChatsViewState extends State<_ChatsView>
     await Future.wait([
       _loadPins(),
       _loadMuted(),
+      _loadHidden(),
       _loadCachedChats(),
     ]);
     await _load();
@@ -1211,6 +1819,18 @@ class _ChatsViewState extends State<_ChatsView>
     final muted = prefs.getStringList(_mutedChatsKey) ?? [];
     if (!mounted) return;
     setState(() => _mutedChatKeys.addAll(muted));
+  }
+
+  Future<void> _loadHidden() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hidden = prefs.getStringList(_hiddenChatsKey) ?? [];
+    if (!mounted) return;
+    setState(() => _hiddenChatKeys.addAll(hidden));
+  }
+
+  Future<void> _saveHidden() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_hiddenChatsKey, _hiddenChatKeys.toList());
   }
 
   Future<void> _toggleMute(String key) async {
@@ -1312,22 +1932,21 @@ class _ChatsViewState extends State<_ChatsView>
       }).toList();
       _unreadCounts.remove(key);
     });
-    await _saveCachedChats(_chats);
+    await Future.wait([_saveCachedChats(_chats), _saveHidden()]);
     try {
       await ApiService().deleteChat(key);
-      await _load();
     } catch (_) {
       try {
         await ApiService().hideChat(key);
-        await _load();
-        return;
-      } catch (_) {}
-      if (!mounted) return;
-      setState(() {
-        _hiddenChatKeys.remove(key);
-        _chats = previousChats;
-      });
-      _showFloatingNotice('Could not delete chat', error: true);
+      } catch (_) {
+        if (!mounted) return;
+        setState(() {
+          _hiddenChatKeys.remove(key);
+          _chats = previousChats;
+        });
+        await _saveHidden();
+        _showFloatingNotice('Could not delete chat', error: true);
+      }
     }
   }
 
@@ -1341,16 +1960,16 @@ class _ChatsViewState extends State<_ChatsView>
       }).toList();
       _unreadCounts.remove(key);
     });
-    await _saveCachedChats(_chats);
+    await Future.wait([_saveCachedChats(_chats), _saveHidden()]);
     try {
       await ApiService().leaveGroupChat(groupChatId);
-      await _load();
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _hiddenChatKeys.remove(key);
         _chats = previousChats;
       });
+      await _saveHidden();
       _showFloatingNotice('Could not leave group', error: true);
     }
   }
@@ -1389,7 +2008,7 @@ class _ChatsViewState extends State<_ChatsView>
       _chats = nextChats;
       _loading = false;
     });
-    unawaited(_saveCachedChats(nextChats));
+    unawaited(Future.wait([_saveCachedChats(nextChats), _saveHidden()]));
   }
 
   Future<void> _load() async {
@@ -1449,7 +2068,7 @@ class _ChatsViewState extends State<_ChatsView>
           .whereType<Map>()
           .map((item) => _chatKey(Map<String, dynamic>.from(item)))
           .toSet();
-      _hiddenChatKeys.removeWhere(incomingChatKeys.contains);
+      // Hidden keys are persisted; only remove when user explicitly re-opens chat
       final nextSignature = [
         for (final rawChat in data.whereType<Map>())
           _chatSignature(Map<String, dynamic>.from(rawChat)),
@@ -1787,8 +2406,7 @@ class _ChatItem extends StatelessWidget {
         (activity?['now_playing'] as Map?)?.cast<String, dynamic>() ?? {};
     final activityStatus = (activity?['activity_status'] ?? '').toString();
     final isLiveNow = activityStatus == 'live' && nowPlaying.isNotEmpty;
-    final isRecentListen =
-        activityStatus == 'recent' && nowPlaying.isNotEmpty;
+    final isRecentListen = activityStatus == 'recent' && nowPlaying.isNotEmpty;
     final liveTitle = (nowPlaying['title'] ?? '').toString().trim();
     final liveArtist = (nowPlaying['artist'] ?? '').toString().trim();
     final isOnline = activity?['is_online'] == true;
@@ -1800,11 +2418,11 @@ class _ChatItem extends StatelessWidget {
             ? 'Listened recently'
             : isOnline
                 ? 'Online'
-        : lastSeenLabel.isNotEmpty
-            ? (lastSeenLabel == 'now'
-                ? 'Last seen just now'
-                : 'Last seen $lastSeenLabel ago')
-            : '';
+                : lastSeenLabel.isNotEmpty
+                    ? (lastSeenLabel == 'now'
+                        ? 'Last seen just now'
+                        : 'Last seen $lastSeenLabel ago')
+                    : '';
 
     final previewText = _ChatItem._cleanPreview(preview, previewType, timeStr);
     final isTrackPreview = previewType == 'track';
@@ -1843,8 +2461,7 @@ class _ChatItem extends StatelessWidget {
                         (chat['firebase_chat_id'] as String?) ?? '')));
         onReturn?.call(result);
       },
-      onLongPress: () =>
-          _showChatOptions(context, name, chatKind, groupChatId),
+      onLongPress: () => _showChatOptions(context, name, chatKind, groupChatId),
       child: Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Container(
@@ -1918,10 +2535,10 @@ class _ChatItem extends StatelessWidget {
                     ),
                     boxShadow: [
                       BoxShadow(
-                      color: (isLiveNow
-                              ? AppColors.green
-                              : const Color(0xFFFACC15))
-                          .withOpacity(0.22),
+                        color: (isLiveNow
+                                ? AppColors.green
+                                : const Color(0xFFFACC15))
+                            .withOpacity(0.22),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                       ),
@@ -1931,9 +2548,8 @@ class _ChatItem extends StatelessWidget {
                     child: Icon(
                       Icons.graphic_eq_rounded,
                       size: 12,
-                      color: isLiveNow
-                          ? AppColors.green
-                          : const Color(0xFFFACC15),
+                      color:
+                          isLiveNow ? AppColors.green : const Color(0xFFFACC15),
                     ),
                   ),
                 ),
@@ -2475,6 +3091,7 @@ class _NewMessageScreenState extends State<_NewMessageScreen> {
           result['partner']?['username']?.toString() ??
           (user['display_name'] ?? user['username'] ?? 'User').toString();
       final avatarUrl = result['partner']?['avatar_url']?.toString();
+      final firebaseChatId = (result['firebase_chat_id'] as String?) ?? '';
       final chatResult = await Navigator.push<Map<String, dynamic>?>(
         context,
         MaterialPageRoute(
@@ -2483,6 +3100,7 @@ class _NewMessageScreenState extends State<_NewMessageScreen> {
             partnerName: partnerName,
             partnerId: partnerId,
             partnerAvatarUrl: avatarUrl,
+            firebaseChatId: firebaseChatId.isNotEmpty ? firebaseChatId : null,
           ),
         ),
       );

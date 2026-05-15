@@ -1,9 +1,13 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../utils/media_url.dart';
 import 'album_screen.dart';
 import 'artist_screen.dart';
 
@@ -324,293 +328,394 @@ class _ShareTrackSheet extends StatefulWidget {
 }
 
 class _ShareTrackSheetState extends State<_ShareTrackSheet> {
-  List<dynamic> _matches = [];
-  bool _loadingMatches = true;
+  List<Map<String, dynamic>> _destinations = [];
+  bool _loading = true;
+  final Set<String> _sendingKeys = {};
+  final Set<String> _sentKeys = {};
+
+  String get _trackId =>
+      (widget.track?['spotify_id'] ?? widget.track?['deezer_id'] ??
+          widget.track?['track_id'] ?? '').toString();
+  String get _trackTitle =>
+      (widget.track?['title'] ?? widget.track?['trackName'] ?? 'Unknown').toString();
+  String get _trackArtist =>
+      (widget.track?['artist'] ?? widget.track?['artistName'] ?? '').toString();
+  String? get _trackCover =>
+      (widget.track?['cover_url'] ?? widget.track?['artworkUrl100'])?.toString();
+  String? get _trackPreview =>
+      (widget.track?['preview_url'] ?? widget.track?['previewUrl'])?.toString();
 
   @override
   void initState() {
     super.initState();
-    _loadMatches();
+    _loadDestinations();
   }
 
-  Future<void> _loadMatches() async {
+  String _destKey(Map<String, dynamic> chat) {
+    final kind = (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct').toString();
+    if (kind == 'user' || kind == 'direct' || kind == 'match') {
+      final personId = (chat['user_id'] ?? chat['id'] ??
+          (chat['partner'] as Map?)?['id'])?.toString();
+      if (personId != null && personId.isNotEmpty) return 'person:$personId';
+    }
+    if (kind == 'group') {
+      final groupId = (chat['group_chat_id'] ?? chat['chat_id'])?.toString();
+      if (groupId != null && groupId.isNotEmpty) return 'group:$groupId';
+    }
+    return [kind, chat['match_id'], chat['chat_id'], chat['group_chat_id'],
+        chat['user_id'] ?? chat['id']].join(':');
+  }
+
+  Future<void> _loadDestinations() async {
+    // Capture user ID synchronously before first await to avoid context-across-async-gap
+    final myId = (context.read<AuthProvider>().user?['id'] as num?)?.toInt();
     try {
-      final data = await ApiService().getMyMatches();
+      final byKey = <String, Map<String, dynamic>>{};
+      final directUserIds = <int>{};
+
+      int priority(Map<String, dynamic> item) {
+        final kind = (item['destination_type'] ?? item['chat_kind'] ?? 'direct').toString();
+        if (kind == 'match') return 0;
+        if (kind == 'direct') return 1;
+        if (kind == 'group') return 2;
+        return 3;
+      }
+      void add(Map<String, dynamic> item) {
+        final key = _destKey(item);
+        if (key.trim().replaceAll(':', '').isEmpty) return;
+        final existing = byKey[key];
+        if (existing == null || priority(item) < priority(existing)) byKey[key] = item;
+      }
+
+      final chats = await ApiService().getChats();
+      for (final raw in chats.whereType<Map>()) {
+        final chat = Map<String, dynamic>.from(raw);
+        final kind = (chat['chat_kind'] ?? 'direct').toString();
+        if (kind == 'group') {
+          final groupId = (chat['group_chat_id'] as num?)?.toInt();
+          final memberCount = (chat['member_count'] as num?)?.toInt() ?? 0;
+          if (groupId == null || memberCount <= 0) continue;
+          chat['destination_type'] = 'group';
+          add(chat);
+        } else {
+          final chatId = (chat['chat_id'] as num?)?.toInt();
+          final matchId = (chat['match_id'] as num?)?.toInt();
+          if (chatId == null && matchId == null) continue;
+          final partner = (chat['partner'] as Map?)?.cast<String, dynamic>() ?? const {};
+          final partnerId = (partner['id'] as num?)?.toInt();
+          if (partnerId != null) directUserIds.add(partnerId);
+          chat['destination_type'] = kind == 'match' ? 'match' : 'direct';
+          add(chat);
+        }
+      }
+
+      try {
+        if (myId != null) {
+          final following = await ApiService().getUserFollowing(myId, limit: 100);
+          for (final user in following) {
+            final userId = (user['id'] as num?)?.toInt();
+            if (userId == null || userId == myId) continue;
+            if (directUserIds.contains(userId)) continue;
+            add({...user, 'destination_type': 'user', 'user_id': userId});
+          }
+        }
+      } catch (_) {}
+
+      try {
+        final friends = await ApiService().getFriends();
+        for (final raw in friends.whereType<Map>()) {
+          final user = Map<String, dynamic>.from(raw);
+          final userId = (user['id'] as num?)?.toInt();
+          if (userId == null) continue;
+          if (directUserIds.contains(userId)) continue;
+          add({...user, 'destination_type': 'user', 'user_id': userId});
+        }
+      } catch (_) {}
+
+      final sorted = byKey.values.toList()
+        ..sort((a, b) {
+          final ak = (a['destination_type'] ?? '').toString();
+          final bk = (b['destination_type'] ?? '').toString();
+          if (ak == bk) {
+            return _destName(a).toLowerCase().compareTo(_destName(b).toLowerCase());
+          }
+          if (ak == 'group') return -1;
+          if (bk == 'group') return 1;
+          return ak.compareTo(bk);
+        });
+
       if (!mounted) return;
-      setState(() { _matches = data.take(5).toList(); _loadingMatches = false; });
+      setState(() { _destinations = sorted; _loading = false; });
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _loadingMatches = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  void _snack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg, style: GoogleFonts.outfit(fontSize: 13)),
-      backgroundColor: AppColors.surface,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      duration: const Duration(seconds: 2),
-    ));
+  String _destName(Map<String, dynamic> chat) {
+    final kind = (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct').toString();
+    if (kind == 'group') {
+      final partner = (chat['partner'] as Map?)?.cast<String, dynamic>() ?? const {};
+      final title = (chat['title'] ?? chat['name'] ?? chat['display_name'] ??
+          partner['display_name'] ?? partner['name'] ?? '').toString().trim();
+      return title.isNotEmpty ? title : 'Group chat';
+    }
+    if (kind == 'user') {
+      return (chat['display_name'] ?? chat['first_name'] ?? chat['username'] ?? 'User').toString();
+    }
+    final partner = (chat['partner'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return (partner['display_name'] ?? partner['first_name'] ?? partner['username'] ?? 'Chat').toString();
   }
 
-  Future<void> _copyLink() async {
-    final title = widget.track?['title']?.toString() ??
-        widget.track?['trackName']?.toString() ?? 'Unknown';
-    final artist = widget.track?['artist']?.toString() ??
-        widget.track?['artistName']?.toString() ?? '';
-    final text = artist.isNotEmpty ? '$title by $artist · MoodWave' : '$title · MoodWave';
-    await Clipboard.setData(ClipboardData(text: text));
-    _snack('Copied to clipboard');
+  String _destSubtitle(Map<String, dynamic> chat) {
+    final kind = (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct').toString();
+    if (kind == 'group') {
+      final memberCount = (chat['member_count'] as num?)?.toInt() ?? 0;
+      return memberCount > 0 ? '$memberCount members' : 'Group chat';
+    }
+    if (kind == 'user') {
+      final username = (chat['username'] ?? '').toString().trim();
+      return username.isNotEmpty ? '@$username' : 'Following';
+    }
+    final partner = (chat['partner'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final username = (partner['username'] ?? '').toString().trim();
+    return username.isNotEmpty ? '@$username' : 'Direct chat';
   }
 
-  Future<void> _systemShare() async {
-    final title = widget.track?['title']?.toString() ??
-        widget.track?['trackName']?.toString() ??
-        'Unknown';
-    final artist = widget.track?['artist']?.toString() ??
-        widget.track?['artistName']?.toString() ??
-        '';
-    final text =
-        artist.isNotEmpty ? 'Listen to $title by $artist on MoodWave' : 'Listen to $title on MoodWave';
-    await Share.share(text, subject: 'MoodWave track');
+  String _destAvatar(Map<String, dynamic> chat) {
+    final kind = (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct').toString();
+    if (kind == 'user') return buildMediaUrl((chat['avatar_url'] ?? '').toString());
+    final partner = (chat['partner'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return buildMediaUrl((partner['avatar_url'] ?? chat['avatar_url'] ?? '').toString());
   }
 
-  Future<void> _sendToMatch(int matchId, String name) async {
-    final title = widget.track?['title']?.toString() ??
-        widget.track?['trackName']?.toString() ?? 'Unknown';
-    final artist = widget.track?['artist']?.toString() ??
-        widget.track?['artistName']?.toString() ?? '';
-    final msg = artist.isNotEmpty
-        ? '🎵 Check out: $title by $artist'
-        : '🎵 Check out: $title';
+  Future<void> _sendTo(Map<String, dynamic> chat) async {
+    final key = _destKey(chat);
+    if (_sendingKeys.contains(key) || _sentKeys.contains(key)) return;
+    setState(() => _sendingKeys.add(key));
     try {
-      await ApiService().sendTextMessage(matchId, msg);
+      final kind = (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct').toString();
+      final matchId = (chat['match_id'] as num?)?.toInt();
+      final chatId = (chat['chat_id'] as num?)?.toInt();
+      final groupChatId = (chat['group_chat_id'] as num?)?.toInt();
+
+      if (kind == 'match' && matchId != null) {
+        await ApiService().sendTrackInChat(matchId,
+            trackId: _trackId, title: _trackTitle, artist: _trackArtist,
+            coverUrl: _trackCover, previewUrl: _trackPreview);
+      } else if (kind == 'group' && groupChatId != null) {
+        await ApiService().sendTrackInGroupChat(groupChatId,
+            trackId: _trackId, title: _trackTitle, artist: _trackArtist,
+            coverUrl: _trackCover, previewUrl: _trackPreview);
+      } else if (kind == 'direct' && chatId != null) {
+        await ApiService().sendTrackInDirectChat(chatId,
+            trackId: _trackId, title: _trackTitle, artist: _trackArtist,
+            coverUrl: _trackCover, previewUrl: _trackPreview);
+      } else if (kind == 'user') {
+        final userId = ((chat['user_id'] ?? chat['id']) as num?)?.toInt();
+        if (userId == null) throw StateError('Missing user id');
+        final started = await ApiService().startDirectChat(userId);
+        final newChatId = (started['chat_id'] as num?)?.toInt();
+        if (newChatId == null) throw StateError('No chat_id');
+        await ApiService().sendTrackInDirectChat(newChatId,
+            trackId: _trackId, title: _trackTitle, artist: _trackArtist,
+            coverUrl: _trackCover, previewUrl: _trackPreview);
+      }
+
       if (!mounted) return;
-      _snack('Sent to $name!');
-      Navigator.of(context).pop();
+      setState(() { _sendingKeys.remove(key); _sentKeys.add(key); });
     } catch (_) {
       if (!mounted) return;
-      _snack('Could not send. Try again.');
+      setState(() => _sendingKeys.remove(key));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Could not send. Try again.',
+            style: GoogleFonts.outfit(fontSize: 13)),
+        backgroundColor: AppColors.surface,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 2),
+      ));
     }
-  }
-
-  void _showMatchPicker() {
-    if (_loadingMatches) { _snack('Loading matches…'); return; }
-    if (_matches.isEmpty) { _snack('No matches yet. Match with someone first!'); return; }
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        decoration: BoxDecoration(
-          color: AppColors.bg2,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-          border: Border.all(color: AppColors.border2),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Center(child: Container(
-              width: 40, height: 4, margin: const EdgeInsets.symmetric(vertical: 14),
-              decoration: BoxDecoration(color: AppColors.surface3, borderRadius: BorderRadius.circular(100)))),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-              child: Text('Send to…', style: GoogleFonts.outfit(
-                  fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.text)),
-            ),
-            ..._matches.map((m) {
-              final match = m as Map<String, dynamic>;
-              final matchId = match['match_id'] as int? ?? match['id'] as int? ?? 0;
-              final partner = match['partner'] as Map? ?? {};
-              final name = (partner['display_name'] ?? partner['first_name'] ?? partner['username'] ?? 'User').toString();
-              final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
-              return GestureDetector(
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _sendToMatch(matchId, name);
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  child: Row(children: [
-                    Container(
-                      width: 44, height: 44,
-                      decoration: BoxDecoration(gradient: AppColors.gradMixed, shape: BoxShape.circle),
-                      child: Center(child: Text(initial,
-                          style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(child: Text(name, style: GoogleFonts.outfit(
-                        fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.text))),
-                    const Icon(Icons.send_rounded, color: AppColors.purpleLight, size: 18),
-                  ]),
-                ),
-              );
-            }),
-            const SizedBox(height: 20),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.track?['title']?.toString() ??
-        widget.track?['trackName']?.toString() ?? 'Unknown';
-    final artist = widget.track?['artist']?.toString() ??
-        widget.track?['artistName']?.toString() ?? '';
-    final coverUrl = widget.track?['cover_url']?.toString() ??
-        widget.track?['artworkUrl100']?.toString();
-
-    final matchNames = _matches.take(3).map((m) {
-      final partner = (m as Map)['partner'] as Map? ?? {};
-      return (partner['display_name'] ?? partner['first_name'] ?? 'User').toString();
-    }).join(', ');
-    final matchSub = _loadingMatches
-        ? 'Loading…'
-        : _matches.isEmpty
-            ? 'No matches yet'
-            : matchNames + (_matches.length > 3 ? ' and more' : '');
-
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: AppColors.bg2,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-        border: Border.all(color: AppColors.border2),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.82),
+      padding: EdgeInsets.fromLTRB(18, 0, 18,
+          18 + MediaQuery.of(context).viewInsets.bottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Center(child: Container(
             width: 40, height: 4, margin: const EdgeInsets.symmetric(vertical: 14),
-            decoration: BoxDecoration(color: AppColors.surface3, borderRadius: BorderRadius.circular(100)))),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-            child: Text('Share Track', style: GoogleFonts.outfit(
-                fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.text)),
-          ),
-          // Preview card
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF1a0533), Color(0xFF7c3aed), Color(0xFF0d1a3d)]),
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: AppColors.border2),
-              ),
-              padding: const EdgeInsets.all(20),
-              child: Row(children: [
-                Container(width: 68, height: 68,
-                  decoration: BoxDecoration(gradient: AppColors.gradMixed,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 20)]),
-                  child: coverUrl != null
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: Image.network(coverUrl, fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) =>
-                                  const Center(child: Text('🎵', style: TextStyle(fontSize: 32)))))
-                      : const Center(child: Text('🎵', style: TextStyle(fontSize: 32)))),
-                const SizedBox(width: 14),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.outfit(
-                      fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.01 * 18)),
-                  if (artist.isNotEmpty) Text(artist, maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.outfit(
-                      fontSize: 14, color: const Color(0xB3C8B4FF))),
-                  const SizedBox(height: 10),
-                  Container(height: 3, decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(100)),
-                    child: FractionallySizedBox(widthFactor: 0.38, alignment: Alignment.centerLeft,
-                      child: Container(decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [AppColors.purple, AppColors.pink]),
-                        borderRadius: BorderRadius.circular(100))))),
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    const Icon(Icons.graphic_eq_rounded, size: 10, color: Colors.white54),
-                    const SizedBox(width: 4),
-                    Text('MoodWave', style: GoogleFonts.outfit(
-                        fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white54)),
-                  ]),
-                ])),
-              ]),
+            decoration: BoxDecoration(
+              color: AppColors.surface3, borderRadius: BorderRadius.circular(100)))),
+          Text('Share Track', style: GoogleFonts.outfit(
+              fontSize: 20, fontWeight: FontWeight.w900, color: AppColors.text)),
+          const SizedBox(height: 14),
+          // Track preview
+          Container(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                  colors: [Color(0xFF1a0533), Color(0xFF7c3aed), Color(0xFF0d1a3d)]),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: AppColors.border2),
             ),
-          ),
-          // Apps
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-            child: Text('SHARE TO', style: GoogleFonts.outfit(
-                fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.text3, letterSpacing: 0.1)),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-            child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-              _ShareApp('↗', 'System', const LinearGradient(colors: [AppColors.purple, AppColors.pink]),
-                  onTap: _systemShare),
-              _ShareApp('💌', 'In Chat', null, onTap: _showMatchPicker),
-              _ShareApp('📋', 'Copy', const LinearGradient(colors: [Color(0xFF334155), Color(0xFF64748b)]),
-                  onTap: _copyLink),
-            ]),
-          ),
-          // Actions
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+            padding: const EdgeInsets.all(14),
             child: Row(children: [
-              Expanded(child: GestureDetector(
-                onTap: _copyLink,
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: AppColors.glass,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.border)),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    const Icon(Icons.copy_rounded, size: 16, color: AppColors.text),
-                    const SizedBox(width: 8),
-                    Text('Copy Link', style: GoogleFonts.outfit(
-                        fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.text)),
-                  ])))),
-              const SizedBox(width: 10),
-              Expanded(child: GestureDetector(
-                onTap: () => _snack('Story sharing coming soon'),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(gradient: AppColors.gradPurple,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: [BoxShadow(color: AppColors.purpleDark.withOpacity(0.35), blurRadius: 16)]),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    const Icon(Icons.ios_share_rounded, size: 16, color: Colors.white),
-                    const SizedBox(width: 8),
-                    Text('Share to Story', style: GoogleFonts.outfit(
-                        fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
-                  ])))),
+              Container(
+                width: 54, height: 54,
+                decoration: BoxDecoration(
+                  gradient: AppColors.gradMixed,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [BoxShadow(
+                      color: Colors.black.withOpacity(0.35), blurRadius: 14)]),
+                child: _trackCover != null
+                    ? ClipRRect(borderRadius: BorderRadius.circular(12),
+                        child: Image.network(_trackCover!, fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Center(
+                                child: Text('🎵', style: TextStyle(fontSize: 24)))))
+                    : const Center(child: Text('🎵', style: TextStyle(fontSize: 24)))),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(_trackTitle, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                        fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+                if (_trackArtist.isNotEmpty) Text(_trackArtist,
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                        fontSize: 13, color: const Color(0xB3C8B4FF))),
+                const SizedBox(height: 6),
+                Row(children: [
+                  const Icon(Icons.graphic_eq_rounded, size: 10, color: Colors.white54),
+                  const SizedBox(width: 4),
+                  Text('MoodWave', style: GoogleFonts.outfit(
+                      fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white54)),
+                ]),
+              ])),
             ]),
           ),
-          // Send to match
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
-            child: GestureDetector(
-              onTap: _showMatchPicker,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: AppColors.purple.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.purple.withOpacity(0.15)),
-                ),
-                child: Row(children: [
-                  const Icon(Icons.favorite_rounded, color: AppColors.purpleLight, size: 20),
-                  const SizedBox(width: 10),
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Send to Match', style: GoogleFonts.outfit(
-                        fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.purpleLight)),
-                    Text(matchSub, style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-                  ])),
-                  const Icon(Icons.chevron_right_rounded, color: AppColors.text3),
-                ]),
+          const SizedBox(height: 14),
+          // System share
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                  gradient: AppColors.gradPurple,
+                  borderRadius: BorderRadius.circular(14)),
+              child: const Icon(Icons.ios_share_rounded,
+                  color: Colors.white, size: 18)),
+            title: Text('System share', style: GoogleFonts.outfit(
+                fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.text)),
+            subtitle: Text('Open device share menu', style: GoogleFonts.outfit(
+                fontSize: 12, color: AppColors.text3)),
+            onTap: () async {
+              Navigator.pop(context);
+              final text = _trackArtist.isNotEmpty
+                  ? 'Listen to $_trackTitle by $_trackArtist on MoodWave'
+                  : 'Listen to $_trackTitle on MoodWave';
+              await Share.share(text, subject: 'MoodWave track');
+            },
+          ),
+          const SizedBox(height: 8),
+          Text('People & groups', style: GoogleFonts.outfit(
+              fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.text2)),
+          const SizedBox(height: 8),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(child: CircularProgressIndicator(
+                  strokeWidth: 2, color: AppColors.purpleLight)))
+          else if (_destinations.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Text('No contacts yet', style: GoogleFonts.outfit(
+                  fontSize: 13, color: AppColors.text3)))
+          else
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                children: _destinations.map((dest) {
+                  final key = _destKey(dest);
+                  final name = _destName(dest);
+                  final subtitle = _destSubtitle(dest);
+                  final avatarUrl = _destAvatar(dest);
+                  final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
+                  final sending = _sendingKeys.contains(key);
+                  final sent = _sentKeys.contains(key);
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.bg,
+                      borderRadius: BorderRadius.circular(14)),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    child: Row(children: [
+                      Container(
+                        width: 38, height: 38,
+                        clipBehavior: Clip.antiAlias,
+                        decoration: BoxDecoration(
+                          gradient: avatarUrl.isEmpty
+                              ? const LinearGradient(
+                                  colors: [Color(0xFF7c3aed), Color(0xFFec4899)])
+                              : null,
+                          color: avatarUrl.isNotEmpty ? AppColors.glass : null,
+                          shape: BoxShape.circle),
+                        child: avatarUrl.isNotEmpty
+                            ? CachedNetworkImage(
+                                imageUrl: avatarUrl, fit: BoxFit.cover,
+                                errorWidget: (_, __, ___) => Center(
+                                    child: Text(initial,
+                                        style: GoogleFonts.outfit(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white))))
+                            : Center(child: Text(initial,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 14, fontWeight: FontWeight.w700,
+                                    color: Colors.white)))),
+                      const SizedBox(width: 10),
+                      Expanded(child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Text(name, style: GoogleFonts.outfit(
+                            fontSize: 14, fontWeight: FontWeight.w700,
+                            color: AppColors.text)),
+                        Text(subtitle, style: GoogleFonts.outfit(
+                            fontSize: 12, color: AppColors.text3)),
+                      ])),
+                      TextButton(
+                        onPressed: sent || sending ? null : () => _sendTo(dest),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          if (sending)
+                            const SizedBox(width: 12, height: 12,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.purpleLight))
+                          else if (sent)
+                            const Icon(Icons.check_rounded,
+                                size: 15, color: AppColors.green),
+                          if (sending || sent) const SizedBox(width: 5),
+                          Text(sent ? 'Sent' : 'Send',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 13, fontWeight: FontWeight.w800,
+                                  color: sent
+                                      ? AppColors.green
+                                      : AppColors.purpleLight)),
+                        ]),
+                      ),
+                    ]),
+                  );
+                }).toList(),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -752,29 +857,4 @@ void showTrackMenu(
       ),
     ),
   );
-}
-
-class _ShareApp extends StatelessWidget {
-  final String emoji, name;
-  final LinearGradient? gradient;
-  final VoidCallback? onTap;
-  const _ShareApp(this.emoji, this.name, this.gradient, {this.onTap});
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(children: [
-        Container(width: 56, height: 56,
-          decoration: BoxDecoration(
-            gradient: gradient,
-            color: gradient == null ? AppColors.surface2 : null,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Center(child: Text(emoji, style: const TextStyle(fontSize: 26)))),
-        const SizedBox(height: 7),
-        Text(name, style: GoogleFonts.outfit(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.text2)),
-      ]),
-    );
-  }
 }

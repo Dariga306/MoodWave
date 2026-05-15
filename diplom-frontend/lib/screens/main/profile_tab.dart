@@ -12,6 +12,7 @@ import '../extra_screens.dart';
 import '../notifications_screen.dart';
 import '../settings_screen.dart';
 import '../stats_screen.dart';
+import '../user_profile_screen.dart';
 
 class ProfileTab extends StatefulWidget {
   const ProfileTab({super.key});
@@ -187,11 +188,12 @@ class _ProfileTabState extends State<ProfileTab> {
                       children: [
                         if (bannerUrl.isNotEmpty)
                           Positioned.fill(
-                            child: CachedNetworkImage(
-                              imageUrl: bannerUrl,
+                            child: Image.network(
+                              bannerUrl,
                               fit: BoxFit.cover,
-                              placeholder: (_, __) => const SizedBox(),
-                              errorWidget: (_, __, ___) => const SizedBox(),
+                              gaplessPlayback: true,
+                              errorBuilder: (_, __, ___) =>
+                                  const SizedBox.shrink(),
                             ),
                           ),
                         Center(
@@ -272,19 +274,13 @@ class _ProfileTabState extends State<ProfileTab> {
                             ),
                             child: avatarUrl.isNotEmpty
                                 ? ClipOval(
-                                    child: CachedNetworkImage(
-                                      imageUrl: avatarUrl,
+                                    child: Image.network(
+                                      avatarUrl,
                                       width: 82,
                                       height: 82,
                                       fit: BoxFit.cover,
-                                      placeholder: (_, __) => Center(
-                                        child: Text(initial,
-                                            style: GoogleFonts.outfit(
-                                                fontSize: 32,
-                                                fontWeight: FontWeight.w800,
-                                                color: Colors.white)),
-                                      ),
-                                      errorWidget: (_, __, ___) => Center(
+                                      gaplessPlayback: true,
+                                      errorBuilder: (_, __, ___) => Center(
                                         child: Text(initial,
                                             style: GoogleFonts.outfit(
                                                 fontSize: 32,
@@ -610,52 +606,82 @@ class _ConnectionsScreenState extends State<_ConnectionsScreen> {
   }
 
   Widget _userRow(Map<String, dynamic> u) {
-    final name = (u['display_name'] ?? u['username'] ?? '').toString();
+    final name = (u['display_name'] ?? u['first_name'] ?? u['username'] ?? '')
+        .toString();
     final uname = (u['username'] ?? '').toString();
-    final avatar = (u['avatar_url'] ?? '').toString();
+    final avatar = buildMediaUrl(
+      u['avatar_url']?.toString(),
+      version: u['updated_at'],
+    );
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      child: Row(children: [
-        Container(
-          width: 50,
-          height: 50,
-          decoration: const BoxDecoration(
-              shape: BoxShape.circle, gradient: AppColors.gradMixed),
-          child: ClipOval(
-            child: avatar.isNotEmpty
-                ? CachedNetworkImage(
-                    imageUrl: avatar,
-                    fit: BoxFit.cover,
-                    errorWidget: (_, __, ___) => Center(
+    final rawId =
+        u['id'] ?? u['user_id'] ?? u['follower_id'] ?? u['following_id'];
+    final userId =
+        rawId is num ? rawId.toInt() : int.tryParse(rawId?.toString() ?? '');
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: userId == null
+            ? null
+            : () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => UserProfileScreen(
+                      userId: userId,
+                      initialUser: {
+                        ...u,
+                        'id': userId,
+                      },
+                    ),
+                  ),
+                ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          child: Row(children: [
+            Container(
+              width: 50,
+              height: 50,
+              decoration: const BoxDecoration(
+                  shape: BoxShape.circle, gradient: AppColors.gradMixed),
+              child: ClipOval(
+                child: avatar.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: avatar,
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) => Center(
+                            child: Text(initial,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white))))
+                    : Center(
                         child: Text(initial,
                             style: GoogleFonts.outfit(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w700,
-                                color: Colors.white))))
-                : Center(
-                    child: Text(initial,
+                                color: Colors.white))),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(name,
+                      style: GoogleFonts.outfit(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.text)),
+                  if (uname.isNotEmpty)
+                    Text('@$uname',
                         style: GoogleFonts.outfit(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white))),
-          ),
+                            fontSize: 12, color: AppColors.text3)),
+                ])),
+            const Icon(Icons.chevron_right_rounded,
+                color: AppColors.text3, size: 20),
+          ]),
         ),
-        const SizedBox(width: 14),
-        Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(name,
-              style: GoogleFonts.outfit(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.text)),
-          if (uname.isNotEmpty)
-            Text('@$uname',
-                style:
-                    GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-        ])),
-      ]),
+      ),
     );
   }
 

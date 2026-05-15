@@ -16,6 +16,8 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
   bool _showActivity = true;
   bool _showFollowers = true;
   bool _showRecentlyPlayed = true;
+  bool _matchingEnabled = true;
+  bool _showMatchCity = true;
   bool _loading = true;
   bool _saving = false;
 
@@ -34,6 +36,8 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
         _showActivity = data['show_activity'] as bool? ?? true;
         _showFollowers = data['show_followers'] as bool? ?? true;
         _showRecentlyPlayed = data['show_recently_played'] as bool? ?? true;
+        _matchingEnabled = data['matching_enabled'] as bool? ?? true;
+        _showMatchCity = data['show_match_city'] as bool? ?? true;
         _loading = false;
       });
     } catch (_) {
@@ -111,6 +115,30 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
                   onChanged: (v) {
                     setState(() => _showRecentlyPlayed = v);
                     _save('show_recently_played', v);
+                  },
+                ),
+                const SizedBox(height: 20),
+                _SectionLabel('Music Match'),
+                _PrivacyTile(
+                  emoji: '💫',
+                  title: 'Appear in Music Match',
+                  subtitle: 'Let others discover your profile in matching',
+                  value: _matchingEnabled,
+                  saving: _saving,
+                  onChanged: (v) {
+                    setState(() => _matchingEnabled = v);
+                    _save('matching_enabled', v);
+                  },
+                ),
+                _PrivacyTile(
+                  emoji: '📍',
+                  title: 'Show City in Matching',
+                  subtitle: 'Display your city on Music Match cards',
+                  value: _showMatchCity,
+                  saving: _saving,
+                  onChanged: (v) {
+                    setState(() => _showMatchCity = v);
+                    _save('show_match_city', v);
                   },
                 ),
                 const SizedBox(height: 20),

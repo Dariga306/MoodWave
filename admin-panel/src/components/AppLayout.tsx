@@ -1,16 +1,14 @@
 import { useState } from 'react'
-import { Layout, Menu, Button, Avatar, Typography, Tooltip } from 'antd'
+import { Outlet, useNavigate, useLocation } from 'react-router-dom'
+import { Tooltip, Badge } from 'antd'
 import {
   DashboardOutlined, UserOutlined, SoundOutlined, UnorderedListOutlined,
   HeartOutlined, BarChartOutlined, SettingOutlined, LogoutOutlined,
   WarningOutlined, CustomerServiceOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
 } from '@ant-design/icons'
-import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
-const { Sider, Content } = Layout
-
-const menuItems = [
+const NAV = [
   { key: '/',          icon: <DashboardOutlined />,      label: 'Dashboard' },
   { key: '/users',     icon: <UserOutlined />,            label: 'Users' },
   { key: '/tracks',    icon: <SoundOutlined />,           label: 'Tracks' },
@@ -22,140 +20,227 @@ const menuItems = [
   { key: '/system',    icon: <SettingOutlined />,         label: 'System' },
 ]
 
+const SIDEBAR_W = 230
+const SIDEBAR_COLLAPSED = 64
+
 export default function AppLayout() {
-  const navigate   = useNavigate()
-  const location   = useLocation()
+  const navigate              = useNavigate()
+  const location              = useLocation()
   const { logout, adminEmail } = useAuth()
   const [collapsed, setCollapsed] = useState(false)
 
-  const currentLabel = menuItems.find(i => i.key === location.pathname)?.label || 'Dashboard'
+  const active = NAV.find(n => n.key === location.pathname)?.label ?? 'Dashboard'
+  const w      = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_W
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#0a0a12' }}>
-      <Sider
-        width={220}
-        collapsed={collapsed}
-        trigger={null}
-        style={{
-          background: 'linear-gradient(180deg, #12082e 0%, #0d0818 60%, #080c18 100%)',
-          borderRight: '1px solid rgba(124,58,237,0.12)',
-          position: 'fixed', height: '100vh', left: 0, top: 0, zIndex: 100,
-          display: 'flex', flexDirection: 'column',
-        }}
-      >
+    <div style={{ display: 'flex', minHeight: '100vh', background: '#07070e', fontFamily: "'Inter', sans-serif" }}>
+      {/* ── Sidebar ─────────────────────────────────────────────────── */}
+      <aside style={{
+        width: w,
+        minWidth: w,
+        height: '100vh',
+        position: 'fixed',
+        top: 0, left: 0,
+        zIndex: 100,
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'linear-gradient(180deg, #110828 0%, #0b0618 55%, #070710 100%)',
+        borderRight: '1px solid rgba(124,58,237,0.18)',
+        transition: 'width 0.22s ease',
+        overflow: 'hidden',
+      }}>
         {/* Logo */}
         <div style={{
-          padding: collapsed ? '16px 0' : '16px 20px',
-          display: 'flex', alignItems: 'center', gap: 10,
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
-          marginBottom: 6,
+          height: 60,
+          display: 'flex',
+          alignItems: 'center',
           justifyContent: collapsed ? 'center' : 'flex-start',
+          padding: collapsed ? 0 : '0 18px',
+          borderBottom: '1px solid rgba(255,255,255,0.05)',
+          flexShrink: 0,
+          gap: 12,
         }}>
           <div style={{
-            width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-            background: 'linear-gradient(135deg, #7c3aed, #06b6d4)',
+            width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+            background: 'linear-gradient(135deg, #7c3aed, #a855f7)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 18, boxShadow: '0 0 20px rgba(124,58,237,0.5)',
+            boxShadow: '0 0 18px rgba(124,58,237,0.6)',
           }}>
-            🎵
+            <svg width="18" height="14" viewBox="0 0 24 18" fill="none">
+              <rect x="0"  y="6"  width="3" height="6"  rx="1.5" fill="white"/>
+              <rect x="4"  y="2"  width="3" height="14" rx="1.5" fill="white"/>
+              <rect x="8"  y="0"  width="3" height="18" rx="1.5" fill="white"/>
+              <rect x="12" y="3"  width="3" height="12" rx="1.5" fill="white"/>
+              <rect x="16" y="5"  width="3" height="8"  rx="1.5" fill="white"/>
+              <rect x="20" y="7"  width="3" height="4"  rx="1.5" fill="white"/>
+            </svg>
           </div>
           {!collapsed && (
-            <div>
-              <div style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 15, lineHeight: 1.2, letterSpacing: '-0.3px' }}>
+            <div style={{ overflow: 'hidden' }}>
+              <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.3px', lineHeight: 1.2,
+                background: 'linear-gradient(90deg, #e2e8f0, #a78bfa)',
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+              }}>
                 MoodWave
               </div>
-              <div style={{ color: '#7c3aed', fontSize: 10, letterSpacing: 1.5, textTransform: 'uppercase' as const }}>
-                Admin
+              <div style={{ fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', color: '#7c3aed', lineHeight: 1.4 }}>
+                Admin Panel
               </div>
             </div>
           )}
         </div>
 
-        {/* Navigation */}
-        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '4px 0' }}>
-          <Menu
-            theme="dark"
-            mode="inline"
-            selectedKeys={[location.pathname]}
-            items={menuItems}
-            onClick={({ key }) => navigate(key)}
-            style={{ background: 'transparent', border: 'none' }}
-          />
-        </div>
+        {/* Nav */}
+        <nav style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
+          {NAV.map(item => {
+            const isActive = location.pathname === item.key
+            return (
+              <Tooltip key={item.key} title={collapsed ? item.label : ''} placement="right">
+                <div
+                  onClick={() => navigate(item.key)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 11,
+                    padding: collapsed ? '11px 0' : '11px 16px',
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    margin: '2px 8px',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                    position: 'relative',
+                    background: isActive ? 'rgba(124,58,237,0.18)' : 'transparent',
+                    border: `1px solid ${isActive ? 'rgba(124,58,237,0.35)' : 'transparent'}`,
+                    transition: 'all 0.15s ease',
+                    color: isActive ? '#c4b5fd' : '#64748b',
+                  }}
+                  onMouseEnter={e => {
+                    if (!isActive) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)'
+                  }}
+                  onMouseLeave={e => {
+                    if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'
+                  }}
+                >
+                  {isActive && (
+                    <div style={{
+                      position: 'absolute', left: -8, top: '50%', transform: 'translateY(-50%)',
+                      width: 3, height: 20, borderRadius: 2,
+                      background: 'linear-gradient(180deg, #a855f7, #7c3aed)',
+                      boxShadow: '0 0 8px #7c3aed',
+                    }} />
+                  )}
+                  <span style={{ fontSize: 16, display: 'flex', flexShrink: 0 }}>
+                    {item.icon}
+                  </span>
+                  {!collapsed && (
+                    <span style={{ fontSize: 13, fontWeight: isActive ? 600 : 400, whiteSpace: 'nowrap' }}>
+                      {item.label}
+                    </span>
+                  )}
+                </div>
+              </Tooltip>
+            )
+          })}
+        </nav>
 
-        {/* Bottom bar */}
+        {/* Bottom */}
         <div style={{
-          borderTop: '1px solid rgba(255,255,255,0.06)',
-          padding: collapsed ? '10px 0' : '10px 14px',
+          borderTop: '1px solid rgba(255,255,255,0.05)',
+          padding: collapsed ? '12px 0' : '12px 16px',
+          flexShrink: 0,
         }}>
           {!collapsed && adminEmail && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <Avatar size={26} style={{
-                background: 'linear-gradient(135deg, #7c3aed, #06b6d4)',
-                flexShrink: 0, fontSize: 11,
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              marginBottom: 10, overflow: 'hidden',
+            }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                background: 'linear-gradient(135deg, #7c3aed, #ec4899)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, color: '#fff', fontWeight: 700,
               }}>
                 {adminEmail[0].toUpperCase()}
-              </Avatar>
-              <Typography.Text style={{ color: '#64748b', fontSize: 11 }} ellipsis>
+              </div>
+              <span style={{ fontSize: 11, color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {adminEmail}
-              </Typography.Text>
+              </span>
             </div>
           )}
           <div style={{ display: 'flex', gap: 6, justifyContent: collapsed ? 'center' : 'flex-start' }}>
-            <Tooltip title={collapsed ? 'Expand sidebar' : 'Collapse'} placement="right">
-              <Button
-                type="text"
-                icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-                onClick={() => setCollapsed(c => !c)}
-                style={{ color: '#475569' }}
-                size="small"
-              />
+            <Tooltip title={collapsed ? 'Expand' : 'Collapse'} placement="right">
+              <button onClick={() => setCollapsed(c => !c)} style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 8, color: '#475569',
+                width: 30, height: 30, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 13, transition: 'all 0.15s',
+              }}>
+                {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              </button>
             </Tooltip>
             {!collapsed && (
               <Tooltip title="Sign out">
-                <Button
-                  type="text" icon={<LogoutOutlined />}
-                  onClick={logout}
-                  style={{ color: '#ef4444' }}
-                  size="small"
-                />
+                <button onClick={logout} style={{
+                  background: 'rgba(239,68,68,0.08)',
+                  border: '1px solid rgba(239,68,68,0.2)',
+                  borderRadius: 8, color: '#ef4444',
+                  width: 30, height: 30, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 13, transition: 'all 0.15s',
+                }}>
+                  <LogoutOutlined />
+                </button>
               </Tooltip>
             )}
           </div>
         </div>
-      </Sider>
+      </aside>
 
-      <Layout style={{
-        marginLeft: collapsed ? 80 : 220,
-        transition: 'margin-left 0.2s ease',
-        background: '#0a0a12',
+      {/* ── Main ────────────────────────────────────────────────────── */}
+      <div style={{
+        flex: 1,
+        marginLeft: w,
+        transition: 'margin-left 0.22s ease',
+        display: 'flex',
+        flexDirection: 'column',
         minHeight: '100vh',
       }}>
-        {/* Slim header */}
-        <div style={{
-          background: 'rgba(13,13,20,0.95)',
-          backdropFilter: 'blur(12px)',
-          padding: '0 24px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        {/* Header */}
+        <header style={{
+          height: 52,
+          background: 'rgba(7,7,14,0.9)',
+          backdropFilter: 'blur(20px)',
           borderBottom: '1px solid rgba(255,255,255,0.05)',
-          position: 'sticky', top: 0, zIndex: 99, height: 50,
+          position: 'sticky', top: 0, zIndex: 99,
+          display: 'flex', alignItems: 'center',
+          padding: '0 24px',
+          justifyContent: 'space-between',
         }}>
-          <Typography.Text style={{ color: '#e2e8f0', fontSize: 15, fontWeight: 600, letterSpacing: '-0.2px' }}>
-            {currentLabel}
-          </Typography.Text>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{
-              width: 7, height: 7, borderRadius: '50%',
-              background: '#10b981', boxShadow: '0 0 6px #10b981',
-            }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h1 style={{
+              margin: 0, fontSize: 16, fontWeight: 700,
+              letterSpacing: '-0.3px',
+              background: 'linear-gradient(90deg, #e2e8f0, #a78bfa)',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+            }}>
+              {active}
+            </h1>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Badge
+              status="processing"
+              style={{ '--ant-badge-processing-color': '#10b981' } as React.CSSProperties}
+            />
             <span style={{ color: '#475569', fontSize: 12 }}>Live</span>
           </div>
-        </div>
+        </header>
 
-        <Content style={{ margin: '20px 24px', minHeight: 360 }}>
+        {/* Content */}
+        <main style={{ flex: 1, padding: '20px 24px' }}>
           <Outlet />
-        </Content>
-      </Layout>
-    </Layout>
+        </main>
+      </div>
+    </div>
   )
 }

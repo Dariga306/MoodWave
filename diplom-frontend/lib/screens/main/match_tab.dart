@@ -29,7 +29,7 @@ class _MatchTabState extends State<MatchTab> {
       final data = await ApiService().getMatchCandidates();
       if (!mounted) return;
       setState(() {
-        _candidates = data;
+        _candidates = (data['candidates'] as List?) ?? [];
         _currentIndex = 0;
         _loading = false;
       });

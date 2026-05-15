@@ -11,8 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_current_user_optional, get_db
 from app.models.user import SearchHistory, User
+from app.services import deezer as deezer_service
 from app.services import spotify as music_service
 from app.services.search_service import (
+    SEARCH_HISTORY_MAX,
     get_trending_searches,
     search_playlists_db,
     search_tracks_deezer,
@@ -24,16 +26,6 @@ from app.services.security import get_blocked_ids_for_user
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_BANNED_SUGGESTION_TERMS = (
-    "official audio",
-    "official song",
-    "official songs",
-    "lyrics",
-    "lyric",
-    "audio",
-)
-
-
 class SearchHistoryCreateRequest(BaseModel):
     query: str
     result_type: str = "track"
@@ -42,29 +34,47 @@ class SearchHistoryCreateRequest(BaseModel):
     result_cover: str | None = None
 
 
+# Блокируем только YouTube-style suffix'ы
+_BANNED_SUGGESTION_SUFFIXES = (
+    "(official audio)",
+    " - audio",
+    "(official song)",
+    "(official songs)",
+    " - official audio",
+)
+
+
 def _sanitize_suggestion(value: str) -> str:
     text = value.strip()
-    lowered = text.lower()
     if not text:
         return ""
-    if any(term in lowered for term in _BANNED_SUGGESTION_TERMS):
-        return ""
+
+    lowered = text.lower().strip()
+
+    # Проверяем только конец строки (suffix)
+    for suffix in _BANNED_SUGGESTION_SUFFIXES:
+        if lowered.endswith(suffix):
+            return ""
+
     return text
 
-
 # ---------------------------------------------------------------------------
-# GET /search  — global search (tracks + users + playlists)
+# GET /search  — global search (tracks + artists + albums + users + playlists)
 # ---------------------------------------------------------------------------
 
 @router.get(
     "",
     summary="Global search",
-    description="Searches tracks, users, and playlists in one request and returns trending queries when the search is empty.",
+    description=(
+        "Searches tracks, artists, albums, users, and playlists in one request. "
+        "Returns trending queries when the search is empty. "
+        "Use type= to filter: all | tracks | artists | albums | users | playlists."
+    ),
 )
 @router.get(
     "/",
     summary="Global search",
-    description="Searches tracks, users, and playlists in one request and returns trending queries when the search is empty.",
+    include_in_schema=False,
 )
 async def global_search(
     q: str = Query(default=""),
@@ -79,22 +89,33 @@ async def global_search(
 
     if len(query) == 0:
         trending = await get_trending_searches(redis)
-        return {"tracks": [], "users": [], "playlists": [], "trending": trending}
+        return {
+            "tracks": [],
+            "artists": [],
+            "albums": [],
+            "users": [],
+            "playlists": [],
+            "trending": trending,
+        }
 
     await track_search_query(query, redis)
 
     requested_type = type.strip().lower() or "all"
-    # For single-character queries only search tracks to avoid noise
+
+    # Для однобуквенных запросов ищем только треки — меньше шума
     if len(query) == 1:
         want_tracks = True
+        want_artists = False
+        want_albums = False
         want_users = False
         want_playlists = False
     else:
-        want_tracks = requested_type in ("all", "tracks")
-        want_users = requested_type in ("all", "users")
+        want_tracks   = requested_type in ("all", "tracks")
+        want_artists  = requested_type in ("all", "artists")
+        want_albums   = requested_type in ("all", "albums")
+        want_users    = requested_type in ("all", "users")
         want_playlists = requested_type in ("all", "playlists")
 
-    # Gather all searches in parallel
     blocked_ids = (
         await get_blocked_ids_for_user(db, current_user.id)
         if want_users and current_user is not None
@@ -110,6 +131,24 @@ async def global_search(
             logger.warning("Track search error: %s", exc)
             return []
 
+    async def _artists():
+        if not want_artists:
+            return []
+        try:
+            return await deezer_service.search_artists_list(query, limit=10)
+        except Exception as exc:
+            logger.warning("Artist search error: %s", exc)
+            return []
+
+    async def _albums():
+        if not want_albums:
+            return []
+        try:
+            return await deezer_service.search_albums(query, limit=10, redis=redis)
+        except Exception as exc:
+            logger.warning("Album search error: %s", exc)
+            return []
+
     async def _users():
         if not want_users or current_user is None:
             return []
@@ -120,9 +159,17 @@ async def global_search(
             return []
         return await search_playlists_db(query, db, limit=10)
 
-    tracks, users, playlists = await asyncio.gather(_tracks(), _users(), _playlists())
+    tracks, artists, albums, users, playlists = await asyncio.gather(
+        _tracks(), _artists(), _albums(), _users(), _playlists()
+    )
 
-    return {"tracks": tracks, "users": users, "playlists": playlists}
+    return {
+        "tracks": tracks,
+        "artists": artists,
+        "albums": albums,
+        "users": users,
+        "playlists": playlists,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +309,8 @@ async def get_search_history(
             select(SearchHistory)
             .where(SearchHistory.user_id == current_user.id)
             .order_by(desc(SearchHistory.created_at))
-            .limit(100)
+            # FIX: читаем ровно столько, сколько храним
+            .limit(SEARCH_HISTORY_MAX)
         )
     ).scalars().all()
 
@@ -319,12 +367,13 @@ async def save_search_history(
     db.add(item)
     await db.flush()
 
+    # FIX: trim-граница = SEARCH_HISTORY_MAX (было hardcoded 50, read-limit был 100)
     rows = (
         await db.execute(
             select(SearchHistory.id)
             .where(SearchHistory.user_id == current_user.id)
             .order_by(desc(SearchHistory.created_at))
-            .offset(50)
+            .offset(SEARCH_HISTORY_MAX)
         )
     ).scalars().all()
     if rows:

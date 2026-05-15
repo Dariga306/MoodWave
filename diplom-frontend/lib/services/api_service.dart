@@ -49,13 +49,14 @@ class ApiService {
   late final Dio _dio;
   final _storage = const FlutterSecureStorage();
   String? _cachedToken; // in-memory cache to avoid web storage race conditions
+  bool _refreshing = false;
 
   ApiService._internal() {
     _dio = Dio(BaseOptions(
       baseUrl: ApiService.baseUrl,
-      connectTimeout: const Duration(seconds: 35),
-      receiveTimeout: const Duration(seconds: 35),
-      sendTimeout: const Duration(seconds: 35),
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
+      sendTimeout: const Duration(seconds: 10),
       headers: {'Content-Type': 'application/json'},
     ));
 
@@ -69,13 +70,53 @@ class ApiService {
       },
       onError: (error, handler) async {
         final path = error.requestOptions.path;
-        if (error.response?.statusCode == 401 &&
-            (path.contains('/auth/me') || path.endsWith('/me'))) {
-          await clearTokens();
+        final is401 = error.response?.statusCode == 401;
+        // Don't retry the refresh endpoint itself to avoid infinite loops
+        final isRefreshPath = path.contains('/auth/refresh');
+        if (is401 && !isRefreshPath && !_refreshing) {
+          final refreshed = await _tryRefreshToken();
+          if (refreshed) {
+            // Retry original request with new token
+            final opts = error.requestOptions;
+            opts.headers['Authorization'] = 'Bearer $_cachedToken';
+            try {
+              final resp = await _dio.fetch(opts);
+              return handler.resolve(resp);
+            } catch (_) {}
+          } else {
+            await clearTokens();
+          }
         }
         handler.next(error);
       },
     ));
+  }
+
+  Future<bool> _tryRefreshToken() async {
+    if (_refreshing) return false;
+    _refreshing = true;
+    try {
+      String? refreshToken;
+      if (kIsWeb) {
+        refreshToken = await readWebToken('refresh_token');
+      }
+      refreshToken ??= await _storage.read(key: 'refresh_token');
+      if (refreshToken == null || refreshToken.isEmpty) return false;
+      final resp = await _dio.post(
+        '/auth/refresh',
+        data: {'refresh_token': refreshToken},
+        options: Options(headers: {}), // no auth header for refresh
+      );
+      final newAccess = resp.data['access_token']?.toString();
+      final newRefresh = resp.data['refresh_token']?.toString();
+      if (newAccess == null || newAccess.isEmpty) return false;
+      await saveTokens(newAccess, newRefresh ?? refreshToken);
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      _refreshing = false;
+    }
   }
 
   Future<String?> getToken() async {
@@ -943,7 +984,7 @@ class ApiService {
   Future<Map<String, dynamic>> getFriendsActivity() async {
     final resp = await _dio.get('/friends/activity');
     final data = Map<String, dynamic>.from(resp.data as Map);
-    for (final key in const ['live', 'recent']) {
+    for (final key in const ['live', 'recent', 'people']) {
       final items = data[key];
       if (items is! List) continue;
       data[key] = items.whereType<Map>().map((raw) {
@@ -1064,9 +1105,21 @@ class ApiService {
   }
 
   // Match
-  Future<List<dynamic>> getMatchCandidates() async {
-    final resp = await _dio.get('/matches/candidates');
-    return resp.data['candidates'] ?? [];
+  Future<Map<String, dynamic>> getMatchCandidates({
+    String? city,
+    bool onlyOnline = false,
+    bool onlyPublic = false,
+    bool excludeHiddenTaste = true,
+    int minSimilarity = 35,
+  }) async {
+    final resp = await _dio.get('/matches/candidates', queryParameters: {
+      if (city != null && city.trim().isNotEmpty) 'city': city.trim(),
+      'only_online': onlyOnline,
+      'only_public': onlyPublic,
+      'exclude_hidden_taste': excludeHiddenTaste,
+      'min_similarity': minSimilarity,
+    });
+    return Map<String, dynamic>.from(resp.data as Map);
   }
 
   Future<Map<String, dynamic>> decideMatch(int userId, String decision) async {

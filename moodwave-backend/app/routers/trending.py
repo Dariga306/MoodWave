@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -12,41 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_user, get_current_user_optional, get_db
 from app.models.music import ListeningHistory, TrackCache
 from app.models.user import User
+from app.services import deezer as deezer_service
 
 router = APIRouter()
 
 TRENDING_CACHE_TTL = 600  # 10 min
-
-
-async def _deezer_global_charts(limit: int = 20) -> list[dict]:
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.get(
-                "https://api.deezer.com/chart/0/tracks",
-                params={"limit": limit},
-            )
-        if resp.status_code == 200:
-            data = resp.json().get("data", [])
-            return [
-                {
-                    "track_id": f"deezer_{t['id']}",
-                    "title": t["title"],
-                    "artist": t["artist"]["name"],
-                    "artist_id": str(t["artist"]["id"]),
-                    "album": t["album"]["title"],
-                    "cover_url": t["album"].get("cover_xl") or t["album"].get("cover_medium"),
-                    "preview_url": t.get("preview"),
-                    "duration_ms": int(t.get("duration", 0)) * 1000,
-                    "play_count": 0,
-                    "growth_percent": 0,
-                    "badge": "HOT",
-                }
-                for t in data
-                if t.get("id")
-            ]
-    except Exception:
-        pass
-    return []
 
 
 @router.get(
@@ -63,14 +34,12 @@ async def get_trending_tracks(
 ):
     redis = request.app.state.redis
 
-    # Check city-specific trending first
     user_city = (
         city
         or (getattr(current_user, "city", None) if current_user else None)
         or ""
     ).lower().replace(" ", "_")
 
-    # All Redis calls wrapped — fall back to Deezer charts if Redis is down
     try:
         city_key = f"trending:city:{user_city}"
         city_count = await redis.zcard(city_key) if user_city else 0
@@ -80,7 +49,7 @@ async def get_trending_tracks(
         raw = []
 
     if not raw:
-        # Fallback to Deezer global charts
+        # FIX: используем shared deezer_service.get_chart_tracks вместо дубля
         try:
             cache_key = f"trending:deezer_fallback:{limit}"
             cached = await redis.get(cache_key)
@@ -88,7 +57,25 @@ async def get_trending_tracks(
                 return {"tracks": json.loads(cached), "based_on": "global_chart"}
         except Exception:
             cached = None
-        tracks = await _deezer_global_charts(limit)
+
+        deezer_tracks = await deezer_service.get_chart_tracks(limit)
+        # Нормализуем формат — используем track_id (как trending endpoint всегда делал)
+        tracks = [
+            {
+                "track_id": t["spotify_id"],
+                "title": t["title"],
+                "artist": t["artist"],
+                "artist_id": str(t.get("artist_id") or ""),
+                "album": t.get("album") or "",
+                "cover_url": t.get("cover_url"),
+                "preview_url": t.get("preview_url"),
+                "duration_ms": t.get("duration_ms") or 0,
+                "play_count": 0,
+                "growth_percent": 0,
+                "badge": "HOT",
+            }
+            for t in deezer_tracks
+        ]
         try:
             await redis.setex(cache_key, TRENDING_CACHE_TTL, json.dumps(tracks))
         except Exception:
@@ -98,14 +85,30 @@ async def get_trending_tracks(
     track_ids = [item[0] for item in raw]
     scores = {item[0]: item[1] for item in raw}
 
-    # Fetch track details from DB
+    # Fetch track details from DB (один запрос)
     result = await db.execute(
         select(TrackCache).where(TrackCache.spotify_id.in_(track_ids))
     )
     tracks_db = {t.spotify_id: t for t in result.scalars().all()}
 
-    # Yesterday's snapshot for growth calculation
     yesterday_key = f"trending:snapshot:{(datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y%m%d')}"
+
+    # FIX: Redis pipeline вместо N последовательных zscore вызовов
+    # Было: for track_id in track_ids: await redis.zscore(yesterday_key, track_id)
+    # → N отдельных round-trips к Redis
+    # Стало: один pipeline с N командами → один round-trip
+    try:
+        async with redis.pipeline() as pipe:
+            for tid in track_ids:
+                pipe.zscore(yesterday_key, tid)
+            yesterday_scores_raw = await pipe.execute()
+    except Exception:
+        yesterday_scores_raw = [None] * len(track_ids)
+
+    yesterday_scores = {
+        track_ids[i]: float(v) if v is not None else 0.0
+        for i, v in enumerate(yesterday_scores_raw)
+    }
 
     response_tracks = []
     for track_id in track_ids:
@@ -114,11 +117,8 @@ async def get_trending_tracks(
             continue
 
         current_score = scores.get(track_id, 0)
-        try:
-            yesterday_raw = await redis.zscore(yesterday_key, track_id)
-        except Exception:
-            yesterday_raw = None
-        yesterday_score = float(yesterday_raw) if yesterday_raw else 0
+        yesterday_score = yesterday_scores.get(track_id, 0)
+
         growth = 0
         if yesterday_score > 0:
             growth = round(((current_score - yesterday_score) / yesterday_score) * 100)
@@ -158,7 +158,6 @@ async def get_home_feed(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    import asyncio
     from app.routers.radio import STATION_CONFIG
 
     redis = request.app.state.redis
@@ -196,7 +195,6 @@ async def get_home_feed(
 
     async def _recommended_artists():
         try:
-            # Top artists from last 30 days
             cutoff = datetime.utcnow() - timedelta(days=30)
             rows = (
                 await db.execute(
@@ -220,7 +218,6 @@ async def get_home_feed(
             if not top_artists:
                 return []
 
-            # Search Deezer for similar artists
             artists_found = []
             seen_names = set(top_artists)
             for seed_artist in top_artists[:3]:
@@ -240,7 +237,6 @@ async def get_home_feed(
                                         or a.get("picture_big")
                                         or a.get("picture_medium")
                                     )
-                                    # filter out the generic Deezer placeholder
                                     if pic and "default" in pic:
                                         pic = None
                                     artists_found.append({

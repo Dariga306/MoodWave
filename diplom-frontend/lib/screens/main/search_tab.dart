@@ -16,6 +16,8 @@ import '../playlist_screen.dart';
 import '../user_profile_screen.dart';
 import '../weather_screen.dart';
 import '../ai_playlist_screen.dart';
+import 'explore_section.dart';
+import 'genre_section.dart';
 
 class SearchTab extends StatefulWidget {
   const SearchTab({super.key});
@@ -353,7 +355,7 @@ class _SearchTabState extends State<SearchTab> {
   }
 
   Future<void> _search(String q) async {
-    // Extract artist name if query has "Artist - Song" separator
+    // Один запрос к /search?type=all — бэкенд возвращает tracks+artists+albums+playlists+users
     String artistQuery = q;
     if (q.contains(' - ')) {
       artistQuery = q.split(' - ').first.trim();
@@ -366,58 +368,31 @@ class _SearchTabState extends State<SearchTab> {
     }
 
     try {
-      final results = await Future.wait([
-        ApiService()
-            .searchTracksWithFallback(q, limit: 10)
-            .catchError((_) => <Map<String, dynamic>>[]),
-        ApiService()
-            .searchArtistsList(artistQuery, limit: 12)
-            .catchError((_) => <Map<String, dynamic>>[]),
-        ApiService()
-            .searchAlbums(q, limit: 8)
-            .catchError((_) => <Map<String, dynamic>>[]),
-        ApiService().globalSearch(q).catchError((_) => <String, dynamic>{}),
-      ]);
+      final result = await ApiService()
+          .globalSearch(q, type: 'all')
+          .catchError((_) => <String, dynamic>{});
       if (!mounted) return;
 
-      final tracks = _sortTracks(
-        ((results[0] as List?) ?? [])
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .toList(),
-        q,
-      );
+      List<Map<String, dynamic>> _parseList(dynamic raw) =>
+          ((raw as List?) ?? [])
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+
+      final tracks = _sortTracks(_parseList(result['tracks']), q);
 
       final seenArtistIds = <String>{};
+      final rawArtists = _parseList(result['artists']);
       final artists = <Map<String, dynamic>>[];
-      for (final a in (results[1] as List?) ?? []) {
-        final artist = Map<String, dynamic>.from(a as Map);
-        final id = artist['id']?.toString() ?? '';
-        if (id.isNotEmpty && seenArtistIds.add(id)) {
-          artists.add(artist);
-        }
+      for (final a in rawArtists) {
+        final id = a['id']?.toString() ?? '';
+        if (id.isNotEmpty && seenArtistIds.add(id)) artists.add(a);
       }
 
-      final albums = _sortAlbums(
-        ((results[2] as List?) ?? [])
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList(),
-        q,
-      );
-
-      final globalResult = results[3] as Map<String, dynamic>;
-      final users = ((globalResult['users'] as List?) ?? [])
-          .whereType<Map>()
-          .map((e) => Map<String, dynamic>.from(e))
-          .toList();
-      final playlists = _sortPlaylists(
-        ((globalResult['playlists'] as List?) ?? const [])
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList(),
-        q,
-      );
+      final albums = _sortAlbums(_parseList(result['albums']), q);
+      final users = _parseList(result['users']);
+      final playlists =
+          _sortPlaylists(_parseList(result['playlists']), q);
 
       setState(() {
         _tracks = tracks;
@@ -986,201 +961,17 @@ class _SearchTabState extends State<SearchTab> {
                   ),
                 ],
                 // ── Explore ──────────────────────────────────────────────
+                // ── Explore ──────────────────────────────────────────────
                 const SizedBox(height: 20),
                 const SectionHeader(title: 'Explore'),
                 const SizedBox(height: 12),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: GridView.count(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    crossAxisCount: 3,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 1.4,
-                    children: [
-                      _ExploreCard(
-                          '🌍',
-                          'Discover',
-                          AppColors.gradBlue,
-                          () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const DiscoverScreen()))),
-                      _ExploreCard(
-                          '🏙',
-                          'Charts',
-                          AppColors.gradPurple,
-                          () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const CityChartsScreen()))),
-                      _ExploreCard(
-                          '📻',
-                          'Radio',
-                          AppColors.gradMixed,
-                          () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const RadioScreen()))),
-                      _ExploreCard(
-                          '🎉',
-                          'Party',
-                          AppColors.gradPink,
-                          () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const BrowseRoomsScreen()))),
-                      _ExploreCard(
-                          '✦',
-                          'AI Mix',
-                          AppColors.gradOrange,
-                          () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const AIPlaylistScreen()))),
-                      _ExploreCard(
-                          '🌨',
-                          'Weather',
-                          AppColors.gradCyan,
-                          () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const WeatherScreen()))),
-                    ],
-                  ),
-                ),
+                const ExploreSection(),
+                // ── Browse Genres ─────────────────────────────────────────
                 // ── Browse Genres ─────────────────────────────────────────
                 const SizedBox(height: 24),
                 const SectionHeader(title: 'Browse Genres'),
                 const SizedBox(height: 12),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: GridView.count(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    crossAxisCount: 2,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 2.2,
-                    children: [
-                      _GenreCard(
-                        emoji: '🎤',
-                        name: 'Pop',
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF7c3aed), Color(0xFFa855f7)],
-                        ),
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const GenreTracksScreen(
-                                genre: 'Pop',
-                                emoji: '🎤',
-                                gradient: LinearGradient(colors: [
-                                  Color(0xFF7c3aed),
-                                  Color(0xFFa855f7)
-                                ]),
-                              ),
-                            )),
-                      ),
-                      _GenreCard(
-                        emoji: '🎸',
-                        name: 'Rock',
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF1e3a8a), Color(0xFF3b82f6)],
-                        ),
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const GenreTracksScreen(
-                                genre: 'Rock',
-                                emoji: '🎸',
-                                gradient: LinearGradient(colors: [
-                                  Color(0xFF1e3a8a),
-                                  Color(0xFF3b82f6)
-                                ]),
-                              ),
-                            )),
-                      ),
-                      _GenreCard(
-                        emoji: '✨',
-                        name: 'K-Pop',
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF9d174d), Color(0xFFec4899)],
-                        ),
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const GenreTracksScreen(
-                                genre: 'K-Pop',
-                                emoji: '✨',
-                                gradient: LinearGradient(colors: [
-                                  Color(0xFF9d174d),
-                                  Color(0xFFec4899)
-                                ]),
-                              ),
-                            )),
-                      ),
-                      _GenreCard(
-                        emoji: '🎤',
-                        name: 'Hip-Hop',
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF1c1917), Color(0xFF57534e)],
-                        ),
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const GenreTracksScreen(
-                                genre: 'Hip-Hop',
-                                emoji: '🎤',
-                                gradient: LinearGradient(colors: [
-                                  Color(0xFF1c1917),
-                                  Color(0xFF57534e)
-                                ]),
-                              ),
-                            )),
-                      ),
-                      _GenreCard(
-                        emoji: '🎹',
-                        name: 'Electronic',
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF164e63), Color(0xFF06b6d4)],
-                        ),
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const GenreTracksScreen(
-                                genre: 'Electronic',
-                                emoji: '🎹',
-                                gradient: LinearGradient(colors: [
-                                  Color(0xFF164e63),
-                                  Color(0xFF06b6d4)
-                                ]),
-                              ),
-                            )),
-                      ),
-                      _GenreCard(
-                        emoji: '🌙',
-                        name: 'Ambient',
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF3b0764), Color(0xFF7c3aed)],
-                        ),
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const GenreTracksScreen(
-                                genre: 'Ambient',
-                                emoji: '🌙',
-                                gradient: LinearGradient(colors: [
-                                  Color(0xFF3b0764),
-                                  Color(0xFF7c3aed)
-                                ]),
-                              ),
-                            )),
-                      ),
-                    ],
-                  ),
-                ),
+                const GenreSection(),
               ],
 
               // ── Made for You banner removed ───────────────────────────
@@ -1657,28 +1448,7 @@ class _ForYouScreenState extends State<_ForYouScreen> {
   }
 }
 
-class _ExploreCard extends StatelessWidget {
-  final String emoji, label;
-  final LinearGradient gradient;
-  final VoidCallback onTap;
-  const _ExploreCard(this.emoji, this.label, this.gradient, this.onTap);
 
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-      onTap: onTap,
-      child: Container(
-          decoration: BoxDecoration(
-              gradient: gradient, borderRadius: BorderRadius.circular(16)),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Text(emoji, style: const TextStyle(fontSize: 22)),
-            const SizedBox(height: 4),
-            Text(label,
-                style: GoogleFonts.outfit(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white)),
-          ])));
-}
 
 class _TrackResult extends StatelessWidget {
   final Map<String, dynamic> track;
@@ -2807,48 +2577,6 @@ class _FlatUserRow extends StatelessWidget {
               Icons.chevron_right_rounded,
               color: AppColors.text3,
               size: 18,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _GenreCard extends StatelessWidget {
-  final String emoji;
-  final String name;
-  final LinearGradient gradient;
-  final VoidCallback onTap;
-
-  const _GenreCard({
-    required this.emoji,
-    required this.name,
-    required this.gradient,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: gradient,
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(emoji, style: const TextStyle(fontSize: 20)),
-            const SizedBox(width: 8),
-            Text(
-              name,
-              style: GoogleFonts.outfit(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
             ),
           ],
         ),

@@ -852,7 +852,44 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                 ),
                               ),
                               const SizedBox(width: 12),
-                              if (!canManage) ...[
+                              if (canManage) ...[
+                                // Share button for owned playlists
+                                GestureDetector(
+                                  onTap: () {
+                                    HapticFeedback.lightImpact();
+                                    Clipboard.setData(ClipboardData(
+                                        text:
+                                            'Check out my playlist: $title on MoodWave'));
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Link copied',
+                                            style: GoogleFonts.outfit(
+                                                fontSize: 13)),
+                                        backgroundColor: AppColors.surface,
+                                        behavior: SnackBarBehavior.floating,
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(12)),
+                                        duration: const Duration(seconds: 2),
+                                      ),
+                                    );
+                                  },
+                                  child: Container(
+                                    width: 52,
+                                    height: 52,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.glass,
+                                      shape: BoxShape.circle,
+                                      border:
+                                          Border.all(color: AppColors.border),
+                                    ),
+                                    child: const Icon(Icons.share_outlined,
+                                        size: 20, color: AppColors.text2),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                              ] else ...[
+                                // Bookmark button for non-owned playlists
                                 GestureDetector(
                                   onTap: _savingCopy
                                       ? null

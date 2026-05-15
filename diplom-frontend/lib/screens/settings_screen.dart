@@ -50,31 +50,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (_) => StatefulBuilder(
         builder: (ctx, setDialog) => AlertDialog(
           backgroundColor: AppColors.surface,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Text('Streaming Quality',
               style: GoogleFonts.outfit(
-                  fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text)),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.text)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Choose audio quality for playback. Higher quality uses more data.',
-                  style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text2, height: 1.5)),
+              Text(
+                  'Choose audio quality for playback. Higher quality uses more data.',
+                  style: GoogleFonts.outfit(
+                      fontSize: 13, color: AppColors.text2, height: 1.5)),
               const SizedBox(height: 16),
               for (final option in [
                 {'label': 'Low (96 kbps)', 'sub': 'Saves data', 'value': '96'},
-                {'label': 'Normal (160 kbps)', 'sub': 'Balanced', 'value': '160'},
-                {'label': 'High (320 kbps)', 'sub': 'Best quality', 'value': '320'},
+                {
+                  'label': 'Normal (160 kbps)',
+                  'sub': 'Balanced',
+                  'value': '160'
+                },
+                {
+                  'label': 'High (320 kbps)',
+                  'sub': 'Best quality',
+                  'value': '320'
+                },
               ])
                 GestureDetector(
                   onTap: () async {
                     setDialog(() => _streamingQuality = option['value']!);
                     setState(() => _streamingQuality = option['value']!);
                     final prefs = await SharedPreferences.getInstance();
-                    await prefs.setString('streaming_quality', option['value']!);
+                    await prefs.setString(
+                        'streaming_quality', option['value']!);
                   },
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
                     decoration: BoxDecoration(
                       color: _streamingQuality == option['value']
                           ? AppColors.purple.withOpacity(0.15)
@@ -87,15 +102,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     child: Row(children: [
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(option['label']!,
-                            style: GoogleFonts.outfit(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.text)),
-                        Text(option['sub']!,
-                            style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
-                      ])),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            Text(option['label']!,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.text)),
+                            Text(option['sub']!,
+                                style: GoogleFonts.outfit(
+                                    fontSize: 11, color: AppColors.text3)),
+                          ])),
                       if (_streamingQuality == option['value'])
                         const Icon(Icons.check_circle_rounded,
                             color: AppColors.purpleLight, size: 20),
@@ -109,7 +128,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: () => Navigator.pop(ctx),
               child: Text('Done',
                   style: GoogleFonts.outfit(
-                      color: AppColors.purpleLight, fontWeight: FontWeight.w700)),
+                      color: AppColors.purpleLight,
+                      fontWeight: FontWeight.w700)),
             ),
           ],
         ),
@@ -125,19 +145,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Clear Cache?',
             style: GoogleFonts.outfit(
-                fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.text)),
-        content: Text('This will clear cached images and temporary data. Your playlists and account data are kept.',
-            style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2, height: 1.5)),
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text)),
+        content: Text(
+            'This will clear cached images and temporary data. Your playlists and account data are kept.',
+            style: GoogleFonts.outfit(
+                fontSize: 14, color: AppColors.text2, height: 1.5)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3)),
+            child: Text('Cancel',
+                style: GoogleFonts.outfit(color: AppColors.text3)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: Text('Clear',
                 style: GoogleFonts.outfit(
-                    color: const Color(0xFFef4444), fontWeight: FontWeight.w700)),
+                    color: const Color(0xFFef4444),
+                    fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -367,7 +393,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Your City',
             style: GoogleFonts.outfit(
-                fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.text)),
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -381,13 +409,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: AppColors.text3)),
+            child: Text('Cancel',
+                style: GoogleFonts.outfit(color: AppColors.text3)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, ctrl.text.trim()),
@@ -418,14 +448,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Playback Sources',
             style: GoogleFonts.outfit(
-                fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.text)),
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text)),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           _infoPoint('🎵', 'Track metadata & covers: Deezer API'),
           _infoPoint('▶️', 'Full audio playback: YouTube'),
           _infoPoint('🔍', 'Search & discovery: Deezer catalog'),
           _infoPoint('🎤', 'Artist & album pages: Deezer'),
           const SizedBox(height: 8),
-          Text('Audio quality is determined by YouTube and cannot be changed manually.',
+          Text(
+              'Audio quality is determined by YouTube and cannot be changed manually.',
               style: GoogleFonts.outfit(
                   fontSize: 12, color: AppColors.text3, height: 1.5)),
         ]),
@@ -469,12 +502,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-                child: Text('Settings',
-                    style: GoogleFonts.outfit(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.text,
-                        letterSpacing: -0.02 * 26)),
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () => Navigator.of(context).pop(),
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: AppColors.glass,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: const Icon(
+                          Icons.arrow_back_rounded,
+                          size: 18,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text('Settings',
+                        style: GoogleFonts.outfit(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.text,
+                            letterSpacing: -0.02 * 26)),
+                  ],
+                ),
               ),
               _SettingsGroup(label: 'Account', children: [
                 GestureDetector(
@@ -492,8 +547,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) =>
-                              const NotificationSettingsScreen())),
+                          builder: (_) => const NotificationSettingsScreen())),
                   child: _SettingRow(
                       emoji: '🔔',
                       bg: AppColors.blue.withOpacity(0.15),
@@ -609,13 +663,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     sub: 'Clear cached images and temp data',
                     trailing: _clearingCache
                         ? const SizedBox(
-                            width: 16, height: 16,
+                            width: 16,
+                            height: 16,
                             child: CircularProgressIndicator(
                                 strokeWidth: 2, color: AppColors.purpleLight))
                         : Row(mainAxisSize: MainAxisSize.min, children: [
                             Text('Clear',
                                 style: GoogleFonts.outfit(
-                                    fontSize: 13, color: const Color(0xFFef4444))),
+                                    fontSize: 13,
+                                    color: const Color(0xFFef4444))),
                             const SizedBox(width: 6),
                             const Icon(Icons.chevron_right_rounded,
                                 color: AppColors.text3, size: 16),

@@ -13,6 +13,7 @@ import '../album_screen.dart';
 import '../artist_screen.dart';
 import '../extra_screens.dart';
 import '../mood_screen.dart';
+import '../mood_tracks_screen.dart';
 import '../notifications_screen.dart';
 import '../player_screen.dart';
 import '../playlist_screen.dart';
@@ -45,6 +46,7 @@ class _HomeTabState extends State<HomeTab> {
   bool _loading = true;
   bool _playingWeather = false;
   bool _chartsAreCityData = false;
+  int _unreadNotifCount = 0;
 
   PlayerProvider? _playerProvider;
   String? _lastKnownTrackId;
@@ -99,35 +101,64 @@ class _HomeTabState extends State<HomeTab> {
     final city = user?['city'] ?? 'Astana';
     final api = ApiService();
     try {
-      final results = await Future.wait([
-        api.getWeather(city).catchError((_) => <String, dynamic>{}),
-        api.getChartsByCity(city).catchError((_) => <dynamic>[]),
-        api.getRecentlyPlayed(limit: 20).catchError((_) => <dynamic>[]),
-        api.getCharts(genre: '').catchError((_) => <dynamic>[]),
-        api.getFollowedArtistsDetails().catchError((_) => <dynamic>[]),
-        api.getActiveRooms(limit: 5).catchError((_) => <dynamic>[]),
-        // Radio stations (no auth required)
-        api.getRadioStations().catchError((_) => <dynamic>[]),
-        // Trending tracks (auth optional)
-        api.getTrendingTracks(limit: 10).catchError((_) => <dynamic>[]),
-        // Home feed (auth required — youMightLike artists)
-        api.getHomeFeed().catchError((_) => <String, dynamic>{}),
-        api.getFriendsActivity().catchError((_) => <String, dynamic>{}),
-        api.getLikedAlbums().catchError((_) => <Map<String, dynamic>>[]),
-        api.getPlaylists().catchError((_) => <dynamic>[]),
-        api.getRecommendations().catchError((_) => <dynamic>[]),
-        api.getMatchCandidates().catchError((_) => <dynamic>[]),
-        api.getGenreMixes().catchError((_) => <Map<String, dynamic>>[]),
+      // Phase 1: critical content — show page as soon as this completes
+      final phase1 = await Future.wait([
+        api.getWeather(city).catchError((_) => <String, dynamic>{}),        // 0
+        api.getChartsByCity(city).catchError((_) => <dynamic>[]),            // 1
+        api.getRecentlyPlayed(limit: 20).catchError((_) => <dynamic>[]),     // 2
+        api.getCharts(genre: '').catchError((_) => <dynamic>[]),             // 3
+        api.getActiveRooms(limit: 5).catchError((_) => <dynamic>[]),         // 4
+        api.getTrendingTracks(limit: 10).catchError((_) => <dynamic>[]),     // 5
+        api.getFriendsActivity().catchError((_) => <String, dynamic>{}),     // 6
       ]);
       if (!mounted) return;
 
-      final cityCharts = (results[1] as List?) ?? [];
-      final globalCharts = (results[3] as List?) ?? [];
-      final charts = cityCharts.isNotEmpty ? cityCharts : globalCharts;
-      final feed = results[8] as Map<String, dynamic>;
-      final recently = (results[2] as List?) ?? [];
-      final followedRaw = (results[4] as List?) ?? [];
+      final cityCharts = (phase1[1] as List?) ?? [];
+      final globalCharts = (phase1[3] as List?) ?? [];
+      final recently = (phase1[2] as List?) ?? [];
+
+      setState(() {
+        _weather = phase1[0] as Map<String, dynamic>?;
+        _charts = cityCharts.isNotEmpty ? cityCharts : globalCharts;
+        _chartsAreCityData = cityCharts.isNotEmpty;
+        _recentlyPlayed = recently;
+        _freshWave = globalCharts;
+        _liveRooms = (phase1[4] as List?) ?? [];
+        _hotRightNow = (phase1[5] as List?) ?? [];
+        _friendsActivity = Map<String, dynamic>.from(phase1[6] as Map);
+        _loading = false;
+      });
+
+      // Phase 2: enrichment — load in background, update UI when ready
+      _loadEnrichment(api, recently, globalCharts);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadEnrichment(
+      ApiService api, List<dynamic> recently, List<dynamic> globalCharts) async {
+    try {
+      final phase2 = await Future.wait([
+        api.getFollowedArtistsDetails().catchError((_) => <dynamic>[]),               // 0
+        api.getRadioStations().catchError((_) => <dynamic>[]),                        // 1
+        api.getHomeFeed().catchError((_) => <String, dynamic>{}),                     // 2
+        api.getLikedAlbums().catchError((_) => <Map<String, dynamic>>[]),             // 3
+        api.getPlaylists().catchError((_) => <dynamic>[]),                            // 4
+        api.getRecommendations().catchError((_) => <dynamic>[]),                      // 5
+        api.getGenreMixes().catchError((_) => <Map<String, dynamic>>[]),              // 6
+      ]);
+      if (!mounted) return;
+
+      final followedRaw = (phase2[0] as List?) ?? [];
+      final feed = phase2[2] as Map<String, dynamic>;
       final feedArtistsRaw = (feed['you_might_like'] as List?) ?? [];
+      final likedAlbums = (phase2[3] as List?) ?? [];
+      final playlists = (phase2[4] as List?) ?? [];
+      final recommendations = (phase2[5] as List?) ?? [];
+      final genreMixes = (phase2[6] as List?) ?? [];
+
       final artistGroups = await Future.wait([
         api.hydrateArtists(followedRaw),
         api.hydrateArtists(feedArtistsRaw),
@@ -138,80 +169,94 @@ class _HomeTabState extends State<HomeTab> {
           {'id': 4050205, 'name': 'The Weeknd'},
         ]),
       ]);
+      if (!mounted) return;
+
       final followed = artistGroups[0];
       final feedArtists = [...artistGroups[1], ...artistGroups[2]];
-      final likedAlbums = (results[10] as List?) ?? [];
-      final playlists = (results[11] as List?) ?? [];
-      final recommendations = (results[12] as List?) ?? [];
-      final people = (results[13] as List?) ?? [];
-      final genreMixes = (results[14] as List?) ?? [];
       final mixed = _buildMixedRecommendations(
         artists: [...followed, ...feedArtists],
         albums: likedAlbums,
         playlists: playlists,
-        tracks: [...recommendations, ...globalCharts],
-        people: people,
       );
       final thisIs = _buildThisIsArtists(followed, feedArtists);
       final aiMixes = _buildAiMixes(
         mixes: genreMixes,
         fallbackTracks: [...recommendations, ...globalCharts],
       );
-      final because =
-          await _loadBecauseYouListened(api, recently, recommendations);
+      final because = await _loadBecauseYouListened(api, recently, [
+        ...recommendations,
+        ...globalCharts,
+        ...recently,
+      ]);
       if (!mounted) return;
 
       setState(() {
-        _weather = results[0] as Map<String, dynamic>?;
-        _friendsActivity = Map<String, dynamic>.from(results[9] as Map);
-        _charts = charts;
-        _chartsAreCityData = cityCharts.isNotEmpty;
-        _recentlyPlayed = recently;
-        _freshWave = globalCharts;
         _followedArtists = followed;
-        _liveRooms = (results[5] as List?) ?? [];
-        _radioStations = (results[6] as List?) ?? [];
-        _hotRightNow = (results[7] as List?) ?? [];
+        _radioStations = (phase2[1] as List?) ?? [];
         _becauseYouListened = because;
         _aiMixes = aiMixes;
         _mixedRecommendations = mixed;
         _thisIsArtists = thisIs;
-        _loading = false;
       });
-    } catch (_) {
+
+      // Notifications last — least critical
+      final unreadCount = await api
+          .getNotifications()
+          .then((d) => (d['notifications'] as List? ?? []).length)
+          .catchError((_) => 0);
       if (!mounted) return;
-      setState(() => _loading = false);
-    }
+      setState(() => _unreadNotifCount = unreadCount);
+    } catch (_) {}
   }
 
   List<Map<String, dynamic>> _buildMixedRecommendations({
     required List<dynamic> artists,
     required List<dynamic> albums,
     required List<dynamic> playlists,
-    required List<dynamic> tracks,
-    required List<dynamic> people,
   }) {
     final items = <Map<String, dynamic>>[];
     final seen = <String>{};
 
-    void add(String type, dynamic value) {
-      if (value is! Map) return;
-      final item = Map<String, dynamic>.from(value);
-      final id =
-          (item['id'] ?? item['album_id'] ?? item['spotify_id'] ?? item['name'])
-              .toString();
-      final key = '$type:$id';
-      if (id.isEmpty || seen.contains(key)) return;
+    void addItem(String type, Map<String, dynamic> item, String key) {
+      if (seen.contains(key)) return;
       seen.add(key);
       items.add({'type': type, 'data': item});
     }
 
-    // Only artists and albums — no random tracks, playlists, users or this_is
-    for (var i = 0; i < 12; i++) {
-      if (i < artists.length) add('artist', artists[i]);
-      if (i < albums.length) add('album', albums[i]);
+    final filteredArtists = artists
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .where((artist) => _isUsableArtistRecommendation(artist))
+        .toList();
+
+    final filteredAlbums = albums
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .where((album) => _isUsableAlbumRecommendation(album))
+        .toList();
+
+    final filteredPlaylists = playlists
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .where((playlist) => _isUsablePlaylistRecommendation(playlist))
+        .toList();
+
+    for (final artist in filteredArtists) {
+      final key = 'artist:${_normalizedText(_entityName(artist))}';
+      if (key.isNotEmpty) addItem('artist', artist, key);
     }
-    return items.take(18).toList();
+
+    for (final album in filteredAlbums) {
+      final key = 'album:${_normalizedText(_entityTitle(album))}|${_normalizedText(_entityArtist(album))}';
+      if (key.isNotEmpty) addItem('album', album, key);
+    }
+
+    for (final playlist in filteredPlaylists) {
+      final key = 'playlist:${_normalizedText(_entityTitle(playlist))}';
+      if (key.isNotEmpty) addItem('playlist', playlist, key);
+    }
+
+    return items;
   }
 
   List<Map<String, dynamic>> _buildThisIsArtists(
@@ -219,27 +264,34 @@ class _HomeTabState extends State<HomeTab> {
     final items = <Map<String, dynamic>>[];
     final seen = <String>{};
 
-    void add(dynamic value) {
-      if (value is! Map) return;
-      final item = Map<String, dynamic>.from(value);
-      final name = (item['name'] ?? item['artist'] ?? '').toString();
-      if (name.isEmpty) return;
-      final key = name.toLowerCase();
-      if (seen.contains(key)) return;
+    void addArtist(Map<String, dynamic> artist) {
+      if (!_isUsableArtistRecommendation(artist)) return;
+      final key = _normalizedText(_entityName(artist));
+      if (key.isEmpty || seen.contains(key)) return;
       seen.add(key);
-      items.add(item);
+      items.add(artist);
     }
 
-    for (final item in followed) add(item);
-    for (final item in suggested) add(item);
-    for (final item in const [
-      {'name': 'Lana Del Rey'},
-      {'name': 'МЭЙБИ БЭЙБИ'},
-      {'name': 'Justin Bieber'},
-      {'name': 'The Weeknd'},
-    ]) {
-      add(item);
+    final filteredFollowed = followed
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .where((artist) => _isUsableArtistRecommendation(artist))
+        .toList();
+
+    final filteredSuggested = suggested
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .where((artist) => _isUsableArtistRecommendation(artist))
+        .toList();
+
+    for (final artist in filteredFollowed) {
+      addArtist(artist);
     }
+
+    for (final artist in filteredSuggested) {
+      addArtist(artist);
+    }
+
     return items.take(10).toList();
   }
 
@@ -299,20 +351,250 @@ class _HomeTabState extends State<HomeTab> {
     if (recently.isEmpty) return fallback.take(12).toList();
     final seed = recently.first;
     if (seed is! Map) return fallback.take(12).toList();
-    final artist = (seed['artist'] ?? seed['artistName'] ?? '').toString();
-    final title = (seed['title'] ?? seed['trackName'] ?? '').toString();
-    final query = artist.isNotEmpty ? artist : title;
-    if (query.isEmpty) return fallback.take(12).toList();
-    try {
-      final tracks = await api.searchTracksWithFallback(query, limit: 16);
-      return tracks
-          .where((track) =>
-              (track['title'] ?? track['trackName'] ?? '').toString() != title)
-          .take(12)
-          .toList();
-    } catch (_) {
-      return fallback.take(12).toList();
+    final artist = _entityArtist(Map<String, dynamic>.from(seed));
+    final title = _entityTitle(Map<String, dynamic>.from(seed));
+    final queries = <String>{
+      if (artist.isNotEmpty && title.isNotEmpty) '$artist $title',
+      if (artist.isNotEmpty) artist,
+      if (title.isNotEmpty) title,
+    }.where((query) => query.trim().isNotEmpty).toList();
+    if (queries.isEmpty) {
+      return _finalizeBecauseTracks(
+        fallback
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
+        seedArtist: artist,
+        seedTitle: title,
+      );
     }
+    try {
+      final searchResults = await Future.wait(
+        queries.map(
+          (query) => api
+              .searchTracksWithFallback(query, limit: 18)
+              .catchError((_) => <Map<String, dynamic>>[]),
+        ),
+      );
+      final candidates = <Map<String, dynamic>>[
+        for (final batch in searchResults)
+          ...batch
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item)),
+        ...fallback
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item)),
+      ];
+      return _finalizeBecauseTracks(
+        candidates,
+        seedArtist: artist,
+        seedTitle: title,
+      );
+    } catch (_) {
+      return _finalizeBecauseTracks(
+        fallback
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
+        seedArtist: artist,
+        seedTitle: title,
+      );
+    }
+  }
+
+  List<dynamic> _finalizeBecauseTracks(
+    List<Map<String, dynamic>> candidates, {
+    required String seedArtist,
+    required String seedTitle,
+  }) {
+    final cleaned = _dedupeTracks(
+      candidates.where(_isUsableTrackRecommendation).toList(),
+      onePerAlbum: true,
+    ).whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
+
+    final seedArtistKey = _normalizedText(seedArtist);
+    final seedTitleKey = _normalizedText(seedTitle);
+    final sameArtist = <Map<String, dynamic>>[];
+    final adjacent = <Map<String, dynamic>>[];
+
+    for (final track in cleaned) {
+      final trackTitle = _normalizedText(_entityTitle(track));
+      final trackArtist = _normalizedText(_entityArtist(track));
+      if (trackTitle == seedTitleKey && trackArtist == seedArtistKey) continue;
+      if (trackArtist == seedArtistKey) {
+        sameArtist.add(track);
+      } else {
+        adjacent.add(track);
+      }
+    }
+
+    final result = <Map<String, dynamic>>[];
+    final artistCounts = <String, int>{};
+
+    void tryAdd(Map<String, dynamic> track) {
+      if (result.length >= 12) return;
+      final artistKey = _normalizedText(_entityArtist(track));
+      if (artistKey.isEmpty) return;
+      final nextCount = (artistCounts[artistKey] ?? 0) + 1;
+      if (nextCount > (artistKey == seedArtistKey ? 3 : 2)) return;
+      artistCounts[artistKey] = nextCount;
+      result.add(track);
+    }
+
+    var sameIndex = 0;
+    var adjacentIndex = 0;
+    while (result.length < 12 &&
+        (sameIndex < sameArtist.length || adjacentIndex < adjacent.length)) {
+      if (sameIndex < sameArtist.length) {
+        tryAdd(sameArtist[sameIndex++]);
+      }
+      for (var i = 0; i < 2 && adjacentIndex < adjacent.length; i++) {
+        tryAdd(adjacent[adjacentIndex++]);
+      }
+    }
+
+    return result;
+  }
+
+  String _normalizedText(String value) =>
+      value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  String _entityName(Map<String, dynamic> item) =>
+      (item['name'] ??
+              item['display_name'] ??
+              item['username'] ??
+              item['artist'] ??
+              '')
+          .toString()
+          .trim();
+
+  String _entityTitle(Map<String, dynamic> item) =>
+      (item['title'] ??
+              item['trackName'] ??
+              item['album_name'] ??
+              item['collectionName'] ??
+              '')
+          .toString()
+          .trim();
+
+  String _entityArtist(Map<String, dynamic> item) =>
+      (item['artist'] ?? item['artistName'] ?? item['artist_name'] ?? '')
+          .toString()
+          .trim();
+
+  String _artistImage(Map<String, dynamic> item) =>
+      (item['picture_xl'] ??
+              item['picture_big'] ??
+              item['picture_medium'] ??
+              item['photo_url'] ??
+              item['image_url'] ??
+              item['avatar_url'] ??
+              item['cover_url'] ??
+              '')
+          .toString()
+          .trim();
+
+  String _albumImage(Map<String, dynamic> item) =>
+      (item['cover_url'] ??
+              item['artworkUrl100'] ??
+              item['cover_xl'] ??
+              item['image_url'] ??
+              item['picture_xl'] ??
+              item['picture_big'] ??
+              item['picture_medium'] ??
+              '')
+          .toString()
+          .trim();
+
+  bool _hasUsableImage(String value) {
+    final url = value.trim().toLowerCase();
+    if (url.isEmpty) return false;
+    if (url.contains('placeholder')) return false;
+    if (url.contains('/default')) return false;
+    if (url.endsWith('/null') || url.endsWith('null')) return false;
+    // Deezer empty artist/album image — no ID segment (double-slash)
+    if (url.contains('/images/artist//')) return false;
+    if (url.contains('/images/album//')) return false;
+    if (url.contains('/images/misc//')) return false;
+    // Generic empty-ID pattern: path segment is empty between two slashes
+    if (RegExp(r'/[a-z]+//\d+x\d+').hasMatch(url)) return false;
+    return true;
+  }
+
+  bool _looksLikeNoiseEntity(String value) {
+    final text = _normalizedText(value);
+    if (text.isEmpty) return true;
+    const blockedFragments = [
+      'karaoke',
+      'cover band',
+      'covers',
+      'piano covers',
+      'tribute',
+      'instrumental version',
+      'feat.',
+      'featuring',
+    ];
+    if (blockedFragments.any(text.contains)) return true;
+    return false;
+  }
+
+  bool _looksLikeCollabArtist(String value) {
+    final t = value.trim();
+    if (t.isEmpty) return false;
+    // Russian conjunction between two names: "Артист и Артист"
+    if (RegExp(r'\s+и\s+', caseSensitive: false).hasMatch(t)) return true;
+    // English collab patterns with "&" or "vs"
+    if (RegExp(r'\s+vs\.?\s+', caseSensitive: false).hasMatch(t)) return true;
+    // Comma-separated multi-artist: "Artist A, Artist B"
+    // (exclude "Jr." style abbreviated names and single-word-after-comma)
+    final commaIdx = t.indexOf(', ');
+    if (commaIdx > 0) {
+      final afterComma = t.substring(commaIdx + 2).trim();
+      // if what follows comma is a capitalized word-or-more, it's a second artist
+      if (afterComma.isNotEmpty &&
+          afterComma[0] == afterComma[0].toUpperCase() &&
+          afterComma.length > 2 &&
+          !afterComma.startsWith('Jr') &&
+          !afterComma.startsWith('Sr') &&
+          !afterComma.startsWith('III')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _isUsableArtistRecommendation(Map<String, dynamic> item) {
+    final name = _entityName(item);
+    final image = _artistImage(item);
+    return name.isNotEmpty &&
+        !_looksLikeNoiseEntity(name) &&
+        !_looksLikeCollabArtist(name) &&
+        _hasUsableImage(image);
+  }
+
+  bool _isUsableAlbumRecommendation(Map<String, dynamic> item) {
+    final title = _entityTitle(item);
+    final artist = _entityArtist(item);
+    final image = _albumImage(item);
+    return title.isNotEmpty &&
+        artist.isNotEmpty &&
+        _hasUsableImage(image) &&
+        !_looksLikeNoiseEntity(artist);
+  }
+
+  bool _isUsableTrackRecommendation(Map<String, dynamic> item) {
+    final title = _entityTitle(item);
+    final artist = _entityArtist(item);
+    final image = _albumImage(item);
+    return title.isNotEmpty &&
+        artist.isNotEmpty &&
+        _hasUsableImage(image) &&
+        !_looksLikeNoiseEntity(artist);
+  }
+
+  bool _isUsablePlaylistRecommendation(Map<String, dynamic> item) {
+    final title = _entityTitle(item);
+    return title.isNotEmpty && !_looksLikeNoiseEntity(title);
   }
 
   String _becauseTitle() {
@@ -323,6 +605,12 @@ class _HomeTabState extends State<HomeTab> {
     final title = (first['title'] ?? first['trackName'] ?? '').toString();
     if (title.isEmpty) return 'Because you listened to...';
     return 'Because you listened to $title';
+  }
+
+  String get _becauseSeedArtist {
+    if (_recentlyPlayed.isEmpty || _recentlyPlayed.first is! Map) return '';
+    final first = _recentlyPlayed.first as Map;
+    return (first['artist'] ?? first['artistName'] ?? '').toString().trim();
   }
 
   List<dynamic> get _recentlyPlayedForHome {
@@ -441,6 +729,101 @@ class _HomeTabState extends State<HomeTab> {
     return '🌤';
   }
 
+  IconData _weatherIconData(String desc) {
+    final d = desc.toLowerCase();
+    if (d.contains('snow')) return Icons.ac_unit_rounded;
+    if (d.contains('rain') || d.contains('drizzle')) {
+      return Icons.grain_rounded;
+    }
+    if (d.contains('cloud')) return Icons.cloud_rounded;
+    if (d.contains('thunder') || d.contains('storm')) {
+      return Icons.thunderstorm_rounded;
+    }
+    if (d.contains('clear') || d.contains('sunny')) {
+      return Icons.wb_sunny_rounded;
+    }
+    if (d.contains('fog') || d.contains('mist') || d.contains('haze')) {
+      return Icons.blur_on_rounded;
+    }
+    return Icons.wb_cloudy_rounded;
+  }
+
+  List<Color> _weatherCardGradient(String desc) {
+    final d = desc.toLowerCase();
+    if (d.contains('clear') || d.contains('sunny')) {
+      return const [
+        Color(0xFF15304F),
+        Color(0xFF215E91),
+        Color(0xFF5FA8D3),
+      ];
+    }
+    if (d.contains('cloud')) {
+      return const [
+        Color(0xFF22314C),
+        Color(0xFF314B69),
+        Color(0xFF607D9B),
+      ];
+    }
+    if (d.contains('rain') || d.contains('drizzle')) {
+      return const [
+        Color(0xFF0C1B2A),
+        Color(0xFF17314D),
+        Color(0xFF215A8A),
+      ];
+    }
+    if (d.contains('snow')) {
+      return const [
+        Color(0xFF1B2538),
+        Color(0xFF3A4C68),
+        Color(0xFF7C96B8),
+      ];
+    }
+    if (d.contains('thunder') || d.contains('storm')) {
+      return const [
+        Color(0xFF131420),
+        Color(0xFF2A2248),
+        Color(0xFF4B3C82),
+      ];
+    }
+    if (d.contains('fog') || d.contains('mist') || d.contains('haze')) {
+      return const [
+        Color(0xFF1A2430),
+        Color(0xFF2A3946),
+        Color(0xFF506473),
+      ];
+    }
+    return const [
+      Color(0xFF0D1A3D),
+      Color(0xFF1A1060),
+      Color(0xFF0D2040),
+    ];
+  }
+
+  Color _weatherAccent(String desc) {
+    final d = desc.toLowerCase();
+    if (d.contains('clear') || d.contains('sunny')) {
+      return const Color(0xFFF8D66D);
+    }
+    if (d.contains('cloud')) return const Color(0xFFB9D6FF);
+    if (d.contains('rain') || d.contains('drizzle')) {
+      return const Color(0xFF7CC6FF);
+    }
+    if (d.contains('snow')) return const Color(0xFFE6F2FF);
+    if (d.contains('thunder') || d.contains('storm')) {
+      return const Color(0xFFC7B4FF);
+    }
+    if (d.contains('fog') || d.contains('mist') || d.contains('haze')) {
+      return const Color(0xFFD5E2F0);
+    }
+    return const Color(0xFF93C5FD);
+  }
+
+  String _weatherListenersLabel(int count, String city) {
+    if (count <= 0) return 'Be first in $city today';
+    if (count == 1) return '1 person listening now';
+    return '$count people listening now';
+  }
+
   String _weatherMood(String desc) {
     final d = desc.toLowerCase();
     if (d.contains('rain') || d.contains('drizzle')) return 'rainy';
@@ -450,14 +833,6 @@ class _HomeTabState extends State<HomeTab> {
     if (d.contains('cloud')) return 'cloudy';
     if (d.contains('fog') || d.contains('mist')) return 'foggy';
     return 'chill';
-  }
-
-  String _greeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 5) return 'Still vibing';
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
   }
 
   Future<void> _playWeatherVibes() async {
@@ -501,6 +876,15 @@ class _HomeTabState extends State<HomeTab> {
     );
   }
 
+  void _openMood(MoodData mood) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MoodTracksScreen(mood: mood),
+      ),
+    );
+  }
+
   List<Widget> _buildMoodSection() {
     return [
       const SizedBox(height: 22),
@@ -511,82 +895,21 @@ class _HomeTabState extends State<HomeTab> {
       ),
       const SizedBox(height: 12),
       SizedBox(
-        height: 130,
-        child: ListView(
+        height: 150,
+        child: ListView.builder(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.only(left: 20),
-          children: [
-            _MoodTile(
-                emoji: '😊',
-                name: 'Happy',
-                gradient: AppColors.gradOrange,
-                onTap: () => _showMoodTracks('happy', '😊', 'Happy')),
-            _MoodTile(
-                emoji: '🌙',
-                name: 'Chill',
-                gradient: AppColors.gradCyan,
-                onTap: () => _showMoodTracks('chill', '🌙', 'Chill')),
-            _MoodTile(
-                emoji: '💘',
-                name: 'Romantic',
-                gradient: AppColors.gradPink,
-                onTap: () => _showMoodTracks('romantic', '💘', 'Romantic')),
-            _MoodTile(
-                emoji: '🏃',
-                name: 'Workout',
-                gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF7c3d12), Color(0xFFf59e0b)]),
-                onTap: () => _showMoodTracks('workout', '🏃', 'Workout')),
-            _MoodTile(
-                emoji: '📚',
-                name: 'Focus',
-                gradient: AppColors.gradBlue,
-                onTap: () => _showMoodTracks('study', '📚', 'Focus')),
-            _MoodTile(
-                emoji: '🎉',
-                name: 'Party',
-                gradient: AppColors.gradPurple,
-                onTap: () => _showMoodTracks('party', '🎉', 'Party')),
-            _MoodTile(
-                emoji: '🌧',
-                name: 'Rainy',
-                gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF0f172a), Color(0xFF2563eb)]),
-                onTap: () => _showMoodTracks('rainy', '🌧', 'Rainy')),
-            _MoodTile(
-                emoji: '🔥',
-                name: 'Angry',
-                gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF450a0a), Color(0xFFdc2626)]),
-                onTap: () => _showMoodTracks('angry', '🔥', 'Angry')),
-            _MoodTile(
-                emoji: '☁️',
-                name: 'Dreamy',
-                gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF312e81), Color(0xFFa855f7)]),
-                onTap: () => _showMoodTracks('dreamy', '☁️', 'Dreamy')),
-            _MoodTile(
-                emoji: '🚗',
-                name: 'Drive',
-                gradient: AppColors.gradPurple,
-                onTap: () => _showMoodTracks('driving', '🚗', 'Drive')),
-            _MoodTile(
-                emoji: '💔',
-                name: 'Sad',
-                gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF1a0a2e), Color(0xFF4c1d95)]),
-                onTap: () => _showMoodTracks('sad', '💔', 'Sad')),
-          ],
+          itemCount: allMoods.length,
+          itemBuilder: (context, index) {
+            final mood = allMoods[index];
+            return Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: _MoodTile(
+                mood: mood,
+                onTap: () => _openMood(mood),
+              ),
+            );
+          },
         ),
       ),
     ];
@@ -598,12 +921,13 @@ class _HomeTabState extends State<HomeTab> {
     final city = user?['city'] ?? 'Astana';
     final displayName = user?['display_name'] ?? user?['username'] ?? '';
     final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U';
-    final firstName = displayName.toString().trim().split(' ').first;
 
     final weatherDesc =
         _weather?['description'] ?? _weather?['condition'] ?? 'Clear';
     final weatherTemp = _weather?['temperature'] ?? _weather?['temp'];
-    final weatherEmoji = _getWeatherEmoji(weatherDesc);
+    final weatherIcon = _weatherIconData(weatherDesc);
+    final weatherGradient = _weatherCardGradient(weatherDesc);
+    final weatherAccent = _weatherAccent(weatherDesc);
     final listenersCount = _liveRooms.fold<int>(
         0, (sum, r) => sum + ((r['participant_count'] as int?) ?? 0));
 
@@ -645,26 +969,48 @@ class _HomeTabState extends State<HomeTab> {
                                       fontWeight: FontWeight.w800,
                                       color: Colors.white)),
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '${_greeting()}${firstName.isNotEmpty ? ', $firstName' : ''}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.outfit(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: AppColors.text3),
-                            ),
                           ],
                         ),
                       ),
                       GestureDetector(
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const NotificationsScreen())),
-                          child: const AppIconButton(
-                              icon: Icons.notifications_outlined)),
+                          onTap: () async {
+                            await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) =>
+                                        const NotificationsScreen()));
+                            if (mounted) setState(() => _unreadNotifCount = 0);
+                          },
+                          child: Stack(clipBehavior: Clip.none, children: [
+                            const AppIconButton(
+                                icon: Icons.notifications_outlined),
+                            if (_unreadNotifCount > 0)
+                              Positioned(
+                                top: -3,
+                                right: -3,
+                                child: Container(
+                                  padding: const EdgeInsets.all(3),
+                                  constraints: const BoxConstraints(
+                                      minWidth: 17, minHeight: 17),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFEF4444),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      _unreadNotifCount > 99
+                                          ? '99+'
+                                          : '$_unreadNotifCount',
+                                      style: GoogleFonts.outfit(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ])),
                       const SizedBox(width: 10),
                       GestureDetector(
                         onTap: () => Navigator.push(
@@ -699,87 +1045,161 @@ class _HomeTabState extends State<HomeTab> {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
                   child: Container(
-                    padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              Color(0xFF0d1a3d),
-                              Color(0xFF1a1060),
-                              Color(0xFF0d2040)
-                            ]),
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                            color: AppColors.blue.withOpacity(0.25))),
-                    child: Row(children: [
-                      Expanded(
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                            Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                    color: AppColors.blue.withOpacity(0.15),
-                                    borderRadius: BorderRadius.circular(100),
-                                    border: Border.all(
-                                        color:
-                                            AppColors.blue.withOpacity(0.25))),
-                                child: Text('$weatherEmoji Live Weather',
-                                    style: GoogleFonts.outfit(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: const Color(0xFF93c5fd),
-                                        letterSpacing: 0.05))),
-                            const SizedBox(height: 8),
-                            Text(
-                                weatherTemp != null
-                                    ? '${weatherTemp.toStringAsFixed(0)}°'
-                                    : '—°',
-                                style: GoogleFonts.outfit(
-                                    fontSize: 36,
-                                    fontWeight: FontWeight.w800,
-                                    color: Colors.white,
-                                    height: 1)),
-                            Text('$weatherDesc · $city',
-                                style: GoogleFonts.outfit(
-                                    fontSize: 14,
-                                    color: const Color(0xFF93c5fd)
-                                        .withOpacity(0.7))),
-                            const SizedBox(height: 4),
-                            Text(
-                                '$weatherEmoji $listenersCount people listening now',
-                                style: GoogleFonts.outfit(
-                                    fontSize: 12,
-                                    color: const Color(0xFF93c5fd)
-                                        .withOpacity(0.55))),
-                          ])),
-                      GestureDetector(
-                        onTap: _playWeatherVibes,
-                        child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 10),
-                            decoration: BoxDecoration(
-                                color: AppColors.blue.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: AppColors.blue.withOpacity(0.3))),
-                            child: _playingWeather
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Color(0xFF93c5fd)),
-                                  )
-                                : Text('Play Vibes',
-                                    style: GoogleFonts.outfit(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                        color: const Color(0xFF93c5fd)))),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: weatherGradient,
                       ),
-                    ]),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color: weatherAccent.withOpacity(0.22),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: weatherGradient.last.withOpacity(0.28),
+                          blurRadius: 22,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Stack(
+                      children: [
+                        Positioned(
+                          right: -12,
+                          top: -10,
+                          child: Container(
+                            width: 110,
+                            height: 110,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: weatherAccent.withOpacity(0.10),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: 18,
+                          top: 18,
+                          child: Icon(
+                            weatherIcon,
+                            size: 42,
+                            color: weatherAccent.withOpacity(0.9),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: Row(children: [
+                            Expanded(
+                                child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                  Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.10),
+                                          borderRadius:
+                                              BorderRadius.circular(100),
+                                          border: Border.all(
+                                              color: Colors.white
+                                                  .withOpacity(0.12))),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            weatherIcon,
+                                            size: 13,
+                                            color: weatherAccent,
+                                          ),
+                                          const SizedBox(width: 5),
+                                          Text('Live Weather',
+                                              style: GoogleFonts.outfit(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: weatherAccent,
+                                                  letterSpacing: 0.05)),
+                                        ],
+                                      )),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                      weatherTemp != null
+                                          ? '${weatherTemp.toStringAsFixed(0)}°'
+                                          : '—°',
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 36,
+                                          fontWeight: FontWeight.w800,
+                                          color: Colors.white,
+                                          height: 1)),
+                                  const SizedBox(height: 2),
+                                  Text('$weatherDesc · $city',
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 14,
+                                          color:
+                                              Colors.white.withOpacity(0.78))),
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    children: [
+                                      Container(
+                                        width: 7,
+                                        height: 7,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: const Color(0xFF22C55E),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: const Color(0xFF22C55E)
+                                                  .withOpacity(0.4),
+                                              blurRadius: 6,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                            _weatherListenersLabel(
+                                                listenersCount, city),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: GoogleFonts.outfit(
+                                                fontSize: 12,
+                                                color: Colors.white
+                                                    .withOpacity(0.62))),
+                                      ),
+                                    ],
+                                  ),
+                                ])),
+                            const SizedBox(width: 16),
+                            GestureDetector(
+                              onTap: _playWeatherVibes,
+                              child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 12),
+                                  decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.12),
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                          color:
+                                              Colors.white.withOpacity(0.14))),
+                                  child: _playingWeather
+                                      ? SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: weatherAccent),
+                                        )
+                                      : Text('Play Vibes',
+                                          style: GoogleFonts.outfit(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.white))),
+                            ),
+                          ]),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -787,31 +1207,13 @@ class _HomeTabState extends State<HomeTab> {
               // ─── Recently Played ───────────────────────────────
               if (_recentlyPlayedForHome.isNotEmpty) ...[
                 const SizedBox(height: 22),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Text('Recently Played',
-                          style: GoogleFonts.outfit(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.text,
-                              letterSpacing: -0.3)),
-                      GestureDetector(
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const RecentHistoryScreen())),
-                        child: Text('See all',
-                            style: GoogleFonts.outfit(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.text2)),
-                      ),
-                    ],
-                  ),
+                SectionHeader(
+                  title: 'Recently Played',
+                  action: 'See all →',
+                  onAction: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const RecentHistoryScreen())),
                 ),
                 const SizedBox(height: 12),
                 _RecentHorizontal(
@@ -828,8 +1230,7 @@ class _HomeTabState extends State<HomeTab> {
                   onAction: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => _HomeShelfScreen(
-                        title: 'You Might Like',
+                      builder: (_) => _YouMightLikeScreen(
                         items: _mixedRecommendations,
                       ),
                     ),
@@ -884,9 +1285,13 @@ class _HomeTabState extends State<HomeTab> {
                   onAction: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => _TrackListScreen(
+                      builder: (_) => _BecauseYouListenedScreen(
                         title: _becauseTitle(),
-                        tracks: _becauseYouListened,
+                        tracks: _becauseYouListened
+                            .whereType<Map>()
+                            .map((t) => Map<String, dynamic>.from(t))
+                            .toList(),
+                        seedArtist: _becauseSeedArtist,
                       ),
                     ),
                   ),
@@ -931,6 +1336,60 @@ class _HomeTabState extends State<HomeTab> {
                     itemCount: _thisIsArtists.length.clamp(0, 10),
                     itemBuilder: (context, i) =>
                         _ThisIsCard(artist: _thisIsArtists[i]),
+                  ),
+                ),
+              ],
+
+              // ─── Live Rooms ───────────────────────────────────
+              if (_liveRooms.isNotEmpty) ...[
+                const SizedBox(height: 22),
+                SectionHeader(
+                  title: 'Live Rooms 🎙',
+                  action: 'See all →',
+                  onAction: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const BrowseRoomsScreen(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 132,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    itemCount: _liveRooms.length.clamp(0, 5),
+                    itemBuilder: (context, i) {
+                      final room = _liveRooms[i] as Map<String, dynamic>;
+                      return _LiveRoomCard(room: room);
+                    },
+                  ),
+                ),
+              ],
+
+              // ─── Friends are listening ───────────────────────
+              if (_friendItems.isNotEmpty) ...[
+                const SizedBox(height: 22),
+                SectionHeader(
+                  title: 'Friends are listening',
+                  action: 'See all →',
+                  onAction: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const SocialActivityScreen(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 92,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.only(left: 20),
+                    itemCount: _friendItems.length.clamp(0, 10),
+                    itemBuilder: (context, i) =>
+                        _FriendListeningCard(friend: _friendItems[i]),
                   ),
                 ),
               ],
@@ -1087,60 +1546,6 @@ class _HomeTabState extends State<HomeTab> {
                 ),
               ],
 
-              // ─── Live Rooms ───────────────────────────────────
-              if (_liveRooms.isNotEmpty) ...[
-                const SizedBox(height: 22),
-                SectionHeader(
-                  title: 'Live Rooms 🎙',
-                  action: 'See all →',
-                  onAction: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const BrowseRoomsScreen(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 132,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    itemCount: _liveRooms.length.clamp(0, 5),
-                    itemBuilder: (context, i) {
-                      final room = _liveRooms[i] as Map<String, dynamic>;
-                      return _LiveRoomCard(room: room);
-                    },
-                  ),
-                ),
-              ],
-
-              // ─── Friends are listening ───────────────────────
-              if (_friendItems.isNotEmpty) ...[
-                const SizedBox(height: 22),
-                SectionHeader(
-                  title: 'Friends are listening',
-                  action: 'See all →',
-                  onAction: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const SocialActivityScreen(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 92,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(left: 20),
-                    itemCount: _friendItems.length.clamp(0, 10),
-                    itemBuilder: (context, i) =>
-                        _FriendListeningCard(friend: _friendItems[i]),
-                  ),
-                ),
-              ],
-
               const SizedBox(height: 32),
             ],
           ),
@@ -1194,7 +1599,16 @@ class _HomeTabState extends State<HomeTab> {
 
 class _RecommendationCard extends StatelessWidget {
   final Map<String, dynamic> item;
-  const _RecommendationCard({required this.item});
+  final double width;
+  final double imageHeight;
+  final bool compact;
+
+  const _RecommendationCard({
+    required this.item,
+    this.width = 112,
+    this.imageHeight = 92,
+    this.compact = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1208,15 +1622,15 @@ class _RecommendationCard extends StatelessWidget {
     return GestureDetector(
       onTap: () => _openRecommendation(context, type, data),
       child: Container(
-        width: 112,
+        width: width,
         margin: const EdgeInsets.only(right: 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Stack(children: [
               Container(
-                width: 112,
-                height: 92,
+                width: width,
+                height: imageHeight,
                 decoration: BoxDecoration(
                   gradient: _recommendationGradient(type),
                   borderRadius:
@@ -1263,17 +1677,17 @@ class _RecommendationCard extends StatelessWidget {
             ]),
             const SizedBox(height: 7),
             Text(title,
-                maxLines: 1,
+                maxLines: compact ? 1 : 2,
                 overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.outfit(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+                    fontSize: compact ? 12 : 14,
+                    fontWeight: FontWeight.w800,
                     color: AppColors.text)),
             Text(subtitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style:
-                    GoogleFonts.outfit(fontSize: 10, color: AppColors.text3)),
+                    GoogleFonts.outfit(fontSize: compact ? 10 : 11, color: AppColors.text3)),
           ],
         ),
       ),
@@ -1381,66 +1795,67 @@ class _RecommendationCard extends StatelessWidget {
     }
   }
 
-  void _openRecommendation(
-      BuildContext context, String type, Map<String, dynamic> data) {
-    if (type == 'artist') {
-      final id = data['id']?.toString() ?? '';
-      if (id.isEmpty) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ArtistScreen(
-            artistId: id,
-            artistName: (data['name'] ?? '').toString(),
-          ),
-        ),
-      );
-      return;
-    }
-    if (type == 'album') {
-      final rawId = data['id'] ?? data['album_id'];
-      final id = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
-      if (id == null) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => AlbumScreen(albumId: id)),
-      );
-      return;
-    }
-    if (type == 'playlist') {
-      final rawId = data['id'] ?? data['playlist_id'];
-      final id = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
-      if (id == null) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => PlaylistScreen(
-            playlistId: id,
-            playlistTitle: data['name']?.toString(),
-          ),
-        ),
-      );
-      return;
-    }
-    if (type == 'this_is') {
-      _openThisIs(context, data);
-      return;
-    }
-    if (type == 'user') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => _SimilarUserScreen(user: data),
-        ),
-      );
-      return;
-    }
-    final track = Map<String, dynamic>.from(data);
+}
+
+void _openRecommendation(
+    BuildContext context, String type, Map<String, dynamic> data) {
+  if (type == 'artist') {
+    final id = data['id']?.toString() ?? '';
+    if (id.isEmpty) return;
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => PlayerScreen(track: track)),
+      MaterialPageRoute(
+        builder: (_) => ArtistScreen(
+          artistId: id,
+          artistName: (data['name'] ?? '').toString(),
+        ),
+      ),
     );
+    return;
   }
+  if (type == 'album') {
+    final rawId = data['id'] ?? data['album_id'];
+    final id = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
+    if (id == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => AlbumScreen(albumId: id)),
+    );
+    return;
+  }
+  if (type == 'playlist') {
+    final rawId = data['id'] ?? data['playlist_id'];
+    final id = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
+    if (id == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PlaylistScreen(
+          playlistId: id,
+          playlistTitle: data['name']?.toString(),
+        ),
+      ),
+    );
+    return;
+  }
+  if (type == 'this_is') {
+    _openThisIs(context, data);
+    return;
+  }
+  if (type == 'user') {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _SimilarUserScreen(user: data),
+      ),
+    );
+    return;
+  }
+  final track = Map<String, dynamic>.from(data);
+  Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => PlayerScreen(track: track)),
+  );
 }
 
 Future<void> _openThisIs(
@@ -1632,6 +2047,7 @@ class _HotTrackCard extends StatelessWidget {
                       child: CachedNetworkImage(
                         imageUrl: coverUrl,
                         fit: BoxFit.cover,
+                        placeholder: (_, __) => const SizedBox(),
                         errorWidget: (_, __, ___) => const Center(
                             child: Text('🎵', style: TextStyle(fontSize: 36))),
                       ),
@@ -1939,8 +2355,7 @@ class _TrackCard extends StatelessWidget {
                           fit: BoxFit.cover,
                           placeholder: (_, __) => const SizedBox(),
                           errorWidget: (_, __, ___) => const Center(
-                              child:
-                                  Text('🎵', style: TextStyle(fontSize: 40)))))
+                              child: Text('🎵', style: TextStyle(fontSize: 40)))))
                   : const Center(
                       child: Text('🎵', style: TextStyle(fontSize: 40))),
             ),
@@ -1970,34 +2385,111 @@ class _TrackCard extends StatelessWidget {
 // ─── Mood tile ────────────────────────────────────────────────────────────────
 
 class _MoodTile extends StatelessWidget {
-  final String emoji, name;
-  final LinearGradient gradient;
-  final VoidCallback? onTap;
-  const _MoodTile(
-      {required this.emoji,
-      required this.name,
-      required this.gradient,
-      this.onTap});
+  final MoodData mood;
+  final VoidCallback onTap;
+
+  const _MoodTile({
+    required this.mood,
+    required this.onTap,
+  });
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) {
+    return GestureDetector(
       onTap: onTap,
       child: Container(
-          width: 120,
-          margin: const EdgeInsets.only(right: 12),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-              gradient: gradient, borderRadius: BorderRadius.circular(20)),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(emoji, style: const TextStyle(fontSize: 30)),
-            const Spacer(),
-            Text(name,
-                style: GoogleFonts.outfit(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white)),
-          ])));
+        width: 138,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: mood.glowColor.withOpacity(0.30),
+              blurRadius: 22,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CachedNetworkImage(
+                imageUrl: mood.artUrl,
+                fit: BoxFit.cover,
+                placeholder: (_, __) => Container(
+                  decoration: BoxDecoration(gradient: mood.gradient),
+                ),
+                errorWidget: (_, __, ___) => Container(
+                  decoration: BoxDecoration(gradient: mood.gradient),
+                ),
+              ),
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.transparent,
+                      mood.gradient.colors.first.withOpacity(0.55),
+                      mood.gradient.colors.last.withOpacity(0.92),
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    stops: const [0.0, 0.55, 1.0],
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: 14,
+                left: 0,
+                right: 0,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text(
+                        mood.name,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          color: Colors.white,
+                          fontSize: 17,
+                          height: 1.1,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.2,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black.withOpacity(0.6),
+                              blurRadius: 10,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        mood.subtitle,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          color: Colors.white.withOpacity(0.72),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ─── Mood tracks bottom sheet ─────────────────────────────────────────────────
@@ -2057,7 +2549,20 @@ class _MoodTracksSheetState extends State<_MoodTracksSheet> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Row(children: [
-            Text(widget.emoji, style: const TextStyle(fontSize: 24)),
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: AppColors.purple.withOpacity(0.18),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: const Icon(
+                Icons.graphic_eq_rounded,
+                color: AppColors.purpleLight,
+                size: 18,
+              ),
+            ),
             const SizedBox(width: 10),
             Text('${widget.name} Vibes',
                 style: GoogleFonts.outfit(
@@ -2118,8 +2623,7 @@ class _MoodTracksSheetState extends State<_MoodTracksSheet> {
                                       borderRadius: BorderRadius.circular(12)),
                                   child: coverUrl != null
                                       ? ClipRRect(
-                                          borderRadius:
-                                              BorderRadius.circular(12),
+                                          borderRadius: BorderRadius.circular(12),
                                           child: CachedNetworkImage(
                                               imageUrl: coverUrl,
                                               fit: BoxFit.cover,
@@ -2262,6 +2766,162 @@ class _AiMixCard extends StatelessWidget {
 
 // ─── Home see-all screens ────────────────────────────────────────────────────
 
+class _BecauseYouListenedScreen extends StatelessWidget {
+  final String title;
+  final List<Map<String, dynamic>> tracks;
+  final String seedArtist;
+
+  const _BecauseYouListenedScreen({
+    required this.title,
+    required this.tracks,
+    required this.seedArtist,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final seedKey = seedArtist.trim().toLowerCase();
+    final fromArtist = seedKey.isNotEmpty
+        ? tracks.where((t) {
+            final a = (t['artist'] ?? t['artistName'] ?? '')
+                .toString()
+                .trim()
+                .toLowerCase();
+            return a == seedKey;
+          }).toList()
+        : <Map<String, dynamic>>[];
+    final others = tracks
+        .where((t) {
+          final a = (t['artist'] ?? t['artistName'] ?? '')
+              .toString()
+              .trim()
+              .toLowerCase();
+          return a != seedKey;
+        })
+        .toList();
+
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: SafeArea(
+        child: Column(children: [
+          _PushedHeader(title: title),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+              children: [
+                if (fromArtist.isNotEmpty) ...[
+                  _BecauseSectionLabel('From ${seedArtist.isNotEmpty ? seedArtist : "this artist"}'),
+                  ...fromArtist.map((t) => _BecauseTrackRow(track: t, queue: tracks)),
+                  const SizedBox(height: 10),
+                ],
+                if (others.isNotEmpty) ...[
+                  _BecauseSectionLabel(fromArtist.isEmpty ? 'Tracks' : 'Similar vibe'),
+                  ...others.map((t) => _BecauseTrackRow(track: t, queue: tracks)),
+                ],
+              ],
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _BecauseSectionLabel extends StatelessWidget {
+  final String text;
+  const _BecauseSectionLabel(this.text);
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(0, 8, 0, 10),
+        child: Text(
+          text,
+          style: GoogleFonts.outfit(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: AppColors.text3,
+            letterSpacing: 0.3,
+          ),
+        ),
+      );
+}
+
+class _BecauseTrackRow extends StatelessWidget {
+  final Map<String, dynamic> track;
+  final List<Map<String, dynamic>> queue;
+  const _BecauseTrackRow({required this.track, required this.queue});
+
+  @override
+  Widget build(BuildContext context) {
+    final title =
+        (track['title'] ?? track['trackName'] ?? 'Unknown').toString();
+    final artist = (track['artist'] ?? track['artistName'] ?? '').toString();
+    final cover = (track['cover_url'] ?? track['artworkUrl100'])?.toString();
+    final durationMs = track['duration_ms'] as int? ??
+        track['trackTimeMillis'] as int? ??
+        0;
+    final durationStr = durationMs > 0
+        ? '${(durationMs ~/ 60000).toString().padLeft(1, '0')}:${((durationMs % 60000) ~/ 1000).toString().padLeft(2, '0')}'
+        : '';
+    final withQueue = Map<String, dynamic>.from(track)..['queue'] = queue;
+
+    return GestureDetector(
+      onTap: () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => PlayerScreen(track: withQueue))),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              gradient: AppColors.gradMixed,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: cover != null && cover.isNotEmpty
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: CachedNetworkImage(
+                      imageUrl: cover,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) =>
+                          const Center(child: Text('🎵')),
+                    ),
+                  )
+                : const Center(child: Text('🎵')),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text)),
+                Text(artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        GoogleFonts.outfit(fontSize: 12, color: AppColors.text2)),
+              ],
+            ),
+          ),
+          if (durationStr.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            Text(durationStr,
+                style: GoogleFonts.outfit(
+                    fontSize: 12, color: AppColors.text3)),
+            const SizedBox(width: 6),
+          ],
+          const Icon(Icons.play_arrow_rounded, color: AppColors.text3, size: 22),
+        ]),
+      ),
+    );
+  }
+}
+
 class _TrackListScreen extends StatelessWidget {
   final String title;
   final List<dynamic> tracks;
@@ -2330,15 +2990,14 @@ class _TrackListScreen extends StatelessWidget {
                                     fontWeight: FontWeight.w700,
                                     color: AppColors.text)),
                             Text(artist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                                 style: GoogleFonts.outfit(
-                                    fontSize: 12, color: AppColors.text3)),
+                                    fontSize: 12,
+                                    color: AppColors.text2)),
                           ],
                         ),
                       ),
                       const Icon(Icons.play_arrow_rounded,
-                          color: AppColors.text3),
+                          color: AppColors.text3, size: 22),
                     ]),
                   ),
                 );
@@ -2378,6 +3037,264 @@ class _HomeShelfScreen extends StatelessWidget {
             ),
           ),
         ]),
+      ),
+    );
+  }
+}
+
+class _RecommendationListRow extends StatelessWidget {
+  final Map<String, dynamic> item;
+
+  const _RecommendationListRow({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final type = item['type']?.toString() ?? 'album';
+    final data = Map<String, dynamic>.from(item['data'] as Map);
+    final title = (data['title'] ??
+            data['trackName'] ??
+            data['album_name'] ??
+            data['collectionName'] ??
+            'MoodWave pick')
+        .toString();
+    final subtitle =
+        (data['artist'] ?? data['artistName'] ?? data['artist_name'] ?? '')
+            .toString();
+    final imageUrl = (data['cover_url'] ??
+            data['artworkUrl100'] ??
+            data['cover_xl'] ??
+            data['image_url'] ??
+            '')
+        .toString();
+
+    return GestureDetector(
+      onTap: () => _openRecommendation(context, type, data),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                gradient: AppColors.gradBlue,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: imageUrl.isNotEmpty
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: CachedNetworkImage(
+                        imageUrl: imageUrl,
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) =>
+                            const Center(child: Text('💿')),
+                      ),
+                    )
+                  : const Center(child: Text('💿')),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.glass,
+                      borderRadius: BorderRadius.circular(100),
+                    ),
+                    child: Text(
+                      'ALBUM',
+                      style: GoogleFonts.outfit(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.text2,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.text,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        GoogleFonts.outfit(fontSize: 12, color: AppColors.text3),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.text3,
+              size: 18,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ShelfSectionTitle extends StatelessWidget {
+  final String title;
+  final String subtitle;
+
+  const _ShelfSectionTitle({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.outfit(
+            fontSize: 19,
+            fontWeight: FontWeight.w800,
+            color: AppColors.text,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          style: GoogleFonts.outfit(
+            fontSize: 12,
+            color: AppColors.text3,
+            height: 1.45,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ShelfEmptyState extends StatelessWidget {
+  final String title;
+  final String subtitle;
+
+  const _ShelfEmptyState({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 40),
+      child: Center(
+        child: Column(
+          children: [
+            const Icon(Icons.music_note_rounded,
+                color: AppColors.text3, size: 42),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: GoogleFonts.outfit(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppColors.text,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.outfit(fontSize: 13, color: AppColors.text3),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _YouMightLikeScreen extends StatelessWidget {
+  final List<Map<String, dynamic>> items;
+
+  const _YouMightLikeScreen({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    final artists = items.where((item) => item['type'] == 'artist').toList();
+    final albums = items.where((item) => item['type'] == 'album').toList();
+
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            const _PushedHeader(title: 'You Might Like'),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (artists.isNotEmpty) ...[
+                      _ShelfSectionTitle(
+                        title: 'Artists for you',
+                        subtitle: 'Based on your follows and recent listening',
+                      ),
+                      const SizedBox(height: 12),
+                      GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: artists.length,
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 16,
+                          crossAxisSpacing: 14,
+                          mainAxisExtent: 210,
+                        ),
+                        itemBuilder: (context, i) => _RecommendationCard(
+                          item: artists[i],
+                          width: double.infinity,
+                          imageHeight: 140,
+                          compact: false,
+                        ),
+                      ),
+                    ],
+                    if (albums.isNotEmpty) ...[
+                      const SizedBox(height: 22),
+                      _ShelfSectionTitle(
+                        title: 'Albums you may like',
+                        subtitle: 'A cleaner set of records close to your taste',
+                      ),
+                      const SizedBox(height: 12),
+                      ...albums.map(
+                        (item) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _RecommendationListRow(item: item),
+                        ),
+                      ),
+                    ],
+                    if (artists.isEmpty && albums.isEmpty)
+                      const _ShelfEmptyState(
+                        title: 'No recommendations yet',
+                        subtitle:
+                            'Play more music and follow a few artists to unlock better picks.',
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2570,7 +3487,7 @@ class _SimilarUserScreenState extends State<_SimilarUserScreen> {
                 gradient: const LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [Color(0xFF1a063d), Color(0xFF0f172a)],
+                  colors: [Color(0xFF1a063d), Color(0xFF111827)],
                 ),
                 borderRadius: BorderRadius.circular(26),
                 border: Border.all(color: AppColors.border),
@@ -2936,7 +3853,8 @@ class _FriendListeningCard extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
                 color: AppColors.glass,
-                border: Border.all(color: Colors.white.withOpacity(0.1)),
+                border: Border.all(
+                    color: AppColors.purpleLight.withOpacity(0.4), width: 2),
               ),
               child: cover.isNotEmpty
                   ? CachedNetworkImage(
@@ -2946,9 +3864,8 @@ class _FriendListeningCard extends StatelessWidget {
                         decoration: BoxDecoration(gradient: avatarGradient),
                       ),
                     )
-                  : Container(
-                      decoration: BoxDecoration(gradient: avatarGradient),
-                    ),
+                  : const Center(
+                      child: Text('🎵', style: TextStyle(fontSize: 22))),
             ),
             const SizedBox(width: 10),
             Expanded(

@@ -10,6 +10,7 @@ import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../utils/error_helper.dart';
+import '../utils/media_url.dart';
 import '../utils/show_snackbar.dart';
 import 'taste_preferences_screen.dart';
 
@@ -65,6 +66,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late bool _showActivity;
   late bool _showFollowers;
   late bool _hideMusicTaste;
+  late bool _matchingEnabled;
+  late bool _showMatchCity;
   late bool _hideForwardProfile;
   String? _gender;
   bool _saving = false;
@@ -74,6 +77,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Uint8List? _bannerBytes;
   String? _savedAvatarUrl;
   String? _savedBannerUrl;
+  int _previewVersion = DateTime.now().millisecondsSinceEpoch;
 
   @override
   void initState() {
@@ -89,6 +93,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _showActivity = widget.user['show_activity'] ?? true;
     _showFollowers = widget.user['show_followers'] ?? true;
     _hideMusicTaste = widget.user['hide_music_taste'] ?? false;
+    _matchingEnabled = widget.user['matching_enabled'] ?? true;
+    _showMatchCity = widget.user['show_match_city'] ?? true;
     _hideForwardProfile = widget.user['hide_forward_profile'] ?? false;
     _gender = widget.user['gender'];
     _savedAvatarUrl = widget.user['avatar_url'] as String?;
@@ -402,6 +408,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'show_activity': _showActivity,
         'show_followers': _showFollowers,
         'hide_music_taste': _hideMusicTaste,
+        'matching_enabled': _matchingEnabled,
+        'show_match_city': _showMatchCity,
         'hide_forward_profile': _hideForwardProfile,
         if (_gender != null) 'gender': _gender,
       };
@@ -445,6 +453,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         _savedBannerUrl = nextBannerUrl;
         _avatarBytes = null;
         _bannerBytes = null;
+        _previewVersion = DateTime.now().millisecondsSinceEpoch;
       });
       showSuccessSnackBar(context, 'Profile updated successfully!');
       Navigator.of(context).pop(true);
@@ -466,8 +475,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             ? _nameCtrl.text
             : widget.user['display_name'] ?? 'U')[0]
         .toUpperCase();
-    final avatarUrl = _savedAvatarUrl ?? '';
-    final bannerUrl = _savedBannerUrl ?? '';
+    final avatarUrl = buildMediaUrl(_savedAvatarUrl, version: _previewVersion);
+    final bannerUrl = buildMediaUrl(_savedBannerUrl, version: _previewVersion);
     final bannerColors = _bannerGradients[_bannerPreset];
     final avatarColors = _avatarGradients[_avatarPreset];
 
@@ -791,6 +800,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
                   // Privacy toggles
                   _buildToggleRow(
+                    'Appear in Music Match',
+                    'Let other people discover you in Music Match',
+                    Icons.auto_awesome_rounded,
+                    _matchingEnabled,
+                    (v) => setState(() => _matchingEnabled = v),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildToggleRow(
                     'Public Profile',
                     'Anyone can see your profile',
                     Icons.public_rounded,
@@ -820,6 +837,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     Icons.music_note_rounded,
                     !_hideMusicTaste,
                     (v) => setState(() => _hideMusicTaste = !v),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildToggleRow(
+                    'Show City in Matching',
+                    'Display your city on Music Match cards',
+                    Icons.location_on_rounded,
+                    _showMatchCity,
+                    _matchingEnabled
+                        ? (v) => setState(() => _showMatchCity = v)
+                        : null,
                   ),
                   const SizedBox(height: 8),
                   _buildToggleRow(
@@ -980,8 +1007,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     String subtitle,
     IconData icon,
     bool value,
-    ValueChanged<bool> onChanged,
+    ValueChanged<bool>? onChanged,
   ) {
+    final enabled = onChanged != null;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
@@ -999,12 +1027,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               style: GoogleFonts.outfit(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  color: Colors.white)),
+                  color: enabled ? Colors.white : AppColors.text2)),
           Text(subtitle,
               style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
         ])),
         GestureDetector(
-          onTap: () => onChanged(!value),
+          onTap: enabled ? () => onChanged(!value) : null,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             width: 44,
@@ -1014,7 +1042,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ? const LinearGradient(
                       colors: [AppColors.purpleDark, AppColors.purple])
                   : null,
-              color: value ? null : AppColors.surface3,
+              color: value
+                  ? null
+                  : (enabled ? AppColors.surface3 : AppColors.glass),
               borderRadius: BorderRadius.circular(100),
             ),
             child: AnimatedAlign(

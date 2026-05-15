@@ -169,17 +169,18 @@ def get_messages(firebase_chat_id: str, limit: int = 50) -> list[dict[str, Any]]
         return messages[-limit:]
     try:
         data = db.reference(f"chats/{firebase_chat_id}/messages").order_by_key().limit_to_last(limit).get()
-        if not data:
-            return []
         messages: list[dict[str, Any]] = []
-        for key, payload in data.items():
-            if not isinstance(payload, dict):
-                continue
-            payload["message_id"] = key
-            messages.append(payload)
+        if data:
+            for key, payload in data.items():
+                if not isinstance(payload, dict):
+                    continue
+                payload["message_id"] = key
+                messages.append(payload)
         fallback = _read_fallback_store()
         fallback_chat = fallback.get("chats", {}).get(firebase_chat_id, {})
         fallback_messages = fallback_chat.get("messages", {})
+        firebase_ids = {m.get("message_id") for m in messages}
+        # Overlay reactions from fallback onto Firebase messages
         for message in messages:
             overlay = fallback_messages.get(message.get("message_id", ""))
             if isinstance(overlay, dict) and isinstance(overlay.get("reactions"), dict):
@@ -191,8 +192,12 @@ def get_messages(firebase_chat_id: str, limit: int = 50) -> list[dict[str, Any]]
                             existing.append(user_id)
                     merged[emoji] = existing
                 message["reactions"] = merged
+        # Include fallback-only messages (written when Firebase push failed)
+        for key, item in fallback_messages.items():
+            if key not in firebase_ids and isinstance(item, dict):
+                messages.append({**item, "message_id": key})
         messages.sort(key=lambda item: item.get("sent_at", ""))
-        return messages
+        return messages[-limit:]
     except Exception as e:
         logger.warning("Firebase get_messages failed: %s", e)
         payload = _read_fallback_store()

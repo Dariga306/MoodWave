@@ -199,6 +199,19 @@ class _FavoriteArtistsScreenState extends State<FavoriteArtistsScreen> {
     return hash.toString();
   }
 
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: GoogleFonts.outfit(),
+        ),
+        backgroundColor: const Color(0xFF3d0000),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   Future<void> _loadRecommended() async {
     final seeds = <String>[];
     for (final genre in widget.selectedGenres) {
@@ -339,16 +352,7 @@ class _FavoriteArtistsScreenState extends State<FavoriteArtistsScreen> {
       return;
     }
     if (_selected.length >= 5) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Choose up to 5 artists',
-            style: GoogleFonts.outfit(),
-          ),
-          backgroundColor: const Color(0xFF3d0000),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showError('Choose up to 5 artists');
       return;
     }
     setState(() => _selected.add(Map<String, dynamic>.from(artist)));
@@ -356,27 +360,22 @@ class _FavoriteArtistsScreenState extends State<FavoriteArtistsScreen> {
 
   Future<void> _continue() async {
     if (_selected.length < 5) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Choose 5 artists you like',
-            style: GoogleFonts.outfit(),
-          ),
-          backgroundColor: const Color(0xFF3d0000),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showError('Choose 5 artists to continue');
       return;
     }
     setState(() => _saving = true);
     try {
       await ApiService().saveFavoriteArtists(_selected);
-    } catch (_) {}
-    if (!mounted) return;
-    setState(() => _saving = false);
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const CitySelectScreen()),
-    );
+      if (!mounted) return;
+      setState(() => _saving = false);
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const CitySelectScreen()),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _showError('Could not save artists. Please try again');
+    }
   }
 
   @override
@@ -415,7 +414,7 @@ class _FavoriteArtistsScreenState extends State<FavoriteArtistsScreen> {
                     ),
                     const SizedBox(height: 20),
                     Text(
-                      'Choose 5 artists you like',
+                      'Choose 5 artists',
                       style: GoogleFonts.outfit(
                         fontSize: 26,
                         fontWeight: FontWeight.w800,
@@ -424,7 +423,7 @@ class _FavoriteArtistsScreenState extends State<FavoriteArtistsScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'We use them for your profile, matches and recommendations',
+                      'They help Music Match find people with similar taste',
                       style: GoogleFonts.outfit(
                         fontSize: 14,
                         color: AppColors.text2,
@@ -439,6 +438,44 @@ class _FavoriteArtistsScreenState extends State<FavoriteArtistsScreen> {
                         color: _selected.length >= 5
                             ? AppColors.purpleLight
                             : AppColors.text3,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface.withValues(alpha: 0.78),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              gradient: AppColors.gradMixed,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.favorite_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'These artists will appear in Music Match cards and affect your match percentage.',
+                              style: GoogleFonts.outfit(
+                                fontSize: 12,
+                                height: 1.25,
+                                color: AppColors.text2,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -506,7 +543,7 @@ class _FavoriteArtistsScreenState extends State<FavoriteArtistsScreen> {
                         children: [
                           Text(
                             _searchCtrl.text.trim().length >= 2
-                                ? 'Search Results'
+                                ? 'Search results'
                                 : 'Recommended from your genres',
                             style: GoogleFonts.outfit(
                               fontSize: 18,
@@ -582,7 +619,7 @@ class _FavoriteArtistsScreenState extends State<FavoriteArtistsScreen> {
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
                       gradient: _selected.length >= 5
-                          ? AppColors.primaryBtn
+                          ? AppColors.authCta
                           : const LinearGradient(
                               colors: [Color(0xFF2a2a3d), Color(0xFF2a2a3d)],
                             ),
@@ -590,7 +627,8 @@ class _FavoriteArtistsScreenState extends State<FavoriteArtistsScreen> {
                       boxShadow: _selected.length >= 5
                           ? [
                               BoxShadow(
-                                color: AppColors.purpleDark.withOpacity(0.4),
+                                color:
+                                    AppColors.purpleDark.withValues(alpha: 0.4),
                                 blurRadius: 30,
                                 offset: const Offset(0, 12),
                               ),
@@ -683,7 +721,7 @@ class _ArtistChoiceCard extends StatelessWidget {
           boxShadow: selected
               ? [
                   BoxShadow(
-                    color: AppColors.purpleDark.withOpacity(0.35),
+                    color: AppColors.purpleDark.withValues(alpha: 0.35),
                     blurRadius: 18,
                     offset: const Offset(0, 8),
                   ),

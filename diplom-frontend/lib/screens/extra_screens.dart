@@ -4241,6 +4241,21 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
   String _shareDestinationKey(Map<String, dynamic> chat) {
     final kind = (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct')
         .toString();
+    if (kind == 'user' || kind == 'direct' || kind == 'match') {
+      final personId = (chat['user_id'] ??
+              chat['id'] ??
+              (chat['partner'] as Map?)?['id'])
+          ?.toString();
+      if (personId != null && personId.isNotEmpty) {
+        return 'person:$personId';
+      }
+    }
+    if (kind == 'group') {
+      final groupId = (chat['group_chat_id'] ?? chat['chat_id'])?.toString();
+      if (groupId != null && groupId.isNotEmpty) {
+        return 'group:$groupId';
+      }
+    }
     return [
       kind,
       chat['match_id'],
@@ -4253,10 +4268,21 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
   Future<List<Map<String, dynamic>>> _loadRoomShareDestinations() async {
     final byKey = <String, Map<String, dynamic>>{};
     final directUserIds = <int>{};
+    int priority(Map<String, dynamic> item) {
+      final kind =
+          (item['destination_type'] ?? item['chat_kind'] ?? 'direct').toString();
+      if (kind == 'match') return 0;
+      if (kind == 'direct') return 1;
+      if (kind == 'group') return 2;
+      return 3;
+    }
     void add(Map<String, dynamic> item) {
       final key = _shareDestinationKey(item);
       if (key.trim().replaceAll(':', '').isEmpty) return;
-      byKey.putIfAbsent(key, () => item);
+      final existing = byKey[key];
+      if (existing == null || priority(item) < priority(existing)) {
+        byKey[key] = item;
+      }
     }
 
     final chats = await ApiService().getChats();

@@ -13,14 +13,36 @@ import asyncio
 
 from app.dependencies import get_current_user, get_db
 from app.models.music import ListeningHistory, TrackCache
-from app.models.social import ArtistFollow, Block, Friend, FriendStatus, Match, Report, UserFollow
-from app.models.user import User
+from app.models.social import ArtistFollow, Block, Friend, FriendStatus, Match, MatchDecision, Report, UserFollow
+from app.models.user import TasteVector, User
 from app.services import cache as cache_svc
 from app.services import deezer as deezer_service
 from app.services import firebase as firebase_svc
 from app.services.security import users_are_blocked
 
 router = APIRouter()
+
+
+async def _set_artist_taste_feature(
+    db: AsyncSession,
+    user_id: int,
+    deezer_artist_id: int,
+    *,
+    enabled: bool,
+) -> None:
+    tv = await db.scalar(select(TasteVector).where(TasteVector.user_id == user_id))
+    if not tv:
+        tv = TasteVector(user_id=user_id, vector={})
+        db.add(tv)
+        await db.flush()
+
+    vector = dict(tv.vector or {})
+    key = f"artist:{deezer_artist_id}"
+    if enabled:
+        vector[key] = 1.0
+    else:
+        vector.pop(key, None)
+    tv.vector = vector
 
 
 def _time_ago(dt: datetime) -> str:
@@ -48,9 +70,11 @@ def _friend_payload(user: User) -> dict:
     return {
         "id": user.id,
         "username": user.username,
+        "display_name": user.display_name,
         "first_name": user.first_name,
         "avatar_url": user.avatar_url,
         "city": user.city,
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None,
     }
 
 
@@ -125,6 +149,8 @@ async def _presence_payload(redis, user: User) -> dict:
             last_seen_at = await redis.get(f"last_seen:{user.id}")
         except Exception:
             last_seen_at = None
+    if not last_seen_at and user.updated_at:
+        last_seen_at = user.updated_at.isoformat() + "Z"
     return {
         "is_online": bool(payload),
         "presence_status": "online" if payload else "offline",
@@ -252,6 +278,7 @@ async def friends_activity(
     following_rows = await _following_rows(db, current_user.id)
     live: list[dict] = []
     recent: list[dict] = []
+    people: list[dict] = []
     seen_ids: set[int] = set()
 
     now_utc = datetime.utcnow()
@@ -309,6 +336,7 @@ async def friends_activity(
         else:
             friend_data["now_playing"] = None
             recent.append(friend_data)
+        people.append(friend_data)
 
     for _friendship, user in rows:
         await append_activity_user(user)
@@ -339,7 +367,14 @@ async def friends_activity(
             continue
         await append_activity_user(user)
 
-    return {"live": live, "recent": recent}
+    people.sort(
+        key=lambda item: (
+            0 if item.get("activity_status") == "live" else 1,
+            0 if item.get("is_online") else 1,
+            (item.get("display_name") or item.get("username") or "").lower(),
+        ),
+    )
+    return {"live": live, "recent": recent, "people": people}
 
 
 @router.post(
@@ -559,13 +594,65 @@ async def report_user(
 @router.get(
     "/notifications",
     summary="Get notifications",
-    description="Returns aggregated notifications: mutual matches and pending friend requests, sorted newest first.",
+    description="Returns aggregated notifications: likes, mutual matches and pending friend requests, sorted newest first.",
 )
 async def get_notifications(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     notifications: list[dict] = []
+
+    # Recent incoming likes that are not yet mutual
+    incoming_like_rows = (
+        await db.execute(
+            select(MatchDecision, User)
+            .where(
+                MatchDecision.target_user_id == current_user.id,
+                MatchDecision.decision == "like",
+            )
+            .join(User, User.id == MatchDecision.user_id)
+            .order_by(MatchDecision.created_at.desc())
+            .limit(20)
+        )
+    ).all()
+
+    for like_decision, other in incoming_like_rows:
+        if await users_are_blocked(db, current_user.id, other.id):
+            continue
+        my_reply = await db.scalar(
+            select(MatchDecision).where(
+                MatchDecision.user_id == current_user.id,
+                MatchDecision.target_user_id == other.id,
+                MatchDecision.decision == "like",
+            )
+        )
+        if my_reply:
+            continue
+        existing_match = await db.scalar(
+            select(Match).where(
+                or_(
+                    and_(Match.user_a_id == current_user.id, Match.user_b_id == other.id),
+                    and_(Match.user_a_id == other.id, Match.user_b_id == current_user.id),
+                )
+            )
+        )
+        if existing_match:
+            continue
+        name = other.first_name or other.display_name or other.username
+        notifications.append(
+            {
+                "id": f"like_{like_decision.id}",
+                "type": "like",
+                "user_id": other.id,
+                "user_name": name,
+                "user_initial": name[0].upper() if name else "?",
+                "avatar_url": other.avatar_url,
+                "city": other.city,
+                "text": f"{name} liked your music taste. Like back and you can start chatting together.",
+                "time": _time_ago(like_decision.created_at),
+                "created_at": like_decision.created_at.isoformat(),
+            }
+        )
 
     # Recent mutual matches
     match_rows = (
@@ -760,6 +847,7 @@ async def get_user_following(
 )
 async def follow_artist(
     deezer_artist_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -771,7 +859,14 @@ async def follow_artist(
     )
     if not existing:
         db.add(ArtistFollow(user_id=current_user.id, deezer_artist_id=deezer_artist_id))
-        await db.commit()
+    await _set_artist_taste_feature(
+        db,
+        current_user.id,
+        deezer_artist_id,
+        enabled=True,
+    )
+    await db.commit()
+    await cache_svc.invalidate_all_match_candidates(request.app.state.redis)
     return {"message": "Artist followed"}
 
 
@@ -782,6 +877,7 @@ async def follow_artist(
 )
 async def unfollow_artist(
     deezer_artist_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -791,7 +887,14 @@ async def unfollow_artist(
             ArtistFollow.deezer_artist_id == deezer_artist_id,
         )
     )
+    await _set_artist_taste_feature(
+        db,
+        current_user.id,
+        deezer_artist_id,
+        enabled=False,
+    )
     await db.commit()
+    await cache_svc.invalidate_all_match_candidates(request.app.state.redis)
     return {"message": "Artist unfollowed"}
 
 

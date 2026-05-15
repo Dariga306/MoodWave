@@ -4,7 +4,6 @@ import json
 from datetime import datetime, timedelta
 from typing import Optional
 
-import httpx
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_user_optional, get_db
 from app.models.music import ListeningAction, ListeningHistory, TrackCache
 from app.models.user import User
-from app.schemas.music import TrackResponse
+from app.services import deezer as deezer_service
 
 router = APIRouter()
 
@@ -22,34 +21,6 @@ PLAY_ACTIONS = [
     ListeningAction.completed,
     ListeningAction.replayed,
 ]
-
-
-async def _deezer_global_charts(limit: int) -> list[dict]:
-    """Fetch real global top tracks from Deezer."""
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.get(
-                "https://api.deezer.com/chart/0/tracks",
-                params={"limit": limit},
-            )
-        if resp.status_code == 200:
-            data = resp.json().get("data", [])
-            return [
-                {
-                    "spotify_id": f"deezer_{t['id']}",
-                    "title": t["title"],
-                    "artist": t["artist"]["name"],
-                    "album": t["album"]["title"],
-                    "cover_url": t["album"].get("cover_xl") or t["album"].get("cover_medium"),
-                    "preview_url": t.get("preview"),
-                    "duration_ms": int(t.get("duration", 0)) * 1000,
-                }
-                for t in data
-                if t.get("id")
-            ]
-    except Exception:
-        pass
-    return []
 
 
 def _track_payload(track_id: str, cache: TrackCache | None) -> dict:
@@ -78,7 +49,6 @@ def _track_payload(track_id: str, cache: TrackCache | None) -> dict:
 
 @router.get(
     "/city",
-    response_model=list[TrackResponse],
     summary="Get city charts",
     description="Returns the most-played tracks for a city over the last 24 hours with cached metadata fallbacks.",
 )
@@ -100,11 +70,11 @@ async def charts_by_city(
         await db.execute(
             select(ListeningHistory.spotify_track_id, func.count(ListeningHistory.id).label("plays"))
             .join(User, User.id == ListeningHistory.user_id)
-                .where(
-                    func.lower(User.city) == city.lower(),
-                    ListeningHistory.action.in_(PLAY_ACTIONS),
-                    ListeningHistory.created_at >= window_start,
-                )
+            .where(
+                func.lower(User.city) == city.lower(),
+                ListeningHistory.action.in_(PLAY_ACTIONS),
+                ListeningHistory.created_at >= window_start,
+            )
             .group_by(ListeningHistory.spotify_track_id)
             .order_by(desc("plays"))
             .limit(limit)
@@ -146,13 +116,35 @@ async def charts_by_city(
         ).all()
 
     if city_rows:
-        result: list[dict] = []
-        for track_id, _plays in city_rows:
-            cache = await db.scalar(select(TrackCache).where(TrackCache.spotify_id == track_id))
-            result.append(_track_payload(track_id, cache))
+        track_ids = [r[0] for r in city_rows]
+
+        # FIX: один батч-запрос вместо N отдельных SELECT (было N+1)
+        caches_result = await db.execute(
+            select(TrackCache).where(TrackCache.spotify_id.in_(track_ids))
+        )
+        cache_map: dict[str, TrackCache] = {
+            c.spotify_id: c for c in caches_result.scalars().all()
+        }
+
+        # Сохраняем порядок из city_rows (отсортированный по plays)
+        result = [_track_payload(tid, cache_map.get(tid)) for tid in track_ids]
     else:
-        # Step 4: Deezer global charts (real top 50, not keyword search)
-        result = await _deezer_global_charts(limit)
+        # Step 4: Deezer global charts (реальный топ, не keyword search)
+        # FIX: используем общий deezer_service.get_chart_tracks вместо дубля
+        deezer_tracks = await deezer_service.get_chart_tracks(limit)
+        result = [
+            {
+                "spotify_id": t["spotify_id"],
+                "title": t["title"],
+                "artist": t["artist"],
+                "album": t.get("album"),
+                "genre": None,
+                "cover_url": t.get("cover_url"),
+                "preview_url": t.get("preview_url"),
+                "duration_ms": t.get("duration_ms"),
+            }
+            for t in deezer_tracks
+        ]
 
     await redis.setex(cache_key, CHARTS_CACHE_TTL, json.dumps(result))
     return result

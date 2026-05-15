@@ -15,7 +15,7 @@ class SocialActivityScreen extends StatefulWidget {
 
 class _SocialActivityScreenState extends State<SocialActivityScreen> {
   List<dynamic> _live = [];
-  List<dynamic> _recent = [];
+  List<dynamic> _people = [];
   bool _loading = true;
 
   @override
@@ -29,9 +29,21 @@ class _SocialActivityScreenState extends State<SocialActivityScreen> {
     try {
       final data = await ApiService().getFriendsActivity();
       if (!mounted) return;
+      final live = _asMapList(data['live']);
+      final recent = _asMapList(data['recent']);
+      var people = _asMapList(data['people']);
+      if (people.isEmpty) {
+        final seen = <String>{};
+        people = [...live, ...recent].where((item) {
+          final id = (item['id'] ?? '').toString();
+          if (id.isEmpty || seen.contains(id)) return false;
+          seen.add(id);
+          return true;
+        }).toList();
+      }
       setState(() {
-        _live = (data['live'] as List?) ?? [];
-        _recent = (data['recent'] as List?) ?? [];
+        _live = live;
+        _people = people;
         _loading = false;
       });
     } catch (_) {
@@ -42,6 +54,23 @@ class _SocialActivityScreenState extends State<SocialActivityScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final liveIds = _live
+        .map((item) => ((item as Map)['id'] ?? '').toString())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    final onlinePeople = _people
+        .where((item) =>
+            item is Map &&
+            item['is_online'] == true &&
+            !liveIds.contains((item['id'] ?? '').toString()))
+        .toList();
+    final otherPeople = _people
+        .where((item) =>
+            item is Map &&
+            item['is_online'] != true &&
+            !liveIds.contains((item['id'] ?? '').toString()))
+        .toList();
+
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: Column(
@@ -55,7 +84,7 @@ class _SocialActivityScreenState extends State<SocialActivityScreen> {
                       color: AppColors.purpleLight,
                     ),
                   )
-                : (_live.isEmpty && _recent.isEmpty)
+                : (_live.isEmpty && _people.isEmpty)
                     ? _EmptyActivity(onRefresh: _load)
                     : RefreshIndicator(
                         onRefresh: _load,
@@ -90,10 +119,40 @@ class _SocialActivityScreenState extends State<SocialActivityScreen> {
                                     ),
                                   ),
                             ],
-                            if (_recent.isNotEmpty) ...[
+                            if (onlinePeople.isNotEmpty) ...[
                               SizedBox(height: _live.isNotEmpty ? 18 : 0),
                               Text(
-                                'Recently Played',
+                                'Online',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.text,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Friends who are in MoodWave now',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 12,
+                                  color: AppColors.text2,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              ...onlinePeople.map(
+                                (item) => _RecentFriendItem(
+                                  friend:
+                                      Map<String, dynamic>.from(item as Map),
+                                ),
+                              ),
+                            ],
+                            if (otherPeople.isNotEmpty) ...[
+                              SizedBox(
+                                  height: (_live.isNotEmpty ||
+                                          onlinePeople.isNotEmpty)
+                                      ? 18
+                                      : 0),
+                              Text(
+                                'Last Seen',
                                 style: GoogleFonts.outfit(
                                   fontSize: 20,
                                   fontWeight: FontWeight.w800,
@@ -101,7 +160,7 @@ class _SocialActivityScreenState extends State<SocialActivityScreen> {
                                 ),
                               ),
                               const SizedBox(height: 12),
-                              ..._recent.map(
+                              ...otherPeople.map(
                                 (item) => _RecentFriendItem(
                                   friend:
                                       Map<String, dynamic>.from(item as Map),
@@ -116,6 +175,13 @@ class _SocialActivityScreenState extends State<SocialActivityScreen> {
       ),
     );
   }
+}
+
+List<Map<String, dynamic>> _asMapList(dynamic raw) {
+  return (raw as List? ?? const [])
+      .whereType<Map>()
+      .map((item) => Map<String, dynamic>.from(item))
+      .toList();
 }
 
 class _ActivityHeader extends StatelessWidget {
@@ -165,7 +231,7 @@ class _ActivityHeader extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    'What your friends are listening to',
+                    'Online, last seen and listening activity',
                     style: GoogleFonts.outfit(
                       fontSize: 12,
                       color: AppColors.text3,
@@ -216,7 +282,7 @@ class _EmptyActivity extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Add friends and listen together —\ntheir activity will show here',
+              'When friends come online or play music,\ntheir status will show here',
               textAlign: TextAlign.center,
               style: GoogleFonts.outfit(
                 fontSize: 14,
@@ -438,9 +504,25 @@ class _RecentFriendItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = (friend['now_playing'] as Map?)?.cast<String, dynamic>() ?? {};
-    final track = (now['title'] ?? 'No recent activity').toString();
+    final track = (now['title'] ?? '').toString();
     final artist = (now['artist'] ?? '').toString();
     final playedAt = now['played_at']?.toString();
+    final isOnline = friend['is_online'] == true;
+    final activityStatus = (friend['activity_status'] ?? '').toString();
+    final lastSeenAt = (friend['last_seen_at'] ?? '').toString();
+    final statusColor = activityStatus == 'recent'
+        ? const Color(0xFFFBBF24)
+        : isOnline
+            ? AppColors.green
+            : AppColors.text3;
+    final statusLabel = isOnline ? 'Online now' : _lastSeenLabel(lastSeenAt);
+    final activityLine = track.isNotEmpty
+        ? [
+            if (activityStatus == 'recent') 'Last listened',
+            if (artist.isNotEmpty) artist,
+            track,
+          ].join(' — ')
+        : statusLabel;
 
     return GestureDetector(
       onTap: () => _openProfile(context, friend),
@@ -462,12 +544,12 @@ class _RecentFriendItem extends StatelessWidget {
                     width: 13,
                     height: 13,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFBBF24),
+                      color: statusColor,
                       shape: BoxShape.circle,
                       border: Border.all(color: AppColors.bg, width: 2),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFFFBBF24).withOpacity(0.34),
+                          color: statusColor.withOpacity(0.34),
                           blurRadius: 8,
                         ),
                       ],
@@ -491,7 +573,7 @@ class _RecentFriendItem extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    [if (artist.isNotEmpty) artist, track].join(' — '),
+                    activityLine,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.outfit(
@@ -504,10 +586,15 @@ class _RecentFriendItem extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              _relTime(playedAt),
+              isOnline
+                  ? 'online'
+                  : (playedAt != null && playedAt.isNotEmpty)
+                      ? _relTime(playedAt)
+                      : _lastSeenLabel(lastSeenAt),
               style: GoogleFonts.outfit(
                 fontSize: 11,
-                color: AppColors.text3,
+                fontWeight: isOnline ? FontWeight.w700 : FontWeight.w500,
+                color: statusColor,
               ),
             ),
           ],
@@ -580,12 +667,19 @@ String _relTime(String? iso) {
     final dt = DateTime.parse(normalized).toLocal();
     final diff = DateTime.now().difference(dt);
     if (diff.inMinutes < 1) return 'now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m';
-    if (diff.inHours < 24) return '${diff.inHours}h';
-    return '${diff.inDays}d';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   } catch (_) {
     return '';
   }
+}
+
+String _lastSeenLabel(String? iso) {
+  final rel = _relTime(iso);
+  if (rel.isEmpty) return 'Offline';
+  if (rel == 'now') return 'Just now';
+  return 'Last seen $rel';
 }
 
 void _openProfile(BuildContext context, Map<String, dynamic> friend) {

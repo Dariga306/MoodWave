@@ -69,7 +69,7 @@ class MoodWaveApp extends StatelessWidget {
           builders: {
             TargetPlatform.android: CupertinoPageTransitionsBuilder(),
             TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-            TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+            TargetPlatform.windows: CupertinoPageTransitionsBuilder(),
           },
         ),
         splashFactory: NoSplash.splashFactory,

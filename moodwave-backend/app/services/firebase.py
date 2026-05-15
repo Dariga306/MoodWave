@@ -18,7 +18,7 @@ async def send_text_message(firebase_chat_id: str, sender_id: int, text: str) ->
         {
             "type": "text",
             "sender_id": sender_id,
-            "text": text[:100],
+            "text": text[:2000],
             "sent_at": _now_iso(),
         },
     )

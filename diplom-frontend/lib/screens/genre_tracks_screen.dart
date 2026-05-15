@@ -1,9 +1,498 @@
+import 'dart:math';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import 'player_screen.dart';
+
+// Top artists per genre for parallel search — 20 artists × 20 tracks = ~150+ real tracks
+const _genreArtists = <String, List<String>>{
+  'pop': [
+    'Taylor Swift',
+    'Dua Lipa',
+    'The Weeknd',
+    'Ariana Grande',
+    'Harry Styles',
+    'Olivia Rodrigo',
+    'Justin Bieber',
+    'Selena Gomez',
+    'Bruno Mars',
+    'Lady Gaga',
+    'Katy Perry',
+    'Billie Eilish',
+    'Shawn Mendes',
+    'Ed Sheeran',
+    'Post Malone',
+    'Camila Cabello',
+    'Miley Cyrus',
+    'Sam Smith',
+    'Adele',
+    'Bebe Rexha'
+  ],
+  'rock': [
+    'Queen',
+    'Linkin Park',
+    'Arctic Monkeys',
+    'Imagine Dragons',
+    'Foo Fighters',
+    'Red Hot Chili Peppers',
+    'Green Day',
+    'Twenty One Pilots',
+    'Nirvana',
+    'Pearl Jam',
+    'Radiohead',
+    'Coldplay',
+    'U2',
+    'The Beatles',
+    'AC/DC',
+    'Led Zeppelin',
+    'Metallica',
+    'Muse',
+    'The Strokes',
+    'Oasis'
+  ],
+  'hip-hop': [
+    'Drake',
+    'Kendrick Lamar',
+    'Travis Scott',
+    'J. Cole',
+    'Kanye West',
+    'Cardi B',
+    'Post Malone',
+    'Eminem',
+    'Jay-Z',
+    'Lil Wayne',
+    'Nicki Minaj',
+    '21 Savage',
+    'Future',
+    'Tyler the Creator',
+    'Childish Gambino',
+    'A\$AP Rocky',
+    'Big Sean',
+    'Lil Baby',
+    'Wiz Khalifa',
+    'Mac Miller'
+  ],
+  'electronic': [
+    'Daft Punk',
+    'Calvin Harris',
+    'Martin Garrix',
+    'Deadmau5',
+    'Skrillex',
+    'Avicii',
+    'Marshmello',
+    'Kygo',
+    'The Chainsmokers',
+    'Diplo',
+    'Tiësto',
+    'Zedd',
+    'Flume',
+    'Disclosure',
+    'Duke Dumont',
+    'Porter Robinson',
+    'Madeon',
+    'Rezz',
+    'Illenium',
+    'Tchami'
+  ],
+  'jazz': [
+    'Miles Davis',
+    'John Coltrane',
+    'Norah Jones',
+    'Diana Krall',
+    'Chet Baker',
+    'Bill Evans',
+    'Dave Brubeck',
+    'Herbie Hancock',
+    'Louis Armstrong',
+    'Thelonious Monk',
+    'Charlie Parker',
+    'Ella Fitzgerald',
+    'Duke Ellington',
+    'Wes Montgomery',
+    'Oscar Peterson',
+    'Pat Metheny',
+    'Wayne Shorter',
+    'Dizzy Gillespie',
+    'Charles Mingus',
+    'Sonny Rollins'
+  ],
+  'k-pop': [
+    'BTS',
+    'BLACKPINK',
+    'EXO',
+    'TWICE',
+    'Stray Kids',
+    'NewJeans',
+    'aespa',
+    'IU',
+    'Red Velvet',
+    'MONSTA X',
+    'GOT7',
+    'SHINee',
+    'NCT 127',
+    'Enhypen',
+    'TXT',
+    'Seventeen',
+    'MAMAMOO',
+    'BIGBANG',
+    'Itzy',
+    'NMIXX'
+  ],
+  'classical': [
+    'Frédéric Chopin',
+    'Ludwig van Beethoven',
+    'Wolfgang Amadeus Mozart',
+    'Johann Sebastian Bach',
+    'Claude Debussy',
+    'Pyotr Ilyich Tchaikovsky',
+    'Erik Satie',
+    'Ludovico Einaudi',
+    'Franz Schubert',
+    'Johannes Brahms',
+    'Sergei Rachmaninoff',
+    'Franz Liszt',
+    'Antonín Dvořák',
+    'Edvard Grieg',
+    'Maurice Ravel',
+    'George Gershwin',
+    'Antonio Vivaldi',
+    'Gustav Mahler',
+    'Camille Saint-Saëns',
+    'Max Richter'
+  ],
+  'r&b': [
+    'SZA',
+    'Frank Ocean',
+    'H.E.R.',
+    'Daniel Caesar',
+    'Summer Walker',
+    'Bryson Tiller',
+    'Jhene Aiko',
+    'Khalid',
+    'The Weeknd',
+    'Beyoncé',
+    'Rihanna',
+    'Usher',
+    'Miguel',
+    'Chris Brown',
+    'Alicia Keys',
+    'Kehlani',
+    'Lucky Daye',
+    'Brent Faiyaz',
+    'PJ Morton',
+    '6LACK'
+  ],
+  'latin': [
+    'Bad Bunny',
+    'J Balvin',
+    'Rosalía',
+    'Maluma',
+    'Karol G',
+    'Ozuna',
+    'Daddy Yankee',
+    'Shakira',
+    'Enrique Iglesias',
+    'Marc Anthony',
+    'Luis Fonsi',
+    'Becky G',
+    'Nicky Jam',
+    'Farruko',
+    'Anuel AA',
+    'Lunay',
+    'Sech',
+    'Myke Towers',
+    'Rauw Alejandro',
+    'Camilo'
+  ],
+  'country': [
+    'Luke Combs',
+    'Morgan Wallen',
+    'Zach Bryan',
+    'Taylor Swift',
+    'Chris Stapleton',
+    'Kacey Musgraves',
+    'Tyler Childers',
+    'Carrie Underwood',
+    'Blake Shelton',
+    'Miranda Lambert',
+    'Keith Urban',
+    'Brad Paisley',
+    'Garth Brooks',
+    'Tim McGraw',
+    'Florida Georgia Line',
+    'Thomas Rhett',
+    'Dierks Bentley',
+    'Sam Hunt',
+    'Maren Morris',
+    'Eric Church'
+  ],
+  'metal': [
+    'Metallica',
+    'Slipknot',
+    'Iron Maiden',
+    'Avenged Sevenfold',
+    'System Of A Down',
+    'Bring Me The Horizon',
+    'Megadeth',
+    'Pantera',
+    'Korn',
+    'Ghost',
+    'Judas Priest',
+    'Lamb of God',
+    'Gojira',
+    'Rammstein',
+    'Sabaton',
+    'Slayer',
+    'Anthrax',
+    'Mastodon',
+    'Trivium',
+    'Disturbed'
+  ],
+  'blues': [
+    'B.B. King',
+    'Muddy Waters',
+    'John Lee Hooker',
+    'Stevie Ray Vaughan',
+    'Etta James',
+    'Buddy Guy',
+    'Robert Johnson',
+    'Howlin Wolf',
+    'Eric Clapton',
+    'Gary Clark Jr.',
+    'Susan Tedeschi',
+    'Joe Bonamassa',
+    'Albert King',
+    'Freddie King',
+    'Keb Mo',
+    'Otis Rush',
+    'Taj Mahal',
+    'Bonnie Raitt',
+    'Rory Gallagher',
+    'Christone Kingfish Ingram'
+  ],
+  'lo-fi': [
+    'Jinsang',
+    'Nujabes',
+    'Idealism',
+    'Joji',
+    'potsu',
+    'Kudasai',
+    'eevee',
+    'Tomppabeats',
+    'Lofi Fruits Music',
+    'Aso',
+    'Saib',
+    'Brock Berrigan',
+    'Sleepy Fish',
+    'Kupla',
+    'Leavv',
+    'Psalm Trees',
+    'Birocratic',
+    'Oatmello',
+    'Blazo',
+    'The Deli'
+  ],
+  'reggaeton': [
+    'Bad Bunny',
+    'J Balvin',
+    'Daddy Yankee',
+    'Karol G',
+    'Ozuna',
+    'Rauw Alejandro',
+    'Anuel AA',
+    'Nicky Jam',
+    'Farruko',
+    'Wisin y Yandel',
+    'Don Omar',
+    'Myke Towers',
+    'Sech',
+    'Lunay',
+    'Feid',
+    'Zion and Lennox',
+    'Arcangel',
+    'De La Ghetto',
+    'Mora',
+    'Chencho Corleone'
+  ],
+  'folk': [
+    'Bon Iver',
+    'Fleet Foxes',
+    'Iron and Wine',
+    'Sufjan Stevens',
+    'Nick Drake',
+    'Gregory Alan Isakov',
+    'Big Thief',
+    'Jose Gonzalez',
+    'Mumford & Sons',
+    'The Lumineers',
+    'Caamp',
+    'Hozier',
+    'Lord Huron',
+    'Bright Eyes',
+    'Neutral Milk Hotel',
+    'Simon & Garfunkel',
+    'Joni Mitchell',
+    'James Taylor',
+    'Cat Stevens',
+    'Paul Simon'
+  ],
+  'funk': [
+    'James Brown',
+    'Stevie Wonder',
+    'Earth Wind and Fire',
+    'Parliament',
+    'Chic',
+    'Bruno Mars',
+    'Silk Sonic',
+    'Prince',
+    'George Clinton',
+    'Bootsy Collins',
+    'Sly & the Family Stone',
+    'Kool & the Gang',
+    'Gap Band',
+    'Rick James',
+    'Tower of Power',
+    'Ohio Players',
+    'Commodores',
+    'Cameo',
+    'Maze',
+    'Con Funk Shun'
+  ],
+  'soul': [
+    'Aretha Franklin',
+    'Marvin Gaye',
+    'Al Green',
+    'Otis Redding',
+    'Bill Withers',
+    'Sam Cooke',
+    'Erykah Badu',
+    'Lauryn Hill',
+    'Stevie Wonder',
+    'Nina Simone',
+    'Ray Charles',
+    'Gladys Knight',
+    'Whitney Houston',
+    'Luther Vandross',
+    'Smokey Robinson',
+    'Phyllis Hyman',
+    'Anita Baker',
+    'Mary J. Blige',
+    'D\'Angelo',
+    'Maxwell'
+  ],
+  'indie': [
+    'Arctic Monkeys',
+    'Tame Impala',
+    'Mac DeMarco',
+    'Vampire Weekend',
+    'Arcade Fire',
+    'Beach House',
+    'Bon Iver',
+    'Phoebe Bridgers',
+    'Modest Mouse',
+    'The Shins',
+    'The National',
+    'Wilco',
+    'Yo La Tengo',
+    'Pavement',
+    'Built to Spill',
+    'Real Estate',
+    'Kurt Vile',
+    'Snail Mail',
+    'Mitski',
+    'Soccer Mommy'
+  ],
+  'punk': [
+    'The Clash',
+    'Ramones',
+    'Sex Pistols',
+    'Bad Religion',
+    'NOFX',
+    'Descendents',
+    'The Misfits',
+    'Dead Kennedys',
+    'Black Flag',
+    'Circle Jerks',
+    'Buzzcocks',
+    'Wire',
+    'Gang of Four',
+    'Television',
+    'Stiff Little Fingers',
+    'The Damned',
+    'X',
+    'Fear',
+    'Husker Du',
+    'Fugazi'
+  ],
+  'reggae': [
+    'Bob Marley',
+    'Damian Marley',
+    'Burning Spear',
+    'Peter Tosh',
+    'Toots and the Maytals',
+    'Sizzla',
+    'Chronixx',
+    'Steel Pulse',
+    'Jimmy Cliff',
+    'Lee Scratch Perry',
+    'Barrington Levy',
+    'Buju Banton',
+    'Capleton',
+    'Luciano',
+    'Gregory Isaacs',
+    'Freddie McGregor',
+    'Dennis Brown',
+    'Beenie Man',
+    'Bounty Killer',
+    'Soja'
+  ],
+};
+
+const Map<String, String> _genreArtUrls = {
+  'pop':
+      'https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=1400&q=80',
+  'rock':
+      'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=1400&q=80',
+  'hip-hop':
+      'https://images.unsplash.com/photo-1521334884684-d80222895322?w=1400&q=80',
+  'electronic':
+      'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1400&q=80',
+  'jazz':
+      'https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=1400&q=80',
+  'k-pop':
+      'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=1400&q=80',
+  'classical':
+      'https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=1400&q=80',
+  'r&b':
+      'https://images.unsplash.com/photo-1501612780327-45045538702b?w=1400&q=80',
+  'latin':
+      'https://images.unsplash.com/photo-1504609813442-a8924e83f76e?w=1400&q=80',
+  'country':
+      'https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?w=1400&q=80',
+  'metal':
+      'https://images.unsplash.com/photo-1506157786151-b8491531f063?w=1400&q=80',
+  'blues':
+      'https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=1400&q=80',
+  'lo-fi':
+      'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=1400&q=80',
+  'reggaeton':
+      'https://images.unsplash.com/photo-1504609773096-104ff2c73ba4?w=1400&q=80',
+  'folk':
+      'https://images.unsplash.com/photo-1448375240586-882707db888b?w=1400&q=80',
+  'funk':
+      'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=1400&q=80',
+  'soul':
+      'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=1400&q=80',
+  'indie':
+      'https://images.unsplash.com/photo-1460723237483-7a6dc9d0b212?w=1400&q=80',
+  'punk':
+      'https://images.unsplash.com/photo-1503095396549-807759245b35?w=1400&q=80',
+  'reggae':
+      'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1400&q=80',
+};
 
 class GenreTracksScreen extends StatefulWidget {
   final String genre;
@@ -24,6 +513,7 @@ class GenreTracksScreen extends StatefulWidget {
 class _GenreTracksScreenState extends State<GenreTracksScreen> {
   List<dynamic> _tracks = [];
   bool _loading = true;
+  bool _shuffleMode = false;
 
   @override
   void initState() {
@@ -33,7 +523,49 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
 
   Future<void> _load() async {
     try {
-      final tracks = await ApiService().getCharts(genre: widget.genre, limit: 30);
+      final genre = widget.genre.trim().toLowerCase();
+      final artists = _genreArtists[genre] ?? [];
+
+      List<dynamic> tracks = [];
+
+      if (artists.isNotEmpty) {
+        // Parallel search across top artists → ~150 real tracks
+        final results = await Future.wait(
+          artists.map(
+            (a) => ApiService()
+                .searchTracksWithFallback(a, limit: 20)
+                .catchError((_) => <Map<String, dynamic>>[]),
+          ),
+        );
+        final seen = <String>{};
+        final artistCount = <String, int>{};
+        for (final batch in results) {
+          for (final t in batch) {
+            final id = (t['track_id'] ??
+                    t['spotify_id'] ??
+                    t['deezer_id'] ??
+                    t['id'] ??
+                    '')
+                .toString();
+            if (id.isEmpty || !seen.add(id)) continue;
+            final artist = (t['artist'] ?? '').toString().trim().toLowerCase();
+            if (artist.isNotEmpty) {
+              if ((artistCount[artist] ?? 0) >= 4) continue;
+              artistCount[artist] = (artistCount[artist] ?? 0) + 1;
+            }
+            tracks.add(t);
+          }
+        }
+        tracks.shuffle(Random());
+      } else {
+        // Fallback for unknown genre
+        tracks = await ApiService().getCharts(genre: genre, limit: 100);
+        if (tracks.isEmpty) {
+          tracks =
+              await ApiService().searchTracksWithFallback(genre, limit: 50);
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _tracks = tracks;
@@ -45,6 +577,85 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
     }
   }
 
+  void _playAll() {
+    if (_tracks.isEmpty) return;
+
+    final first = Map<String, dynamic>.from(_tracks[0] as Map)
+      ..['queue'] = _tracks;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PlayerScreen(track: first),
+      ),
+    );
+  }
+
+  void _toggleShuffle() {
+    setState(() {
+      _shuffleMode = !_shuffleMode;
+      if (_shuffleMode) _tracks.shuffle();
+    });
+  }
+
+  String get _totalDuration {
+    if (_loading || _tracks.isEmpty) return '';
+    int totalMs = 0;
+    for (final t in _tracks) {
+      final ms = (t as Map?)?['duration_ms'];
+      totalMs += ms is int ? ms : int.tryParse('$ms') ?? 0;
+    }
+    if (totalMs <= 0) return '';
+    final h = totalMs ~/ 3600000;
+    final m = (totalMs % 3600000) ~/ 60000;
+    if (h > 0) return '${h}h ${m}m';
+    return '${m} min';
+  }
+
+  void _showTrackOptions(BuildContext context, Map track) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(100),
+            ),
+          ),
+          const SizedBox(height: 12),
+          ListTile(
+            leading: const Icon(Icons.favorite_border, color: Colors.white70),
+            title: Text('Add to favorites',
+                style: GoogleFonts.outfit(color: Colors.white)),
+            onTap: () => Navigator.pop(context),
+          ),
+          ListTile(
+            leading:
+                const Icon(Icons.playlist_add_rounded, color: Colors.white70),
+            title: Text('Add to playlist',
+                style: GoogleFonts.outfit(color: Colors.white)),
+            onTap: () => Navigator.pop(context),
+          ),
+          ListTile(
+            leading: const Icon(Icons.share_rounded, color: Colors.white70),
+            title:
+                Text('Share', style: GoogleFonts.outfit(color: Colors.white)),
+            onTap: () => Navigator.pop(context),
+          ),
+          const SizedBox(height: 12),
+        ]),
+      ),
+    );
+  }
+
   String _fmt(dynamic ms) {
     final value = ms is int ? ms : int.tryParse('$ms') ?? 0;
     if (value <= 0) return '';
@@ -53,115 +664,197 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final heroArt = _genreArtUrls[widget.genre.trim().toLowerCase()] ??
+        'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=1400&q=80';
+
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
-            expandedHeight: 200,
+            expandedHeight: 280,
             pinned: true,
             backgroundColor: AppColors.bg,
             leading: GestureDetector(
               onTap: () => Navigator.pop(context),
-              child: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: Colors.white, size: 20),
+              child: Container(
+                margin: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.35),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white.withOpacity(0.15)),
+                ),
+                child: const Icon(Icons.arrow_back_ios_new_rounded,
+                    size: 16, color: Colors.white),
+              ),
             ),
             flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                decoration: BoxDecoration(gradient: widget.gradient),
-                child: Stack(
-                  children: [
-                    // Decorative circles
-                    Positioned(
-                      top: -30, right: -30,
-                      child: Container(
-                        width: 180, height: 180,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.white.withOpacity(0.08),
-                        ),
+              background: Stack(
+                fit: StackFit.expand,
+                children: [
+                  CachedNetworkImage(
+                    imageUrl: heroArt,
+                    fit: BoxFit.cover,
+                    errorWidget: (_, __, ___) => Container(
+                      decoration: BoxDecoration(gradient: widget.gradient),
+                    ),
+                  ),
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.15),
+                          widget.gradient.colors.first.withOpacity(0.45),
+                          AppColors.bg.withOpacity(0.97),
+                        ],
+                        stops: const [0.0, 0.6, 1.0],
                       ),
                     ),
-                    Positioned(
-                      bottom: -20, left: -20,
-                      child: Container(
-                        width: 120, height: 120,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.white.withOpacity(0.06),
-                        ),
-                      ),
-                    ),
-                    Align(
-                      alignment: Alignment.bottomLeft,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(widget.emoji,
-                                style: const TextStyle(fontSize: 40)),
+                  ),
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(28, 40, 28, 16),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            widget.genre,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: 34,
+                              height: 1,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black.withOpacity(0.5),
+                                  blurRadius: 18,
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (!_loading && _totalDuration.isNotEmpty) ...[
                             const SizedBox(height: 8),
-                            Text(widget.genre,
-                                style: GoogleFonts.outfit(
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.w800,
-                                    color: Colors.white,
-                                    letterSpacing: -0.5)),
-                            if (!_loading)
-                              Text('${_tracks.length} tracks',
-                                  style: GoogleFonts.outfit(
-                                      fontSize: 13,
-                                      color: Colors.white.withOpacity(0.7))),
+                            Text(
+                              _totalDuration,
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.sora(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.white.withOpacity(0.72),
+                              ),
+                            ),
                           ],
-                        ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
-          if (_loading)
-            const SliverFillRemaining(
-              child: Center(
-                  child: CircularProgressIndicator(color: AppColors.purpleLight)),
-            )
-          else if (_tracks.isEmpty)
-            SliverFillRemaining(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+
+          // ACTION BAR
+          if (!_loading && _tracks.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
                   children: [
-                    const Text('🎵', style: TextStyle(fontSize: 48)),
-                    const SizedBox(height: 16),
-                    Text('No tracks found',
-                        style: GoogleFonts.outfit(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.text)),
-                    const SizedBox(height: 8),
-                    Text('Try another genre',
-                        style: GoogleFonts.outfit(
-                            fontSize: 14, color: AppColors.text3)),
+                    // Shuffle
+                    GestureDetector(
+                      onTap: _toggleShuffle,
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: _shuffleMode
+                              ? AppColors.purple.withOpacity(0.3)
+                              : AppColors.purple.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _shuffleMode
+                                ? AppColors.purpleLight
+                                : AppColors.purpleLight.withOpacity(0.35),
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.shuffle_rounded,
+                          color: _shuffleMode
+                              ? AppColors.purpleLight
+                              : AppColors.purpleLight.withOpacity(0.6),
+                          size: 20,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(width: 12),
+
+                    // Play All
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: _playAll,
+                        child: Container(
+                          height: 44,
+                          decoration: BoxDecoration(
+                            gradient: AppColors.primaryBtn,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.play_arrow_rounded,
+                                  color: Colors.white, size: 22),
+                              const SizedBox(width: 6),
+                              Text('Play All',
+                                  style: GoogleFonts.outfit(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(width: 12),
+
+                    // 3 dots
+                    GestureDetector(
+                      onTap: () => _showTrackOptions(context, {}),
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: const Icon(Icons.more_horiz_rounded,
+                            color: Colors.white70, size: 20),
+                      ),
+                    ),
                   ],
                 ),
               ),
-            )
-          else
-            SliverList(
+            ),
+
+          // TRACK LIST
+          SliverPadding(
+            padding: const EdgeInsets.only(bottom: 24),
+            sliver: SliverList(
               delegate: SliverChildBuilderDelegate(
                 (ctx, i) {
                   final track = _tracks[i] as Map<String, dynamic>? ?? {};
-                  final trackMap = Map<String, dynamic>.from(track as Map)
+                  final trackMap = Map<String, dynamic>.from(track)
                     ..['queue'] = _tracks;
+
                   final title = trackMap['title']?.toString() ?? '';
                   final artist = trackMap['artist']?.toString() ?? '';
                   final cover = trackMap['cover_url']?.toString() ?? '';
                   final duration = _fmt(trackMap['duration_ms']);
-                  final spotifyId = trackMap['spotify_id']?.toString() ??
-                      trackMap['deezer_id']?.toString() ?? '';
 
                   return GestureDetector(
                     onTap: () => Navigator.push(
@@ -171,37 +864,53 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
                       ),
                     ),
                     child: Container(
-                      color: Colors.transparent,
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 10),
+                          horizontal: 16, vertical: 9),
                       child: Row(children: [
+                        // Track number
+                        SizedBox(
+                          width: 34,
+                          child: Text(
+                            '${i + 1}',
+                            style: GoogleFonts.outfit(
+                              fontSize: 12,
+                              color: AppColors.text3,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // Cover
                         ClipRRect(
                           borderRadius: BorderRadius.circular(10),
                           child: cover.isNotEmpty
                               ? CachedNetworkImage(
                                   imageUrl: cover,
-                                  width: 52,
-                                  height: 52,
+                                  width: 50,
+                                  height: 50,
                                   fit: BoxFit.cover,
                                   placeholder: (_, __) => Container(
-                                      width: 52,
-                                      height: 52,
+                                      width: 50,
+                                      height: 50,
                                       color: AppColors.surface3),
                                   errorWidget: (_, __, ___) => Container(
-                                      width: 52,
-                                      height: 52,
-                                      color: AppColors.surface3,
-                                      child: const Icon(Icons.music_note,
-                                          color: AppColors.text3, size: 24)),
+                                    width: 50,
+                                    height: 50,
+                                    color: AppColors.surface3,
+                                    child: const Icon(Icons.music_note,
+                                        color: AppColors.text3, size: 22),
+                                  ),
                                 )
                               : Container(
-                                  width: 52,
-                                  height: 52,
+                                  width: 50,
+                                  height: 50,
                                   color: AppColors.surface3,
                                   child: const Icon(Icons.music_note,
-                                      color: AppColors.text3, size: 24)),
+                                      color: AppColors.text3, size: 22),
+                                ),
                         ),
-                        const SizedBox(width: 14),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -210,21 +919,37 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: GoogleFonts.outfit(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.text)),
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.text,
+                                  )),
+                              const SizedBox(height: 2),
                               Text(artist,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: GoogleFonts.outfit(
-                                      fontSize: 12, color: AppColors.text3)),
+                                    fontSize: 12,
+                                    color: AppColors.text3,
+                                  )),
                             ],
                           ),
                         ),
-                        if (duration.isNotEmpty)
+                        if (duration.isNotEmpty) ...[
+                          const SizedBox(width: 8),
                           Text(duration,
                               style: GoogleFonts.outfit(
                                   fontSize: 12, color: AppColors.text3)),
+                        ],
+                        const SizedBox(width: 4),
+                        GestureDetector(
+                          onTap: () => _showTrackOptions(context, trackMap),
+                          behavior: HitTestBehavior.opaque,
+                          child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: const Icon(Icons.more_vert_rounded,
+                                color: AppColors.text3, size: 18),
+                          ),
+                        ),
                       ]),
                     ),
                   );
@@ -232,8 +957,10 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
                 childCount: _tracks.length,
               ),
             ),
+          ),
         ],
       ),
     );
   }
 }
+

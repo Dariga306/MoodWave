@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -231,6 +233,7 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
     return (artist['picture_medium'] ??
             artist['picture_big'] ??
             artist['picture_xl'] ??
+            artist['picture_small'] ??
             artist['picture'] ??
             artist['image_url'] ??
             '')
@@ -243,6 +246,50 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
         .replaceAll(RegExp(r'[^a-z0-9а-яё]+'), ' ')
         .trim();
   }
+
+  String _artistNameKey(String value) {
+    var normalized = _normalizeQuery(value);
+    for (final splitter in [' feat ', ' ft ', ' featuring ', ' x ']) {
+      if (normalized.contains(splitter)) {
+        normalized = normalized.split(splitter).first.trim();
+      }
+    }
+    if (normalized.contains('&')) {
+      normalized = normalized.split('&').first.trim();
+    }
+    if (normalized.contains(',')) {
+      normalized = normalized.split(',').first.trim();
+    }
+    return normalized;
+  }
+
+  bool _artistLooksEquivalent(
+      Map<String, dynamic> left, Map<String, dynamic> right) {
+    final leftName = _artistNameKey(_artistName(left));
+    final rightName = _artistNameKey(_artistName(right));
+    if (leftName.isEmpty || rightName.isEmpty) return false;
+    if (leftName == rightName) return true;
+    return leftName.startsWith('$rightName ') ||
+        rightName.startsWith('$leftName ');
+  }
+
+  List<Map<String, dynamic>> _dedupeArtists(
+      List<Map<String, dynamic>> artists) {
+    final deduped = <Map<String, dynamic>>[];
+    final seenIds = <String>{};
+    for (final artist in artists) {
+      final id = _artistId(artist);
+      if (id.isNotEmpty && !seenIds.add(id)) continue;
+      if (deduped.any((existing) => _artistLooksEquivalent(existing, artist))) {
+        continue;
+      }
+      deduped.add(Map<String, dynamic>.from(artist));
+    }
+    return deduped;
+  }
+
+  bool _needsArtistImage(Map<String, dynamic> artist) =>
+      _artistImage(artist).trim().isEmpty && _artistId(artist).isNotEmpty;
 
   String _canonicalGenre(String value) {
     final normalized = _normalizeQuery(value);
@@ -328,18 +375,11 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
     }
 
     try {
-      final responses = await Future.wait(
-        uniqueSeeds.take(20).map(
-              (name) => ApiService()
-                  .searchArtistsList(name, limit: 4)
-                  .catchError((_) => <Map<String, dynamic>>[]),
-            ),
-      );
       final artists = <Map<String, dynamic>>[];
-      final seen = <String>{};
-      for (var i = 0; i < responses.length; i++) {
-        final response = responses[i];
-        final seed = uniqueSeeds[i];
+      for (final seed in uniqueSeeds.take(8)) {
+        final response = await ApiService()
+            .searchArtistsList(seed, limit: 8)
+            .catchError((_) => <Map<String, dynamic>>[]);
         final sorted = response
             .whereType<Map>()
             .map((item) => Map<String, dynamic>.from(item))
@@ -347,22 +387,48 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
           ..sort((a, b) => _artistScore(seed, b).compareTo(
                 _artistScore(seed, a),
               ));
-        for (final candidate in sorted.take(3)) {
-          final id = _artistId(candidate);
-          if (id.isEmpty || !seen.add(id)) continue;
-          artists.add(candidate);
-          if (artists.length >= _expandedRecommendationCount) {
-            break;
-          }
+        final primary = sorted.take(4).toList();
+        artists.addAll(primary);
+        final primaryId = primary.isNotEmpty ? _artistId(primary.first) : '';
+        if (primaryId.isNotEmpty) {
+          try {
+            final profile = await ApiService().getArtistProfile(primaryId);
+            final related = ((profile['related_artists'] as List?) ?? const [])
+                .whereType<Map>()
+                .map((item) => Map<String, dynamic>.from(item))
+                .toList();
+            artists.addAll(related.take(8));
+          } catch (_) {}
         }
-        if (artists.length >= _expandedRecommendationCount) {
+        if (artists.length >= _expandedRecommendationCount * 2) {
           break;
         }
       }
+      var deduped = _dedupeArtists(artists);
+      if (deduped.length < _expandedRecommendationCount) {
+        final extras = _localSearchFallback('');
+        deduped = _dedupeArtists([
+          ...deduped,
+          ...extras,
+        ]);
+      }
+      final missingImages = deduped.where(_needsArtistImage).take(12).toList();
+      if (missingImages.isNotEmpty) {
+        final hydrated = await ApiService().hydrateArtists(missingImages);
+        final hydratedById = {
+          for (final artist in hydrated) _artistId(artist): artist,
+        };
+        deduped = deduped
+            .map((artist) => hydratedById[_artistId(artist)] ?? artist)
+            .map((artist) => Map<String, dynamic>.from(artist))
+            .toList();
+      }
+      deduped = _dedupeArtists(deduped);
       if (!mounted) return;
-      if (artists.isNotEmpty) {
-        setState(() => _recommendedArtists = artists);
-        _warmArtistImages(artists);
+      if (deduped.isNotEmpty) {
+        setState(() => _recommendedArtists =
+            deduped.take(_expandedRecommendationCount).toList());
+        _warmArtistImages(_recommendedArtists);
       } else {
         final fallback = _seedFallbackCards();
         setState(() => _recommendedArtists = fallback);
@@ -382,10 +448,10 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
       return;
     }
     // Show local results immediately while API loads
-    setState(() {
-      _searchResults = _localSearchFallback(q.trim());
-      _searching = true;
-    });
+      setState(() {
+        _searchResults = _localSearchFallback(q.trim());
+        _searching = true;
+      });
     try {
       final query = q.trim();
       final results = await ApiService().searchArtistsList(query, limit: 30);
@@ -393,14 +459,7 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
         ...results.map((item) => Map<String, dynamic>.from(item)),
         ..._localSearchFallback(query),
       ];
-      final deduped = <Map<String, dynamic>>[];
-      final seen = <String>{};
-      for (final artist in combined) {
-        final id = _artistId(artist);
-        final key = id.isNotEmpty ? id : _artistName(artist).toLowerCase();
-        if (key.isEmpty || !seen.add(key)) continue;
-        deduped.add(artist);
-      }
+      var deduped = _dedupeArtists(combined);
       deduped.sort(
         (a, b) {
           final byScore =
@@ -409,7 +468,7 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
           return _artistName(a).length.compareTo(_artistName(b).length);
         },
       );
-      final filtered = deduped
+      var filtered = deduped
           .where((artist) => _artistScore(query, artist) > 0)
           .take(20)
           .toList();
@@ -420,6 +479,24 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
         _searching = false;
       });
       _warmArtistImages(_searchResults);
+      final missingImages = filtered.where(_needsArtistImage).take(10).toList();
+      if (missingImages.isNotEmpty) {
+        final hydrated = await ApiService().hydrateArtists(missingImages);
+        final hydratedById = {
+          for (final artist in hydrated) _artistId(artist): artist,
+        };
+        final hydratedResults = filtered
+            .map((artist) => hydratedById[_artistId(artist)] ?? artist)
+            .map((artist) => Map<String, dynamic>.from(artist))
+            .toList();
+        final dedupedHydrated = _dedupeArtists(hydratedResults);
+        if (!mounted) return;
+        setState(() {
+          _searchResults =
+              dedupedHydrated.isNotEmpty ? dedupedHydrated : _searchResults;
+        });
+        _warmArtistImages(_searchResults);
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -468,7 +545,7 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
         });
       }
     }
-    return cards.take(_expandedRecommendationCount).toList();
+    return _dedupeArtists(cards).take(_expandedRecommendationCount).toList();
   }
 
   List<Map<String, dynamic>> _localSearchFallback(String query) {
@@ -500,7 +577,18 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
     results.sort(
       (a, b) => _artistScore(query, b).compareTo(_artistScore(query, a)),
     );
-    return results.take(_expandedRecommendationCount).toList();
+    return _dedupeArtists(results).take(_expandedRecommendationCount).toList();
+  }
+
+  Future<void> _hydrateSelectedArtist(String id) async {
+    try {
+      final profile = await ApiService().getArtistProfile(id);
+      if (!mounted) return;
+      final index = _selectedArtists.indexWhere((item) => _artistId(item) == id);
+      if (index < 0) return;
+      final hydrated = Map<String, dynamic>.from(profile);
+      setState(() => _selectedArtists[index] = hydrated);
+    } catch (_) {}
   }
 
   void _toggleArtist(Map<String, dynamic> artist) {
@@ -515,7 +603,11 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
       showErrorSnackBar(context, 'Choose up to 5 artists');
       return;
     }
-    setState(() => _selectedArtists.add(Map<String, dynamic>.from(artist)));
+    final selectedArtist = Map<String, dynamic>.from(artist);
+    setState(() => _selectedArtists.add(selectedArtist));
+    if (_needsArtistImage(selectedArtist)) {
+      unawaited(_hydrateSelectedArtist(id));
+    }
   }
 
   void _toggleGenre(String genre) {
@@ -791,16 +883,6 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
                     ),
                   ),
                 )
-              else if (_searching)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 32),
-                  child: Center(
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.purpleLight,
-                    ),
-                  ),
-                )
               else if (artistList.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 24),
@@ -812,7 +894,31 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
                     ),
                   ),
                 )
-              else
+              else ...[
+                if (_searching)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Row(
+                      children: [
+                        const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.purpleLight,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Loading artist images...',
+                          style: GoogleFonts.outfit(
+                            fontSize: 12,
+                            color: AppColors.text3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ...visibleArtistList.map((artist) {
                   final selected = _selectedArtists.any(
                     (item) => _artistId(item) == _artistId(artist),
@@ -824,6 +930,7 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
                     onTap: () => _toggleArtist(artist),
                   );
                 }),
+              ],
             ],
           ),
           Positioned(

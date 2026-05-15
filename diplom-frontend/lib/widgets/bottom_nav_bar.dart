@@ -17,9 +17,9 @@ class BottomNavBar extends StatelessWidget {
         filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
           height: 84,
-          decoration: const BoxDecoration(
-            color: Color(0xEB08080F),
-            border: Border(top: BorderSide(color: AppColors.border)),
+          decoration: BoxDecoration(
+            color: const Color(0xF208080f),
+            border: Border(top: BorderSide(color: Colors.white.withOpacity(0.07))),
           ),
           child: Padding(
             padding: const EdgeInsets.only(bottom: 20, left: 8, right: 8),
@@ -61,7 +61,7 @@ class _NavItem extends StatelessWidget {
             Stack(
               clipBehavior: Clip.none,
               children: [
-                Icon(icon, size: 22, color: active ? AppColors.purpleLight : AppColors.text3),
+                Icon(icon, size: 22, color: active ? AppColors.purpleLight : AppColors.text2),
                 if (badge > 0)
                   Positioned(
                     top: -5,
@@ -73,7 +73,7 @@ class _NavItem extends StatelessWidget {
                           colors: [Color(0xFF7c3aed), Color(0xFFec4899)],
                         ),
                         shape: BoxShape.circle,
-                        border: Border.all(color: const Color(0xEB08080F), width: 1.5),
+                        border: Border.all(color: const Color(0xEB130025), width: 1.5),
                       ),
                       constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
                       child: Text(
@@ -94,7 +94,7 @@ class _NavItem extends StatelessWidget {
                 style: GoogleFonts.outfit(
                     fontSize: 10,
                     fontWeight: FontWeight.w500,
-                    color: active ? AppColors.purpleLight : AppColors.text3,
+                    color: active ? AppColors.purpleLight : AppColors.text2,
                     letterSpacing: 0.04)),
             if (active) ...[
               const SizedBox(height: 2),

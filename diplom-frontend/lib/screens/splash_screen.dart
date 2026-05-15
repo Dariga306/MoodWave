@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/auth_provider.dart';
+import '../theme/app_colors.dart';
+import '../widgets/moodwave_brand.dart';
+import 'login_screen.dart';
 import 'main/main_screen.dart';
 import 'onboarding_screen.dart';
 
@@ -48,8 +52,8 @@ class _SplashScreenState extends State<SplashScreen>
     _glowCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 2000));
 
-    _glow = Tween<double>(begin: 0.3, end: 1.0).animate(
-        CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut));
+    _glow = Tween<double>(begin: 0.3, end: 1.0)
+        .animate(CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut));
 
     _mainCtrl.forward();
     _glowCtrl.repeat(reverse: true);
@@ -57,8 +61,17 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _init() async {
-    await Future.delayed(const Duration(milliseconds: 2800));
+    await Future.delayed(const Duration(milliseconds: 2200));
     if (!mounted) return;
+    final prefs = await SharedPreferences.getInstance();
+    final onboardingDone = prefs.getBool('onboarding_done') ?? false;
+    if (!onboardingDone) {
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+      );
+      return;
+    }
     await context.read<AuthProvider>().checkAuth();
     if (!mounted) return;
     final auth = context.read<AuthProvider>();
@@ -68,7 +81,7 @@ class _SplashScreenState extends State<SplashScreen>
         (user['city'] as String).isNotEmpty;
     final dest = (auth.status == AuthStatus.authenticated && hasCity)
         ? const MainScreen()
-        : const OnboardingScreen();
+        : const LoginScreen();
     Navigator.of(context)
         .pushReplacement(MaterialPageRoute(builder: (_) => dest));
   }
@@ -83,130 +96,91 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-
-          // Фиолетовое свечение на фоне снизу
-          Positioned(
-            bottom: -100, left: 0, right: 0,
-            child: AnimatedBuilder(
-              animation: _glow,
-              builder: (_, __) => Container(
-                height: 400,
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: Alignment.center,
-                    radius: 0.8,
-                    colors: [
-                      const Color(0xFF7c3aed).withOpacity(0.18 * _glow.value),
-                      Colors.transparent,
-                    ],
+      backgroundColor: AppColors.bg,
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(gradient: AppColors.authBackground),
+        child: Stack(
+          children: [
+            Positioned(
+              top: 120,
+              left: -80,
+              right: -80,
+              child: AnimatedBuilder(
+                animation: _glow,
+                builder: (_, __) => Container(
+                  height: 360,
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: Alignment.center,
+                      radius: 0.68,
+                      colors: [
+                        AppColors.pink.withValues(alpha: 0.14 * _glow.value),
+                        AppColors.purple.withValues(alpha: 0.10 * _glow.value),
+                        Colors.transparent,
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-
-          // Логотип + текст по центру
-          Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-
-                // Логотип с пульсирующим свечением
-                AnimatedBuilder(
-                  animation: Listenable.merge([_mainCtrl, _glowCtrl]),
-                  builder: (_, __) => FadeTransition(
-                    opacity: _fade,
-                    child: ScaleTransition(
-                      scale: _scale,
-                      child: Container(
-                        decoration: BoxDecoration(
-  shape: BoxShape.circle,
-  border: Border.all(
-    color: const Color(0xFF7c3aed).withOpacity(0.6),
-    width: 2,
-  ),
-  boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF7c3aed)
-                                  .withOpacity(0.6 * _glow.value),
-                              blurRadius: 60 * _glow.value,
-                              spreadRadius: 10 * _glow.value,
-                            ),
-                            BoxShadow(
-                              color: const Color(0xFFa855f7)
-                                  .withOpacity(0.25 * _glow.value),
-                              blurRadius: 120 * _glow.value,
-                              spreadRadius: 5,
-                            ),
-                          ],
+            Center(
+              child: Transform.translate(
+                offset: const Offset(0, -8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedBuilder(
+                      animation: Listenable.merge([_mainCtrl, _glowCtrl]),
+                      builder: (_, __) => FadeTransition(
+                        opacity: _fade,
+                        child: ScaleTransition(
+                          scale: _scale,
+                          child: const MoodWaveLogoMark(
+                              size: 128, radius: 38, glow: 1.2),
                         ),
-                        child: ClipOval(
-  child: Image.asset(
-    'assets/images/logo.png',
-    width: 200,
-    height: 200,
-    fit: BoxFit.cover,
-  ),
-),
                       ),
                     ),
-                  ),
-                ),
-
-                const SizedBox(height: 32),
-
-                // Текст — появляется после логотипа
-                AnimatedBuilder(
-                  animation: _mainCtrl,
-                  builder: (_, __) => Opacity(
-                    opacity: _textFade.value,
-                    child: Transform.translate(
-                      offset: Offset(0, _textSlide.value),
-                      child: Column(
-                        children: [
-                          Text('MoodWave',
-                              style: GoogleFonts.outfit(
-                                fontSize: 32,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                                letterSpacing: -0.5,
-                              )),
-                          const SizedBox(height: 6),
-                          Text('Music for every mood',
-                              style: GoogleFonts.outfit(
-                                fontSize: 15,
-                                color: Colors.white38,
-                              )),
-                        ],
+                    const SizedBox(height: 26),
+                    AnimatedBuilder(
+                      animation: _mainCtrl,
+                      builder: (_, __) => Opacity(
+                        opacity: _textFade.value,
+                        child: Transform.translate(
+                          offset: Offset(0, _textSlide.value),
+                          child: Column(
+                            children: [
+                              ShaderMask(
+                                shaderCallback: (bounds) =>
+                                    AppColors.authCta.createShader(bounds),
+                                child: Text('MoodWave',
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 38,
+                                      fontWeight: FontWeight.w900,
+                                      color: Colors.white,
+                                    )),
+                              ),
+                              const SizedBox(height: 8),
+                              Text('Discover music through your mood',
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w500,
+                                    color: AppColors.text2,
+                                  )),
+                              const SizedBox(height: 54),
+                              const MoodWaveWaveBars(width: 82, height: 54),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Спиннер внизу
-          Positioned(
-            bottom: 60, left: 0, right: 0,
-            child: AnimatedBuilder(
-              animation: _glow,
-              builder: (_, __) => Center(
-                child: SizedBox(
-                  width: 22, height: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.5,
-                    color: const Color(0xFFa855f7)
-                        .withOpacity(0.4 + 0.4 * _glow.value),
-                  ),
+                  ],
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

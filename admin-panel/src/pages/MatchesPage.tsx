@@ -8,6 +8,8 @@ const { Option } = Select
 const simColor = (v: number) => v >= 95 ? '#10b981' : v >= 85 ? '#7c3aed' : '#f59e0b'
 const simLabel = (v: number) => v >= 95 ? 'Perfect' : v >= 85 ? 'Great' : 'Good'
 
+const tStyle = { background: '#0f0f1c', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, overflow: 'hidden' as const }
+
 export default function MatchesPage() {
   const [matches, setMatches]   = useState<any[]>([])
   const [loading, setLoading]   = useState(false)
@@ -22,12 +24,8 @@ export default function MatchesPage() {
 
   const fetchMatches = async (range = simRange) => {
     setLoading(true)
-    try {
-      const res = await adminApi.getMatches(rangeMap[range])
-      setMatches(res.data)
-    } finally {
-      setLoading(false)
-    }
+    try { const r = await adminApi.getMatches(rangeMap[range]); setMatches(r.data) }
+    finally { setLoading(false) }
   }
 
   useEffect(() => { fetchMatches() }, [])
@@ -41,7 +39,7 @@ export default function MatchesPage() {
   const columns = [
     {
       title: '#', dataIndex: 'id', key: 'id', width: 55,
-      render: (v: number) => <span style={{ color: '#64748b', fontSize: 12 }}>#{v}</span>,
+      render: (v: number) => <span style={{ color: '#334155', fontSize: 12 }}>#{v}</span>,
     },
     {
       title: 'User A', dataIndex: 'user_a', key: 'user_a',
@@ -70,18 +68,16 @@ export default function MatchesPage() {
       ),
     },
     {
-      title: 'Compatibility', dataIndex: 'similarity_pct', key: 'similarity_pct', width: 220,
+      title: 'Compatibility', dataIndex: 'similarity_pct', key: 'similarity_pct', width: 225,
       sorter: (a: any, b: any) => a.similarity_pct - b.similarity_pct,
       render: (v: number) => {
         const color = simColor(v)
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Progress
-              percent={v} showInfo={false} size="small"
-              strokeColor={color} trailColor="#2a2a3e"
-              style={{ flex: 1 }}
-            />
-            <Tag style={{ background: `${color}22`, border: `1px solid ${color}66`, color, borderRadius: 6, minWidth: 66, textAlign: 'center', fontSize: 11 }}>
+            <Progress percent={v} showInfo={false} size="small"
+              strokeColor={color} trailColor="rgba(255,255,255,0.06)"
+              style={{ flex: 1 }} />
+            <Tag style={{ background: `${color}1a`, border: `1px solid ${color}40`, color, borderRadius: 6, minWidth: 70, textAlign: 'center', fontSize: 11 }}>
               {v}% {simLabel(v)}
             </Tag>
           </div>
@@ -90,13 +86,13 @@ export default function MatchesPage() {
     },
     {
       title: 'Date', dataIndex: 'created_at', key: 'created_at', width: 100,
-      render: (v: string) => <span style={{ color: '#64748b', fontSize: 11 }}>{v ? new Date(v).toLocaleDateString() : '—'}</span>,
+      render: (v: string) => <span style={{ color: '#334155', fontSize: 11 }}>{v ? new Date(v).toLocaleDateString() : '—'}</span>,
     },
     {
       title: '', key: 'actions', width: 55,
       render: (_: any, r: any) => (
         <Popconfirm title="Delete this match?" onConfirm={() => deleteMatch(r.id)} okType="danger" okText="Delete">
-          <Button size="small" danger icon={<DeleteOutlined />} />
+          <Button size="small" danger icon={<DeleteOutlined />} style={{ borderRadius: 8 }} />
         </Popconfirm>
       ),
     },
@@ -105,20 +101,22 @@ export default function MatchesPage() {
   return (
     <>
       <Space style={{ marginBottom: 16 }} size={8}>
-        <Select value={simRange} style={{ width: 190 }}
+        <Select value={simRange} style={{ width: 195 }}
           onChange={(v) => { setSimRange(v); fetchMatches(v) }}>
           <Option value="all">All similarities</Option>
           <Option value="low">75–84% — Good</Option>
           <Option value="mid">85–94% — Great</Option>
           <Option value="high">95–100% — Perfect</Option>
         </Select>
-        <Typography.Text style={{ color: '#94a3b8', fontSize: 12 }}>{matches.length} matches</Typography.Text>
+        <Typography.Text style={{ color: '#475569', fontSize: 12 }}>
+          {matches.length} matches
+        </Typography.Text>
       </Space>
 
       <Table
         dataSource={matches} columns={columns} rowKey="id" loading={loading}
         size="small" pagination={{ pageSize: 20, showSizeChanger: false }}
-        style={{ borderRadius: 14, overflow: 'hidden' }}
+        style={tStyle}
       />
     </>
   )
