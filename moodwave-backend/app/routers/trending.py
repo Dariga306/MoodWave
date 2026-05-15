@@ -18,6 +18,7 @@ from app.services import deezer as deezer_service
 router = APIRouter()
 
 TRENDING_CACHE_TTL = 600  # 10 min
+MIN_TRENDING_SAMPLE = 12
 
 
 @router.get(
@@ -34,32 +35,25 @@ async def get_trending_tracks(
 ):
     redis = request.app.state.redis
 
-    user_city = (
-        city
-        or (getattr(current_user, "city", None) if current_user else None)
-        or ""
-    ).lower().replace(" ", "_")
-
-    try:
-        city_key = f"trending:city:{user_city}"
-        city_count = await redis.zcard(city_key) if user_city else 0
-        trending_key = city_key if city_count >= 5 else "trending:global"
-        raw = await redis.zrevrange(trending_key, 0, limit - 1, withscores=True)
-    except Exception:
-        raw = []
-
-    if not raw:
-        # FIX: используем shared deezer_service.get_chart_tracks вместо дубля
+    async def _deezer_fallback(reason: str, *, based_on: str) -> dict:
         try:
-            cache_key = f"trending:deezer_fallback:{limit}"
+            cache_key = f"trending:deezer_fallback:{based_on}:{user_city or 'global'}:{limit}"
             cached = await redis.get(cache_key)
             if cached:
-                return {"tracks": json.loads(cached), "based_on": "global_chart"}
+                payload = json.loads(cached)
+                payload["reason"] = reason
+                return payload
         except Exception:
-            cached = None
+            cache_key = None
 
-        deezer_tracks = await deezer_service.get_chart_tracks(limit)
-        # Нормализуем формат — используем track_id (как trending endpoint всегда делал)
+        if based_on == "city_chart" and user_city:
+            deezer_tracks = await deezer_service.get_city_chart_tracks(
+                user_city.replace("_", " "),
+                limit,
+            )
+        else:
+            deezer_tracks = await deezer_service.get_chart_tracks(limit)
+
         tracks = [
             {
                 "track_id": t["spotify_id"],
@@ -70,17 +64,38 @@ async def get_trending_tracks(
                 "cover_url": t.get("cover_url"),
                 "preview_url": t.get("preview_url"),
                 "duration_ms": t.get("duration_ms") or 0,
-                "play_count": 0,
+                "play_count": int(t.get("rank") or 0),
                 "growth_percent": 0,
                 "badge": "HOT",
             }
             for t in deezer_tracks
         ]
-        try:
-            await redis.setex(cache_key, TRENDING_CACHE_TTL, json.dumps(tracks))
-        except Exception:
-            pass
-        return {"tracks": tracks, "based_on": "global_chart"}
+
+        payload = {"tracks": tracks, "based_on": based_on, "reason": reason}
+        if cache_key and tracks:
+            try:
+                await redis.setex(cache_key, TRENDING_CACHE_TTL, json.dumps(payload))
+            except Exception:
+                pass
+        return payload
+
+    user_city = (
+        city
+        or (getattr(current_user, "city", None) if current_user else None)
+        or ""
+    ).lower().replace(" ", "_")
+
+    try:
+        city_key = f"trending:city:{user_city}"
+        city_count = await redis.zcard(city_key) if user_city else 0
+        trending_key = city_key if city_count >= MIN_TRENDING_SAMPLE else "trending:global"
+        raw = await redis.zrevrange(trending_key, 0, limit - 1, withscores=True)
+    except Exception:
+        raw = []
+
+    if not raw:
+        fallback_based_on = "city_chart" if user_city else "global_chart"
+        return await _deezer_fallback("not_enough_local_signal", based_on=fallback_based_on)
 
     track_ids = [item[0] for item in raw]
     scores = {item[0]: item[1] for item in raw}
@@ -144,6 +159,10 @@ async def get_trending_tracks(
             "badge": badge,
         })
 
+    if len(response_tracks) < max(6, limit // 2):
+        fallback_based_on = "city_chart" if user_city else "global_chart"
+        return await _deezer_fallback("sparse_trending_cache", based_on=fallback_based_on)
+
     based_on = "city" if trending_key == city_key else "global"
     return {"tracks": response_tracks, "based_on": based_on}
 
@@ -195,42 +214,31 @@ async def get_home_feed(
 
     async def _recommended_artists():
         try:
-            cutoff = datetime.utcnow() - timedelta(days=30)
-            rows = (
+            from app.models.user import UserGenre
+            genre_rows = (
                 await db.execute(
-                    select(TrackCache.artist, func.count(ListeningHistory.id).label("plays"))
-                    .join(
-                        ListeningHistory,
-                        ListeningHistory.spotify_track_id == TrackCache.spotify_id,
-                    )
-                    .where(
-                        ListeningHistory.user_id == current_user.id,
-                        ListeningHistory.created_at >= cutoff,
-                        TrackCache.artist.isnot(None),
-                    )
-                    .group_by(TrackCache.artist)
-                    .order_by(desc("plays"))
+                    select(UserGenre.genre)
+                    .where(UserGenre.user_id == current_user.id)
+                    .order_by(desc(UserGenre.weight))
                     .limit(5)
                 )
-            ).all()
-            top_artists = [r.artist for r in rows]
+            ).scalars().all()
 
-            if not top_artists:
-                return []
+            seed_queries = list(genre_rows)[:3] if genre_rows else ["pop", "indie", "electronic"]
 
             artists_found = []
-            seen_names = set(top_artists)
-            for seed_artist in top_artists[:3]:
+            seen_names: set[str] = set()
+            for query in seed_queries:
                 try:
                     async with httpx.AsyncClient(timeout=5) as client:
                         resp = await client.get(
                             "https://api.deezer.com/search/artist",
-                            params={"q": seed_artist, "limit": 5},
+                            params={"q": query, "limit": 8},
                         )
                         if resp.status_code == 200:
                             for a in resp.json().get("data", []):
                                 name = a.get("name", "")
-                                if name and name not in seen_names and len(artists_found) < 12:
+                                if name and name not in seen_names and len(artists_found) < 16:
                                     seen_names.add(name)
                                     pic = (
                                         a.get("picture_xl")

@@ -306,6 +306,7 @@ app.include_router(rooms.router, tags=["rooms"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(trending.router, prefix="/trending", tags=["trending"])
 app.include_router(moods.router, prefix="/moods", tags=["moods"])
+app.include_router(debug.router, tags=["debug"])
 
 
 @app.get("/health")

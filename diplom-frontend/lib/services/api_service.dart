@@ -17,7 +17,7 @@ class ApiService {
     }
     if (kIsWeb) {
       final host = Uri.base.host.toLowerCase();
-      const localApi = 'http://127.0.0.1:8000';
+      const localApi = 'http://127.0.0.1:8001';
       final isLoopback = host.isEmpty ||
           host == 'localhost' ||
           host == '127.0.0.1' ||
@@ -32,15 +32,15 @@ class ApiService {
         r'^(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)$',
       ).hasMatch(host);
       if (isPrivateLan) {
-        return 'http://$host:8000';
+        return 'http://$host:8001';
       }
 
       return localApi;
     }
     if (defaultTargetPlatform == TargetPlatform.android && kDebugMode) {
-      return 'http://10.0.2.2:8000';
+      return 'http://10.0.2.2:8001';
     }
-    return 'http://localhost:8000';
+    return 'http://localhost:8001';
   }
 
   static final ApiService _instance = ApiService._internal();
@@ -1030,10 +1030,21 @@ class ApiService {
   }
 
   // Charts
-  Future<List<dynamic>> getChartsByCity(String city) async {
+  Future<Map<String, dynamic>> getChartsByCity(String city) async {
     final resp =
         await _dio.get('/charts/city', queryParameters: {'city': city});
-    return resp.data as List;
+    final data = resp.data;
+    if (data is Map) return Map<String, dynamic>.from(data);
+    return {'tracks': data as List? ?? [], 'source': 'global'};
+  }
+
+  Future<Map<String, dynamic>> getDiscover(
+      {int limit = 20, String? city}) async {
+    final resp = await _dio.get('/charts/discover', queryParameters: {
+      'limit': limit,
+      if (city != null && city.trim().isNotEmpty) 'city': city.trim(),
+    });
+    return Map<String, dynamic>.from(resp.data as Map);
   }
 
   Future<List<dynamic>> getCharts({String genre = '', int limit = 20}) async {
@@ -1785,6 +1796,11 @@ class ApiService {
   // Debug (dev only)
   Future<Map<String, dynamic>> seedDemoMatch() async {
     final resp = await _dio.post('/debug/seed-demo-match');
+    return resp.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> resetDemoDecisions() async {
+    final resp = await _dio.post('/debug/reset-demo-decisions');
     return resp.data as Map<String, dynamic>;
   }
 

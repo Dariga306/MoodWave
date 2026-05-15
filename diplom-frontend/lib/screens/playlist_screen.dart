@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../providers/auth_provider.dart';
@@ -431,12 +432,14 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               }),
             item(Icons.share_outlined, 'Share', () {
               Navigator.pop(ctx);
-              Clipboard.setData(ClipboardData(
-                  text: 'Check out my playlist: $title on MoodWave'));
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Copied to clipboard'),
-                duration: Duration(seconds: 2),
-              ));
+              Share.share(
+                'Check out my playlist "$title" on MoodWave',
+                subject: title,
+              );
+            }),
+            item(Icons.send_rounded, 'Send to someone', () {
+              Navigator.pop(ctx);
+              _sendToSomeoneDialog();
             }),
             if (!canManage && _playlist != null)
               item(Icons.person_outline_rounded, 'View profile', () {
@@ -547,6 +550,29 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       builder: (ctx) => _AddTracksSheet(
         playlistId: widget.playlistId!,
         onAdded: _load,
+      ),
+    );
+  }
+
+  Future<void> _sendToSomeoneDialog() async {
+    if (_playlist == null) return;
+    final playlistId = _playlist!['id'] as int?;
+    if (playlistId == null) return;
+    final title = _playlist!['title']?.toString() ?? 'Playlist';
+    final coverUrl = _playlist!['cover_url']?.toString();
+    final trackCount = (_playlist!['track_count'] as num?)?.toInt() ?? 0;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => _SendToSheet(
+        playlistId: playlistId,
+        title: title,
+        coverUrl: coverUrl,
+        trackCount: trackCount,
       ),
     );
   }
@@ -857,21 +883,9 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                 GestureDetector(
                                   onTap: () {
                                     HapticFeedback.lightImpact();
-                                    Clipboard.setData(ClipboardData(
-                                        text:
-                                            'Check out my playlist: $title on MoodWave'));
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text('Link copied',
-                                            style: GoogleFonts.outfit(
-                                                fontSize: 13)),
-                                        backgroundColor: AppColors.surface,
-                                        behavior: SnackBarBehavior.floating,
-                                        shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12)),
-                                        duration: const Duration(seconds: 2),
-                                      ),
+                                    Share.share(
+                                      'Check out my playlist "$title" on MoodWave',
+                                      subject: title,
                                     );
                                   },
                                   child: Container(
@@ -1184,6 +1198,189 @@ class _PlaylistOwnerRow extends StatelessWidget {
     );
   }
 }
+
+// ─── Send playlist to someone ────────────────────────────────────────────────
+
+class _SendToSheet extends StatefulWidget {
+  final int playlistId;
+  final String title;
+  final String? coverUrl;
+  final int trackCount;
+
+  const _SendToSheet({
+    required this.playlistId,
+    required this.title,
+    this.coverUrl,
+    required this.trackCount,
+  });
+
+  @override
+  State<_SendToSheet> createState() => _SendToSheetState();
+}
+
+class _SendToSheetState extends State<_SendToSheet> {
+  List<Map<String, dynamic>> _people = [];
+  bool _loading = true;
+  final Set<int> _sending = {};
+  final Set<int> _sent = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final friends = await ApiService().getFriends();
+      if (!mounted) return;
+      setState(() {
+        _people = friends
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _send(Map<String, dynamic> user) async {
+    final userId = (user['id'] as num?)?.toInt();
+    if (userId == null || _sending.contains(userId) || _sent.contains(userId)) return;
+
+    setState(() => _sending.add(userId));
+    try {
+      final chat = await ApiService().startDirectChat(userId);
+      final chatId = (chat['chat_id'] ?? chat['id']) as int?;
+      if (chatId == null) throw Exception('No chat id');
+
+      await ApiService().sendPlaylistInDirectChat(
+        chatId,
+        playlistId: widget.playlistId,
+        title: widget.title,
+        coverUrl: widget.coverUrl,
+        trackCount: widget.trackCount,
+      );
+
+      if (!mounted) return;
+      setState(() => _sent.add(userId));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to send')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending.remove(userId));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.6,
+      child: Column(children: [
+        const SizedBox(height: 8),
+        Container(
+          width: 36,
+          height: 4,
+          decoration: BoxDecoration(
+              color: AppColors.border, borderRadius: BorderRadius.circular(2)),
+        ),
+        const SizedBox(height: 14),
+        Text('Send to',
+            style: GoogleFonts.outfit(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text)),
+        const SizedBox(height: 12),
+        if (_loading)
+          const Expanded(
+              child: Center(
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.purpleLight)))
+        else if (_people.isEmpty)
+          Expanded(
+            child: Center(
+              child: Text('No friends yet',
+                  style: GoogleFonts.outfit(
+                      fontSize: 14, color: AppColors.text3)),
+            ),
+          )
+        else
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _people.length,
+              itemBuilder: (_, i) {
+                final u = _people[i];
+                final userId = (u['id'] as num?)?.toInt() ?? 0;
+                final name = u['display_name']?.toString() ??
+                    u['username']?.toString() ??
+                    'User';
+                final avatar = u['avatar_url']?.toString();
+                final isSent = _sent.contains(userId);
+                final isSending = _sending.contains(userId);
+
+                return ListTile(
+                  leading: CircleAvatar(
+                    radius: 22,
+                    backgroundColor: AppColors.surface3,
+                    backgroundImage:
+                        avatar != null ? NetworkImage(avatar) : null,
+                    child: avatar == null
+                        ? Text(name[0].toUpperCase(),
+                            style: GoogleFonts.outfit(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white))
+                        : null,
+                  ),
+                  title: Text(name,
+                      style: GoogleFonts.outfit(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.text)),
+                  trailing: GestureDetector(
+                    onTap: isSent || isSending ? null : () => _send(u),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        gradient: isSent || isSending
+                            ? null
+                            : AppColors.gradPurple,
+                        color:
+                            isSent || isSending ? AppColors.surface3 : null,
+                        shape: BoxShape.circle,
+                      ),
+                      child: isSending
+                          ? const Padding(
+                              padding: EdgeInsets.all(9),
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : Icon(
+                              isSent
+                                  ? Icons.check_rounded
+                                  : Icons.send_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        const SizedBox(height: 16),
+      ]),
+    );
+  }
+}
+
+// ─── Add tracks ──────────────────────────────────────────────────────────────
 
 class _AddTracksSheet extends StatefulWidget {
   final int playlistId;

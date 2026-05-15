@@ -1,56 +1,58 @@
 from __future__ import annotations
 
+import asyncio
 import json
-from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user_optional, get_db
-from app.models.music import ListeningAction, ListeningHistory, TrackCache
 from app.models.user import User
 from app.services import deezer as deezer_service
 
 router = APIRouter()
 
-CHARTS_CACHE_TTL = 1800  # 30 min
-PLAY_ACTIONS = [
-    ListeningAction.played,
-    ListeningAction.completed,
-    ListeningAction.replayed,
-]
+CHARTS_CACHE_TTL = 1800   # 30 min
+DISCOVER_CACHE_TTL = 600  # 10 min
 
 
-def _track_payload(track_id: str, cache: TrackCache | None) -> dict:
-    if cache:
-        return {
-            "spotify_id": track_id,
-            "title": cache.title,
-            "artist": cache.artist,
-            "album": cache.album,
-            "genre": cache.genres[0] if cache.genres else None,
-            "cover_url": cache.cover_url,
-            "preview_url": cache.preview_url,
-            "duration_ms": cache.duration_ms,
-        }
+def _fmt(t: dict, badge: str | None = None, play_count: int = 0) -> dict:
     return {
-        "spotify_id": track_id,
-        "title": track_id,
-        "artist": "",
-        "album": None,
+        "spotify_id": t.get("spotify_id") or t.get("deezer_id", ""),
+        "deezer_id": t.get("deezer_id") or t.get("spotify_id", ""),
+        "title": t.get("title", ""),
+        "artist": t.get("artist", ""),
+        "album": t.get("album"),
         "genre": None,
-        "cover_url": None,
-        "preview_url": None,
-        "duration_ms": None,
+        "cover_url": t.get("cover_url"),
+        "artist_picture": t.get("artist_picture"),
+        "preview_url": t.get("preview_url"),
+        "duration_ms": t.get("duration_ms"),
+        "play_count": 0,
+        "chart_position": int(t.get("rank") or 0),
+        "badge": badge,
     }
+
+
+def _dedupe_tracks(tracks: list[dict], limit: int) -> list[dict]:
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for track in tracks:
+        key = str(track.get("spotify_id") or track.get("deezer_id") or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(track)
+        if len(deduped) >= limit:
+            break
+    return deduped
 
 
 @router.get(
     "/city",
     summary="Get city charts",
-    description="Returns the most-played tracks for a city over the last 24 hours with cached metadata fallbacks.",
+    description="Returns currently popular tracks for a city, sourced from Deezer charts.",
 )
 async def charts_by_city(
     city: str = Query(...),
@@ -60,91 +62,109 @@ async def charts_by_city(
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     redis = request.app.state.redis
-    cache_key = f"charts:v2:city:{city.lower()}:{limit}"
+    cache_key = f"charts:v6:city:{city.lower()}:{limit}"
     cached = await redis.get(cache_key)
     if cached:
         return json.loads(cached)
 
-    window_start = datetime.utcnow() - timedelta(hours=24)
-    city_rows = (
-        await db.execute(
-            select(ListeningHistory.spotify_track_id, func.count(ListeningHistory.id).label("plays"))
-            .join(User, User.id == ListeningHistory.user_id)
-            .where(
-                func.lower(User.city) == city.lower(),
-                ListeningHistory.action.in_(PLAY_ACTIONS),
-                ListeningHistory.created_at >= window_start,
-            )
-            .group_by(ListeningHistory.spotify_track_id)
-            .order_by(desc("plays"))
-            .limit(limit)
+    deezer_tracks = await deezer_service.get_city_chart_tracks(city, limit)
+    if deezer_tracks:
+        tracks = [_fmt(t) for t in deezer_tracks]
+        city_lower = city.strip().lower()
+        source = (
+            "city"
+            if city_lower in deezer_service.CITY_GENRE_HINTS
+            or city_lower in deezer_service.CITY_SEARCH_HINTS
+            else "global"
         )
-    ).all()
-
-    # Step 2: city data last 7 days
-    if not city_rows:
-        window_7d = datetime.utcnow() - timedelta(days=7)
-        city_rows = (
-            await db.execute(
-                select(ListeningHistory.spotify_track_id, func.count(ListeningHistory.id).label("plays"))
-                .join(User, User.id == ListeningHistory.user_id)
-                .where(
-                    func.lower(User.city) == city.lower(),
-                    ListeningHistory.action.in_(PLAY_ACTIONS),
-                    ListeningHistory.created_at >= window_7d,
-                )
-                .group_by(ListeningHistory.spotify_track_id)
-                .order_by(desc("plays"))
-                .limit(limit)
-            )
-        ).all()
-
-    # Step 3: global top from DB (all users, last 7 days)
-    if not city_rows:
-        window_7d = datetime.utcnow() - timedelta(days=7)
-        city_rows = (
-            await db.execute(
-                select(ListeningHistory.spotify_track_id, func.count(ListeningHistory.id).label("plays"))
-                .where(
-                    ListeningHistory.created_at >= window_7d,
-                    ListeningHistory.action.in_(PLAY_ACTIONS),
-                )
-                .group_by(ListeningHistory.spotify_track_id)
-                .order_by(desc("plays"))
-                .limit(limit)
-            )
-        ).all()
-
-    if city_rows:
-        track_ids = [r[0] for r in city_rows]
-
-        # FIX: один батч-запрос вместо N отдельных SELECT (было N+1)
-        caches_result = await db.execute(
-            select(TrackCache).where(TrackCache.spotify_id.in_(track_ids))
-        )
-        cache_map: dict[str, TrackCache] = {
-            c.spotify_id: c for c in caches_result.scalars().all()
-        }
-
-        # Сохраняем порядок из city_rows (отсортированный по plays)
-        result = [_track_payload(tid, cache_map.get(tid)) for tid in track_ids]
     else:
-        # Step 4: Deezer global charts (реальный топ, не keyword search)
-        # FIX: используем общий deezer_service.get_chart_tracks вместо дубля
-        deezer_tracks = await deezer_service.get_chart_tracks(limit)
-        result = [
-            {
-                "spotify_id": t["spotify_id"],
-                "title": t["title"],
-                "artist": t["artist"],
-                "album": t.get("album"),
-                "genre": None,
-                "cover_url": t.get("cover_url"),
-                "preview_url": t.get("preview_url"),
-                "duration_ms": t.get("duration_ms"),
-            }
-            for t in deezer_tracks
-        ]
+        tracks = []
+        source = "global"
 
+    result = {"tracks": tracks, "source": source}
     await redis.setex(cache_key, CHARTS_CACHE_TTL, json.dumps(result))
     return result
+
+
+@router.get(
+    "/discover",
+    summary="Discover feed — all sections in one call",
+)
+async def get_discover(
+    request: Request,
+    limit: int = Query(default=20, ge=5, le=50),
+    city: Optional[str] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    redis = request.app.state.redis
+    effective_city = (
+        city
+        or (getattr(current_user, "city", None) if current_user else None)
+        or ""
+    ).strip()
+    city_key = effective_city.lower()
+    cache_key = f"charts:discover:v6:{city_key or 'global'}:{limit}"
+    cached = await redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+
+    city_hints = deezer_service.CITY_GENRE_HINTS.get(city_key, [])
+    primary_genre = city_hints[0] if city_hints else "pop"
+    secondary_genre = (
+        city_hints[1]
+        if len(city_hints) > 1
+        else ("hip-hop" if primary_genre != "hip-hop" else "r&b")
+    )
+    tertiary_genre = (
+        "electronic"
+        if primary_genre != "electronic" and secondary_genre != "electronic"
+        else "pop"
+    )
+
+    async def _global_top():
+        tracks = await deezer_service.get_chart_tracks(limit)
+        return [_fmt(t, badge=None, play_count=0) for t in tracks]
+
+    async def _trending():
+        if effective_city:
+            tracks = await deezer_service.get_city_chart_tracks(effective_city, limit)
+        else:
+            tracks = await deezer_service.get_chart_tracks(limit)
+        return [_fmt(t, badge="HOT", play_count=0) for t in tracks]
+
+    async def _viral():
+        if effective_city:
+            tracks = await deezer_service.get_city_boost_tracks(effective_city, limit)
+        else:
+            tracks = await deezer_service.get_genre_chart_tracks(primary_genre, limit)
+        if not tracks:
+            tracks = await deezer_service.get_chart_tracks(limit)
+        return [_fmt(t, badge="VIRAL", play_count=0) for t in tracks]
+
+    async def _new_releases():
+        tracks = await deezer_service.get_genre_chart_tracks(tertiary_genre, limit)
+        if not tracks:
+            tracks = await deezer_service.get_chart_tracks(limit)
+        return [_fmt(t, badge="NEW", play_count=0) for t in tracks]
+
+    async def _rising():
+        tracks = await deezer_service.get_genre_chart_tracks(secondary_genre, limit)
+        if not tracks:
+            tracks = await deezer_service.get_chart_tracks(limit)
+        return [_fmt(t, badge="↑", play_count=0) for t in tracks]
+
+    global_top, trending, viral, new_releases, rising = await asyncio.gather(
+        _global_top(), _trending(), _viral(), _new_releases(), _rising()
+    )
+    payload = {
+        "city": effective_city,
+        "source": "city" if city_key in deezer_service.CITY_GENRE_HINTS else "global",
+        "global_top": _dedupe_tracks(global_top, limit),
+        "trending": _dedupe_tracks(trending, limit),
+        "viral": _dedupe_tracks(viral, limit),
+        "new_releases": _dedupe_tracks(new_releases, limit),
+        "rising": _dedupe_tracks(rising, limit),
+    }
+    await redis.setex(cache_key, DISCOVER_CACHE_TTL, json.dumps(payload))
+    return payload

@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
-import 'main/main_screen.dart';
+import 'onboarding_screen.dart';
 
 // Popular cities shown before typing
 const List<String> _popularCities = [
@@ -200,10 +200,8 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
     }
 
     if (!mounted) return;
-    await context.read<AuthProvider>().completeOnboarding();
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const MainScreen()));
+    Navigator.of(context).pushReplacement(MaterialPageRoute(
+        builder: (_) => const OnboardingScreen(postRegistration: true)));
   }
 
   @override
@@ -252,7 +250,8 @@ class _CitySelectScreenState extends State<CitySelectScreen> {
                               fontWeight: FontWeight.w800,
                               color: AppColors.text)),
                       const SizedBox(height: 4),
-                      Text('For weather moods & local charts',
+                      Text(
+                          'For weather playlists, local charts, and your onboarding preview',
                           style: GoogleFonts.outfit(
                               fontSize: 14, color: AppColors.text2)),
                       const SizedBox(height: 20),

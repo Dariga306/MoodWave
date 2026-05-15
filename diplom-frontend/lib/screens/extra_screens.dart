@@ -6643,7 +6643,7 @@ class _CityChartsScreenState extends State<CityChartsScreen>
       final data = await ApiService().getChartsByCity(city);
       if (!mounted) return;
       setState(() {
-        _tracks = data;
+        _tracks = data['tracks'] as List? ?? [];
         _loading = false;
       });
     } catch (_) {

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -427,6 +426,7 @@ class _MatchViewState extends State<_MatchView>
   bool _onlyPublic = false;
   bool _excludeHiddenTaste = true;
   double _minSimilarity = 35;
+  bool _autoResetAttempted = false;
 
   @override
   void initState() {
@@ -457,6 +457,13 @@ class _MatchViewState extends State<_MatchView>
         _idx = 0;
         _loading = false;
       });
+      if (_matchingEnabled &&
+          _candidates.isEmpty &&
+          !_autoResetAttempted &&
+          !_seedingDemo) {
+        _autoResetAttempted = true;
+        unawaited(_seedDemoProfiles());
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -472,6 +479,9 @@ class _MatchViewState extends State<_MatchView>
     if (_seedingDemo) return;
     setState(() => _seedingDemo = true);
     try {
+      await ApiService()
+          .resetDemoDecisions()
+          .catchError((_) => <String, dynamic>{});
       await ApiService().seedDemoMatch();
       _cityCtrl.clear();
       _onlyOnline = false;
@@ -767,54 +777,50 @@ class _MatchViewState extends State<_MatchView>
                         ),
                       ),
                     ),
-                    if (kDebugMode) ...[
-                      const SizedBox(height: 10),
-                      GestureDetector(
-                        onTap: _seedingDemo ? null : _seedDemoProfiles,
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 18, vertical: 14),
-                          decoration: BoxDecoration(
-                            color: AppColors.glass,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: _seedingDemo
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: AppColors.purpleLight),
-                                )
-                              : Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    const Icon(Icons.auto_awesome_rounded,
-                                        size: 16, color: AppColors.purpleLight),
-                                    const SizedBox(width: 8),
-                                    Text('Add demo profiles',
-                                        style: GoogleFonts.outfit(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w700,
-                                            color: AppColors.text)),
-                                  ],
-                                ),
+                    const SizedBox(height: 10),
+                    GestureDetector(
+                      onTap: _seedingDemo ? null : _seedDemoProfiles,
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 18, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: AppColors.glass,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: AppColors.border),
                         ),
+                        child: _seedingDemo
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.purpleLight),
+                              )
+                            : Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.auto_awesome_rounded,
+                                      size: 16, color: AppColors.purpleLight),
+                                  const SizedBox(width: 8),
+                                  Text('Reset demo profiles',
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.text)),
+                                ],
+                              ),
                       ),
-                    ],
+                    ),
                   ],
                 ),
-                if (kDebugMode) ...[
-                  const SizedBox(height: 14),
-                  Text(
-                    'Demo profiles include different cities, bios, banners, private profiles, and hidden taste settings.',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.outfit(
-                        fontSize: 12, color: AppColors.text3, height: 1.5),
-                  ),
-                ],
+                const SizedBox(height: 14),
+                Text(
+                  'Resetting demo profiles makes every test profile visible again with cities, bios, banners, and fresh pre-likes.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.outfit(
+                      fontSize: 12, color: AppColors.text3, height: 1.5),
+                ),
               ],
             ),
           ),
@@ -1001,44 +1007,41 @@ class _MatchViewState extends State<_MatchView>
               onChangeEnd: (_) => _load(),
             ),
           ),
-          if (kDebugMode) ...[
-            const SizedBox(height: 10),
-            GestureDetector(
-              onTap: _seedingDemo ? null : _seedDemoProfiles,
-              child: Container(
-                width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: AppColors.glass,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (_seedingDemo)
-                      const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: AppColors.purpleLight),
-                      )
-                    else ...[
-                      const Icon(Icons.groups_rounded,
-                          size: 16, color: AppColors.purpleLight),
-                      const SizedBox(width: 8),
-                      Text('Add demo profiles',
-                          style: GoogleFonts.outfit(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.text)),
-                    ],
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: _seedingDemo ? null : _seedDemoProfiles,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.glass,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (_seedingDemo)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.purpleLight),
+                    )
+                  else ...[
+                    const Icon(Icons.groups_rounded,
+                        size: 16, color: AppColors.purpleLight),
+                    const SizedBox(width: 8),
+                    Text('Reset demo profiles',
+                        style: GoogleFonts.outfit(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.text)),
                   ],
-                ),
+                ],
               ),
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -1523,16 +1526,18 @@ class _MatchViewState extends State<_MatchView>
                                         final artistName =
                                             (artist['name'] ?? 'Artist')
                                                 .toString();
-                                        final artistImage = (artist['image_url'] ??
-                                                artist['picture_medium'] ??
-                                                artist['picture_big'] ??
-                                                '')
-                                            .toString();
+                                        final artistImage =
+                                            (artist['image_url'] ??
+                                                    artist['picture_medium'] ??
+                                                    artist['picture_big'] ??
+                                                    '')
+                                                .toString();
                                         return Container(
                                           padding: const EdgeInsets.symmetric(
                                               horizontal: 8, vertical: 6),
                                           decoration: BoxDecoration(
-                                            color: Colors.white.withOpacity(0.04),
+                                            color:
+                                                Colors.white.withOpacity(0.04),
                                             borderRadius:
                                                 BorderRadius.circular(999),
                                             border: Border.all(
@@ -1547,17 +1552,18 @@ class _MatchViewState extends State<_MatchView>
                                                 clipBehavior: Clip.antiAlias,
                                                 decoration: const BoxDecoration(
                                                   shape: BoxShape.circle,
-                                                  gradient:
-                                                      AppColors.gradMixed,
+                                                  gradient: AppColors.gradMixed,
                                                 ),
                                                 child: artistImage.isNotEmpty
                                                     ? CachedNetworkImage(
                                                         imageUrl: artistImage,
                                                         fit: BoxFit.cover,
-                                                        errorWidget: (_, __, ___) =>
-                                                            Center(
+                                                        errorWidget:
+                                                            (_, __, ___) =>
+                                                                Center(
                                                           child: Text(
-                                                            artistName.isNotEmpty
+                                                            artistName
+                                                                    .isNotEmpty
                                                                 ? artistName[0]
                                                                     .toUpperCase()
                                                                 : 'A',
@@ -1565,7 +1571,8 @@ class _MatchViewState extends State<_MatchView>
                                                                 .outfit(
                                                               fontSize: 10,
                                                               fontWeight:
-                                                                  FontWeight.w700,
+                                                                  FontWeight
+                                                                      .w700,
                                                               color:
                                                                   Colors.white,
                                                             ),
@@ -1578,8 +1585,8 @@ class _MatchViewState extends State<_MatchView>
                                                               ? artistName[0]
                                                                   .toUpperCase()
                                                               : 'A',
-                                                          style:
-                                                              GoogleFonts.outfit(
+                                                          style: GoogleFonts
+                                                              .outfit(
                                                             fontSize: 10,
                                                             fontWeight:
                                                                 FontWeight.w700,

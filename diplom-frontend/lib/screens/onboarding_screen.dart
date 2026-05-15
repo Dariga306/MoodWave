@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../providers/auth_provider.dart';
 import '../theme/app_colors.dart';
 import 'login_screen.dart';
+import 'main/main_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
-  const OnboardingScreen({super.key});
+  final bool postRegistration;
+  const OnboardingScreen({super.key, this.postRegistration = false});
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -30,8 +34,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('onboarding_done', true);
     if (!mounted) return;
+    if (widget.postRegistration) {
+      await context.read<AuthProvider>().completeOnboarding();
+    }
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const LoginScreen()));
+      MaterialPageRoute(
+        builder: (_) =>
+            widget.postRegistration ? const MainScreen() : const LoginScreen(),
+      ),
+    );
   }
 
   @override
@@ -144,7 +156,6 @@ class _PageLayout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final top = MediaQuery.of(context).padding.top;
     final screenH = MediaQuery.of(context).size.height;
 
     return Column(
@@ -206,7 +217,7 @@ class _MoodPage extends StatelessWidget {
       titleGradient:
           const LinearGradient(colors: [Color(0xFFe040fb), Color(0xFFa855f7)]),
       description:
-          'Choose from curated mood tiles — Study, Sport, Sleep, Party — and see what others in your city are listening to right now.',
+          'Choose from curated mood tiles like Study, Sport, Sleep, and Party, then jump straight into live chart-driven discovery for your city.',
     );
   }
 }
@@ -346,7 +357,7 @@ class _WeatherPage extends StatelessWidget {
       titleGradient:
           const LinearGradient(colors: [Color(0xFF38bdf8), Color(0xFF0ea5e9)]),
       description:
-          'MoodWave reads the sky. Snow, rain, sunset — get a perfectly curated playlist that matches the atmosphere outside your window.',
+          'MoodWave reads the sky. Snow, rain, sunset, late-night calm — every forecast becomes a matching listening lane with local context.',
     );
   }
 }
@@ -414,8 +425,7 @@ class _WeatherCard extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: const Color(0xFF082f49).withOpacity(0.85),
                     borderRadius: BorderRadius.circular(20),
-                    border:
-                        Border.all(color: Colors.white.withOpacity(0.12)),
+                    border: Border.all(color: Colors.white.withOpacity(0.12)),
                   ),
                   child: Column(
                     children: [
@@ -494,7 +504,7 @@ class _MatchPage extends StatelessWidget {
       titleGradient:
           const LinearGradient(colors: [Color(0xFFf43f5e), Color(0xFFe91e8c)]),
       description:
-          'Our AI matches you with people who share your exact music taste — same artists, same moods, same vibes. Like Tinder for music lovers.',
+          'Meet people who overlap with your real taste profile: same artists, same moods, and shared listening energy you can actually start from.',
     );
   }
 }
@@ -584,8 +594,7 @@ class _MatchCard extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.14),
                       borderRadius: BorderRadius.circular(20),
-                      border:
-                          Border.all(color: Colors.white.withOpacity(0.18)),
+                      border: Border.all(color: Colors.white.withOpacity(0.18)),
                     ),
                     child: Column(
                       children: [
@@ -618,9 +627,7 @@ class _MatchCard extends StatelessWidget {
 
 class _MatchAvatar extends StatelessWidget {
   const _MatchAvatar(
-      {required this.letter,
-      required this.color,
-      required this.borderColor});
+      {required this.letter, required this.color, required this.borderColor});
 
   final String letter;
   final Color color;

@@ -190,8 +190,9 @@ async def seed_demo_match(
             vector = dict(_DEMO_VECTOR)
         db.add(TasteVector(user_id=current_user.id, vector=vector))
         await db.flush()
-
-    base_vector = dict(my_tv.vector or _DEMO_VECTOR)
+        base_vector = dict(vector or _DEMO_VECTOR)
+    else:
+        base_vector = dict(my_tv.vector or _DEMO_VECTOR)
     if not base_vector:
         base_vector = dict(_DEMO_VECTOR)
 
@@ -356,4 +357,69 @@ async def seed_demo_match(
             "4. Tap Open profile to inspect bios, avatars, and banners",
             "5. Swipe right (like) to create a mutual match and start chat",
         ],
+    }
+
+
+@router.post(
+    "/debug/reset-demo-decisions",
+    summary="[DEV] Reset all swipe decisions on demo users",
+    description=(
+        "Deletes all MatchDecision rows where current_user swiped on any demo user "
+        "AND where any demo user swiped on current_user. "
+        "After calling this, re-seed demo users so they pre-like you again. "
+        "Development only (APP_ENV=development)."
+    ),
+)
+async def reset_demo_decisions(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if os.getenv("APP_ENV", "development") != "development":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    suffix = str(current_user.id)
+    prefixes = [demo["prefix"] for demo in _DEMO_USERS]
+    usernames = [f"{p}_{suffix}" for p in prefixes]
+
+    demo_users = (
+        await db.execute(
+            select(User).where(User.username.in_(usernames))
+        )
+    ).scalars().all()
+    demo_ids = [u.id for u in demo_users]
+
+    if not demo_ids:
+        return {"message": "No demo users found. Run seed-demo-match first.", "deleted": 0}
+
+    deleted = 0
+    for demo_id in demo_ids:
+        # current_user's decisions about demo users
+        dec = await db.scalar(
+            select(MatchDecision).where(
+                MatchDecision.user_id == current_user.id,
+                MatchDecision.target_user_id == demo_id,
+            )
+        )
+        if dec:
+            await db.delete(dec)
+            deleted += 1
+        # demo user's decisions about current_user
+        rev = await db.scalar(
+            select(MatchDecision).where(
+                MatchDecision.user_id == demo_id,
+                MatchDecision.target_user_id == current_user.id,
+            )
+        )
+        if rev:
+            await db.delete(rev)
+            deleted += 1
+
+    await db.commit()
+    await cache_svc.invalidate_match_candidates(request.app.state.redis, [current_user.id])
+
+    return {
+        "message": f"Reset {deleted} decisions. Now call /debug/seed-demo-match to restore pre-likes.",
+        "deleted": deleted,
+        "demo_users_found": len(demo_ids),
     }

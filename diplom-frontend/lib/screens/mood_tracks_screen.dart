@@ -131,17 +131,6 @@ class _MoodTracksScreenState extends State<MoodTracksScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.bg,
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _MoodFab(icon: Icons.headphones_rounded, onTap: _playAll),
-            _MoodFab(icon: Icons.shuffle_rounded, active: _shuffleOn, onTap: _toggleShuffle),
-          ],
-        ),
-      ),
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [

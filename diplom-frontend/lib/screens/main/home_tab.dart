@@ -11,7 +11,9 @@ import '../../utils/media_url.dart';
 import '../../widgets/common_widgets.dart';
 import '../album_screen.dart';
 import '../artist_screen.dart';
-import '../extra_screens.dart';
+import '../city_charts_screen.dart';
+import '../discover_screen.dart';
+import '../extra_screens.dart' hide DiscoverScreen, CityChartsScreen;
 import '../mood_screen.dart';
 import '../mood_tracks_screen.dart';
 import '../notifications_screen.dart';
@@ -38,6 +40,9 @@ class _HomeTabState extends State<HomeTab> {
   List<dynamic> _followedArtists = [];
   List<dynamic> _liveRooms = [];
   List<dynamic> _becauseYouListened = [];
+  List<dynamic> _discoverGlobal = [];
+  List<dynamic> _discoverViral = [];
+  List<dynamic> _discoverRising = [];
   List<Map<String, dynamic>> _aiMixes = [];
   List<Map<String, dynamic>> _mixedRecommendations = [];
   List<Map<String, dynamic>> _thisIsArtists = [];
@@ -47,6 +52,7 @@ class _HomeTabState extends State<HomeTab> {
   bool _playingWeather = false;
   bool _chartsAreCityData = false;
   int _unreadNotifCount = 0;
+  String _discoverCity = '';
 
   PlayerProvider? _playerProvider;
   String? _lastKnownTrackId;
@@ -103,28 +109,50 @@ class _HomeTabState extends State<HomeTab> {
     try {
       // Phase 1: critical content — show page as soon as this completes
       final phase1 = await Future.wait([
-        api.getWeather(city).catchError((_) => <String, dynamic>{}),        // 0
-        api.getChartsByCity(city).catchError((_) => <dynamic>[]),            // 1
-        api.getRecentlyPlayed(limit: 20).catchError((_) => <dynamic>[]),     // 2
-        api.getCharts(genre: '').catchError((_) => <dynamic>[]),             // 3
-        api.getActiveRooms(limit: 5).catchError((_) => <dynamic>[]),         // 4
-        api.getTrendingTracks(limit: 10).catchError((_) => <dynamic>[]),     // 5
-        api.getFriendsActivity().catchError((_) => <String, dynamic>{}),     // 6
+        api.getWeather(city).catchError((_) => <String, dynamic>{}), // 0
+        api.getChartsByCity(city).catchError((_) =>
+            <String, dynamic>{'tracks': <dynamic>[], 'source': 'global'}), // 1
+        api.getRecentlyPlayed(limit: 20).catchError((_) => <dynamic>[]), // 2
+        api.getDiscover(city: city).catchError((_) => <String, dynamic>{}), // 3
+        api.getActiveRooms(limit: 5).catchError((_) => <dynamic>[]), // 4
+        api
+            .getTrendingTracks(city: city, limit: 10)
+            .catchError((_) => <dynamic>[]), // 5
+        api.getFriendsActivity().catchError((_) => <String, dynamic>{}), // 6
       ]);
       if (!mounted) return;
 
-      final cityCharts = (phase1[1] as List?) ?? [];
-      final globalCharts = (phase1[3] as List?) ?? [];
+      final cityChartsData = phase1[1] as Map<String, dynamic>?;
+      final cityCharts = (cityChartsData?['tracks'] as List?) ?? [];
+      final cityChartsSource =
+          (cityChartsData?['source'] as String?) ?? 'global';
+      final discoverData = phase1[3] is Map
+          ? Map<String, dynamic>.from(phase1[3] as Map)
+          : <String, dynamic>{};
+      final globalCharts = (discoverData['global_top'] as List?) ?? [];
+      final discoverViral = (discoverData['viral'] as List?) ?? [];
+      final discoverNew = (discoverData['new_releases'] as List?) ?? [];
+      final discoverRising = (discoverData['rising'] as List?) ?? [];
       final recently = (phase1[2] as List?) ?? [];
+      final trendingTracks = (phase1[5] as List?) ?? [];
 
       setState(() {
         _weather = phase1[0] as Map<String, dynamic>?;
         _charts = cityCharts.isNotEmpty ? cityCharts : globalCharts;
-        _chartsAreCityData = cityCharts.isNotEmpty;
+        _chartsAreCityData =
+            cityCharts.isNotEmpty && cityChartsSource == 'city';
         _recentlyPlayed = recently;
-        _freshWave = globalCharts;
+        _freshWave = discoverNew.isNotEmpty ? discoverNew : globalCharts;
+        _discoverGlobal = globalCharts;
+        _discoverViral = discoverViral;
+        _discoverRising = discoverRising;
+        _discoverCity =
+            (discoverData['city']?.toString().trim().isNotEmpty ?? false)
+                ? discoverData['city'].toString().trim()
+                : city.toString();
         _liveRooms = (phase1[4] as List?) ?? [];
-        _hotRightNow = (phase1[5] as List?) ?? [];
+        _hotRightNow =
+            discoverViral.isNotEmpty ? discoverViral : trendingTracks;
         _friendsActivity = Map<String, dynamic>.from(phase1[6] as Map);
         _loading = false;
       });
@@ -137,22 +165,25 @@ class _HomeTabState extends State<HomeTab> {
     }
   }
 
-  Future<void> _loadEnrichment(
-      ApiService api, List<dynamic> recently, List<dynamic> globalCharts) async {
+  Future<void> _loadEnrichment(ApiService api, List<dynamic> recently,
+      List<dynamic> globalCharts) async {
     try {
       final phase2 = await Future.wait([
-        api.getFollowedArtistsDetails().catchError((_) => <dynamic>[]),               // 0
-        api.getRadioStations().catchError((_) => <dynamic>[]),                        // 1
-        api.getHomeFeed().catchError((_) => <String, dynamic>{}),                     // 2
-        api.getLikedAlbums().catchError((_) => <Map<String, dynamic>>[]),             // 3
-        api.getPlaylists().catchError((_) => <dynamic>[]),                            // 4
-        api.getRecommendations().catchError((_) => <dynamic>[]),                      // 5
-        api.getGenreMixes().catchError((_) => <Map<String, dynamic>>[]),              // 6
+        api.getFollowedArtistsDetails().catchError((_) => <dynamic>[]), // 0
+        api.getRadioStations().catchError((_) => <dynamic>[]), // 1
+        api.getHomeFeed().catchError((_) => <String, dynamic>{}), // 2
+        api.getLikedAlbums().catchError((_) => <Map<String, dynamic>>[]), // 3
+        api.getPlaylists().catchError((_) => <dynamic>[]), // 4
+        api.getRecommendations().catchError((_) => <dynamic>[]), // 5
+        api.getGenreMixes().catchError((_) => <Map<String, dynamic>>[]), // 6
       ]);
       if (!mounted) return;
 
       final followedRaw = (phase2[0] as List?) ?? [];
-      final feed = phase2[2] as Map<String, dynamic>;
+      final feedRaw = phase2[2];
+      final feed = feedRaw is Map
+          ? Map<String, dynamic>.from(feedRaw)
+          : <String, dynamic>{};
       final feedArtistsRaw = (feed['you_might_like'] as List?) ?? [];
       final likedAlbums = (phase2[3] as List?) ?? [];
       final playlists = (phase2[4] as List?) ?? [];
@@ -160,14 +191,18 @@ class _HomeTabState extends State<HomeTab> {
       final genreMixes = (phase2[6] as List?) ?? [];
 
       final artistGroups = await Future.wait([
-        api.hydrateArtists(followedRaw),
-        api.hydrateArtists(feedArtistsRaw),
+        api
+            .hydrateArtists(followedRaw)
+            .catchError((_) => <Map<String, dynamic>>[]),
+        api
+            .hydrateArtists(feedArtistsRaw)
+            .catchError((_) => <Map<String, dynamic>>[]),
         api.hydrateArtists(const [
           {'id': 1424821, 'name': 'Lana Del Rey'},
           {'id': 15356779, 'name': 'МЭЙБИ БЭЙБИ'},
           {'id': 288166, 'name': 'Justin Bieber'},
           {'id': 4050205, 'name': 'The Weeknd'},
-        ]),
+        ]).catchError((_) => <Map<String, dynamic>>[]),
       ]);
       if (!mounted) return;
 
@@ -247,7 +282,8 @@ class _HomeTabState extends State<HomeTab> {
     }
 
     for (final album in filteredAlbums) {
-      final key = 'album:${_normalizedText(_entityTitle(album))}|${_normalizedText(_entityArtist(album))}';
+      final key =
+          'album:${_normalizedText(_entityTitle(album))}|${_normalizedText(_entityArtist(album))}';
       if (key.isNotEmpty) addItem('album', album, key);
     }
 
@@ -376,15 +412,19 @@ class _HomeTabState extends State<HomeTab> {
               .catchError((_) => <Map<String, dynamic>>[]),
         ),
       );
-      final candidates = <Map<String, dynamic>>[
+      final fromSearch = <Map<String, dynamic>>[
         for (final batch in searchResults)
           ...batch
               .whereType<Map>()
               .map((item) => Map<String, dynamic>.from(item)),
-        ...fallback
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item)),
       ];
+      // Only use global fallback if search returned nothing
+      final candidates = fromSearch.isNotEmpty
+          ? fromSearch
+          : fallback
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item))
+              .toList();
       return _finalizeBecauseTracks(
         candidates,
         seedArtist: artist,
@@ -459,52 +499,48 @@ class _HomeTabState extends State<HomeTab> {
   String _normalizedText(String value) =>
       value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
 
-  String _entityName(Map<String, dynamic> item) =>
-      (item['name'] ??
-              item['display_name'] ??
-              item['username'] ??
-              item['artist'] ??
-              '')
-          .toString()
-          .trim();
+  String _entityName(Map<String, dynamic> item) => (item['name'] ??
+          item['display_name'] ??
+          item['username'] ??
+          item['artist'] ??
+          '')
+      .toString()
+      .trim();
 
-  String _entityTitle(Map<String, dynamic> item) =>
-      (item['title'] ??
-              item['trackName'] ??
-              item['album_name'] ??
-              item['collectionName'] ??
-              '')
-          .toString()
-          .trim();
+  String _entityTitle(Map<String, dynamic> item) => (item['title'] ??
+          item['trackName'] ??
+          item['album_name'] ??
+          item['collectionName'] ??
+          '')
+      .toString()
+      .trim();
 
   String _entityArtist(Map<String, dynamic> item) =>
       (item['artist'] ?? item['artistName'] ?? item['artist_name'] ?? '')
           .toString()
           .trim();
 
-  String _artistImage(Map<String, dynamic> item) =>
-      (item['picture_xl'] ??
-              item['picture_big'] ??
-              item['picture_medium'] ??
-              item['photo_url'] ??
-              item['image_url'] ??
-              item['avatar_url'] ??
-              item['cover_url'] ??
-              '')
-          .toString()
-          .trim();
+  String _artistImage(Map<String, dynamic> item) => (item['picture_xl'] ??
+          item['picture_big'] ??
+          item['picture_medium'] ??
+          item['photo_url'] ??
+          item['image_url'] ??
+          item['avatar_url'] ??
+          item['cover_url'] ??
+          '')
+      .toString()
+      .trim();
 
-  String _albumImage(Map<String, dynamic> item) =>
-      (item['cover_url'] ??
-              item['artworkUrl100'] ??
-              item['cover_xl'] ??
-              item['image_url'] ??
-              item['picture_xl'] ??
-              item['picture_big'] ??
-              item['picture_medium'] ??
-              '')
-          .toString()
-          .trim();
+  String _albumImage(Map<String, dynamic> item) => (item['cover_url'] ??
+          item['artworkUrl100'] ??
+          item['cover_xl'] ??
+          item['image_url'] ??
+          item['picture_xl'] ??
+          item['picture_big'] ??
+          item['picture_medium'] ??
+          '')
+      .toString()
+      .trim();
 
   bool _hasUsableImage(String value) {
     final url = value.trim().toLowerCase();
@@ -1251,30 +1287,6 @@ class _HomeTabState extends State<HomeTab> {
                 ),
               ],
 
-              // ─── AI Mixes ────────────────────────────────────
-              if (_aiMixes.isNotEmpty) ...[
-                const SizedBox(height: 22),
-                SectionHeader(
-                  title: 'AI Mixes',
-                  action: 'See all →',
-                  onAction: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => _AiMixesScreen(mixes: _aiMixes),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 146,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(left: 20),
-                    itemCount: _aiMixes.length.clamp(0, 8),
-                    itemBuilder: (context, i) => _AiMixCard(mix: _aiMixes[i]),
-                  ),
-                ),
-              ],
 
               // ─── Because you listened to ───────────────────────
               if (_becauseYouListened.isNotEmpty) ...[
@@ -1396,10 +1408,85 @@ class _HomeTabState extends State<HomeTab> {
 
               ..._buildMoodSection(),
 
+              if (_discoverGlobal.isNotEmpty ||
+                  _discoverViral.isNotEmpty ||
+                  _freshWave.isNotEmpty ||
+                  _discoverRising.isNotEmpty) ...[
+                const SizedBox(height: 22),
+                SectionHeader(
+                  title: 'Discover',
+                  action: 'Open →',
+                  onAction: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const DiscoverScreen(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 38,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    children: [
+                      _buildDiscoverQuickChip(
+                        label: '🌐 Global',
+                        active: true,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const DiscoverScreen(initialTab: 0),
+                          ),
+                        ),
+                      ),
+                      _buildDiscoverQuickChip(
+                        label: '🔥 Viral',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const DiscoverScreen(initialTab: 1),
+                          ),
+                        ),
+                      ),
+                      _buildDiscoverQuickChip(
+                        label: '🆕 New Releases',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const DiscoverScreen(initialTab: 2),
+                          ),
+                        ),
+                      ),
+                      _buildDiscoverQuickChip(
+                        label: '📈 Rising',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const DiscoverScreen(initialTab: 3),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_discoverCity.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+                    child: Text(
+                      'Live chart discovery tuned for $_discoverCity',
+                      style: GoogleFonts.outfit(
+                        fontSize: 12,
+                        color: AppColors.text3,
+                      ),
+                    ),
+                  ),
+              ],
+
               // ─── Top in City ───────────────────────────────────
               const SizedBox(height: 22),
               SectionHeader(
-                  title: _chartsAreCityData ? 'Top in $city' : 'Trending Now',
+                  title: _chartsAreCityData ? 'Top in $city' : 'Global charts',
                   action: 'See all →',
                   onAction: () => Navigator.push(
                       context,
@@ -1409,7 +1496,7 @@ class _HomeTabState extends State<HomeTab> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 2, 20, 0),
                   child: Text(
-                    'Global charts • Play more to unlock $city trends',
+                    'Showing worldwide leaders while we keep the feed aligned to $city',
                     style: GoogleFonts.outfit(
                         fontSize: 11, color: AppColors.text3),
                   ),
@@ -1574,12 +1661,54 @@ class _HomeTabState extends State<HomeTab> {
                   color: Colors.white)),
           const SizedBox(height: 4),
           Text(
-            'Play a few tracks or refresh to see real city results.',
+            'We are showing the external chart feed first while local city layering catches up.',
             textAlign: TextAlign.center,
             style: GoogleFonts.outfit(
                 fontSize: 12, color: AppColors.text3, height: 1.5),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDiscoverQuickChip({
+    required String label,
+    required VoidCallback onTap,
+    bool active = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          decoration: BoxDecoration(
+            gradient: active ? AppColors.primaryBtn : null,
+            color: active ? null : AppColors.surface,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color:
+                  active ? Colors.transparent : Colors.white.withOpacity(0.08),
+            ),
+            boxShadow: active
+                ? [
+                    BoxShadow(
+                      color: AppColors.purple.withOpacity(0.22),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(
+            label,
+            style: GoogleFonts.outfit(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1686,8 +1815,8 @@ class _RecommendationCard extends StatelessWidget {
             Text(subtitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style:
-                    GoogleFonts.outfit(fontSize: compact ? 10 : 11, color: AppColors.text3)),
+                style: GoogleFonts.outfit(
+                    fontSize: compact ? 10 : 11, color: AppColors.text3)),
           ],
         ),
       ),
@@ -1794,7 +1923,6 @@ class _RecommendationCard extends StatelessWidget {
         return AppColors.gradOrange;
     }
   }
-
 }
 
 void _openRecommendation(
@@ -2355,7 +2483,8 @@ class _TrackCard extends StatelessWidget {
                           fit: BoxFit.cover,
                           placeholder: (_, __) => const SizedBox(),
                           errorWidget: (_, __, ___) => const Center(
-                              child: Text('🎵', style: TextStyle(fontSize: 40)))))
+                              child:
+                                  Text('🎵', style: TextStyle(fontSize: 40)))))
                   : const Center(
                       child: Text('🎵', style: TextStyle(fontSize: 40))),
             ),
@@ -2400,20 +2529,21 @@ class _MoodTile extends StatelessWidget {
       child: Container(
         width: 138,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(22),
           boxShadow: [
             BoxShadow(
-              color: mood.glowColor.withOpacity(0.30),
-              blurRadius: 22,
-              offset: const Offset(0, 8),
+              color: mood.glowColor.withValues(alpha: 0.40),
+              blurRadius: 28,
+              offset: const Offset(0, 10),
             ),
           ],
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(22),
           child: Stack(
             fit: StackFit.expand,
             children: [
+              // Photo background
               CachedNetworkImage(
                 imageUrl: mood.artUrl,
                 fit: BoxFit.cover,
@@ -2424,13 +2554,14 @@ class _MoodTile extends StatelessWidget {
                   decoration: BoxDecoration(gradient: mood.gradient),
                 ),
               ),
+              // Color overlay
               Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
                       Colors.transparent,
-                      mood.gradient.colors.first.withOpacity(0.55),
-                      mood.gradient.colors.last.withOpacity(0.92),
+                      mood.gradient.colors.first.withValues(alpha: 0.55),
+                      mood.gradient.colors.last.withValues(alpha: 0.92),
                     ],
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
@@ -2438,19 +2569,19 @@ class _MoodTile extends StatelessWidget {
                   ),
                 ),
               ),
+              // Text content
               Positioned(
-                bottom: 14,
+                bottom: 0,
                 left: 0,
                 right: 0,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         mood.name,
-                        textAlign: TextAlign.center,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.outfit(
@@ -2458,26 +2589,22 @@ class _MoodTile extends StatelessWidget {
                           fontSize: 17,
                           height: 1.1,
                           fontWeight: FontWeight.w900,
-                          letterSpacing: -0.2,
-                          shadows: [
-                            Shadow(
-                              color: Colors.black.withOpacity(0.6),
-                              blurRadius: 10,
-                            ),
+                          letterSpacing: -0.3,
+                          shadows: const [
+                            Shadow(color: Color(0x88000000), blurRadius: 10),
                           ],
                         ),
                       ),
                       const SizedBox(height: 3),
                       Text(
                         mood.subtitle,
-                        textAlign: TextAlign.center,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.outfit(
-                          color: Colors.white.withOpacity(0.72),
-                          fontSize: 10,
+                          color: Colors.white.withValues(alpha: 0.75),
+                          fontSize: 11,
                           fontWeight: FontWeight.w500,
-                          letterSpacing: 0.2,
+                          letterSpacing: 0.1,
                         ),
                       ),
                     ],
@@ -2623,7 +2750,8 @@ class _MoodTracksSheetState extends State<_MoodTracksSheet> {
                                       borderRadius: BorderRadius.circular(12)),
                                   child: coverUrl != null
                                       ? ClipRRect(
-                                          borderRadius: BorderRadius.circular(12),
+                                          borderRadius:
+                                              BorderRadius.circular(12),
                                           child: CachedNetworkImage(
                                               imageUrl: coverUrl,
                                               fit: BoxFit.cover,
@@ -2789,15 +2917,13 @@ class _BecauseYouListenedScreen extends StatelessWidget {
             return a == seedKey;
           }).toList()
         : <Map<String, dynamic>>[];
-    final others = tracks
-        .where((t) {
-          final a = (t['artist'] ?? t['artistName'] ?? '')
-              .toString()
-              .trim()
-              .toLowerCase();
-          return a != seedKey;
-        })
-        .toList();
+    final others = tracks.where((t) {
+      final a = (t['artist'] ?? t['artistName'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      return a != seedKey;
+    }).toList();
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -2809,13 +2935,17 @@ class _BecauseYouListenedScreen extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
               children: [
                 if (fromArtist.isNotEmpty) ...[
-                  _BecauseSectionLabel('From ${seedArtist.isNotEmpty ? seedArtist : "this artist"}'),
-                  ...fromArtist.map((t) => _BecauseTrackRow(track: t, queue: tracks)),
+                  _BecauseSectionLabel(
+                      'From ${seedArtist.isNotEmpty ? seedArtist : "this artist"}'),
+                  ...fromArtist
+                      .map((t) => _BecauseTrackRow(track: t, queue: tracks)),
                   const SizedBox(height: 10),
                 ],
                 if (others.isNotEmpty) ...[
-                  _BecauseSectionLabel(fromArtist.isEmpty ? 'Tracks' : 'Similar vibe'),
-                  ...others.map((t) => _BecauseTrackRow(track: t, queue: tracks)),
+                  _BecauseSectionLabel(
+                      fromArtist.isEmpty ? 'Tracks' : 'Similar vibe'),
+                  ...others
+                      .map((t) => _BecauseTrackRow(track: t, queue: tracks)),
                 ],
               ],
             ),
@@ -2855,9 +2985,8 @@ class _BecauseTrackRow extends StatelessWidget {
         (track['title'] ?? track['trackName'] ?? 'Unknown').toString();
     final artist = (track['artist'] ?? track['artistName'] ?? '').toString();
     final cover = (track['cover_url'] ?? track['artworkUrl100'])?.toString();
-    final durationMs = track['duration_ms'] as int? ??
-        track['trackTimeMillis'] as int? ??
-        0;
+    final durationMs =
+        track['duration_ms'] as int? ?? track['trackTimeMillis'] as int? ?? 0;
     final durationStr = durationMs > 0
         ? '${(durationMs ~/ 60000).toString().padLeft(1, '0')}:${((durationMs % 60000) ~/ 1000).toString().padLeft(2, '0')}'
         : '';
@@ -2903,19 +3032,20 @@ class _BecauseTrackRow extends StatelessWidget {
                 Text(artist,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style:
-                        GoogleFonts.outfit(fontSize: 12, color: AppColors.text2)),
+                    style: GoogleFonts.outfit(
+                        fontSize: 12, color: AppColors.text2)),
               ],
             ),
           ),
           if (durationStr.isNotEmpty) ...[
             const SizedBox(width: 8),
             Text(durationStr,
-                style: GoogleFonts.outfit(
-                    fontSize: 12, color: AppColors.text3)),
+                style:
+                    GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
             const SizedBox(width: 6),
           ],
-          const Icon(Icons.play_arrow_rounded, color: AppColors.text3, size: 22),
+          const Icon(Icons.play_arrow_rounded,
+              color: AppColors.text3, size: 22),
         ]),
       ),
     );
@@ -2991,8 +3121,7 @@ class _TrackListScreen extends StatelessWidget {
                                     color: AppColors.text)),
                             Text(artist,
                                 style: GoogleFonts.outfit(
-                                    fontSize: 12,
-                                    color: AppColors.text2)),
+                                    fontSize: 12, color: AppColors.text2)),
                           ],
                         ),
                       ),
@@ -3133,8 +3262,8 @@ class _RecommendationListRow extends StatelessWidget {
                     subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style:
-                        GoogleFonts.outfit(fontSize: 12, color: AppColors.text3),
+                    style: GoogleFonts.outfit(
+                        fontSize: 12, color: AppColors.text3),
                   ),
                 ],
               ),
@@ -3273,7 +3402,8 @@ class _YouMightLikeScreen extends StatelessWidget {
                       const SizedBox(height: 22),
                       _ShelfSectionTitle(
                         title: 'Albums you may like',
-                        subtitle: 'A cleaner set of records close to your taste',
+                        subtitle:
+                            'A cleaner set of records close to your taste',
                       ),
                       const SizedBox(height: 12),
                       ...albums.map(

@@ -763,44 +763,50 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                 child: Row(
                   children: [
-                    // Shuffle
+                    // Shuffle button
                     GestureDetector(
                       onTap: _toggleShuffle,
-                      child: Container(
-                        width: 44,
-                        height: 44,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: 48,
+                        height: 48,
                         decoration: BoxDecoration(
                           color: _shuffleMode
-                              ? AppColors.purple.withOpacity(0.3)
-                              : AppColors.purple.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(12),
+                              ? AppColors.purple.withOpacity(0.18)
+                              : AppColors.surface,
+                          borderRadius: BorderRadius.circular(14),
                           border: Border.all(
                             color: _shuffleMode
-                                ? AppColors.purpleLight
-                                : AppColors.purpleLight.withOpacity(0.35),
+                                ? AppColors.purpleLight.withOpacity(0.7)
+                                : AppColors.border,
                           ),
                         ),
                         child: Icon(
                           Icons.shuffle_rounded,
+                          size: 20,
                           color: _shuffleMode
                               ? AppColors.purpleLight
-                              : AppColors.purpleLight.withOpacity(0.6),
-                          size: 20,
+                              : AppColors.text3,
                         ),
                       ),
                     ),
-
                     const SizedBox(width: 12),
-
-                    // Play All
+                    // Play All (expanded)
                     Expanded(
                       child: GestureDetector(
                         onTap: _playAll,
                         child: Container(
-                          height: 44,
+                          height: 48,
                           decoration: BoxDecoration(
                             gradient: AppColors.primaryBtn,
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.purple.withOpacity(0.26),
+                                blurRadius: 22,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
                           ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -818,22 +824,23 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
                         ),
                       ),
                     ),
-
                     const SizedBox(width: 12),
-
-                    // 3 dots
+                    // More options button
                     GestureDetector(
-                      onTap: () => _showTrackOptions(context, {}),
+                      onTap: () {},
                       child: Container(
-                        width: 44,
-                        height: 44,
+                        width: 48,
+                        height: 48,
                         decoration: BoxDecoration(
                           color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(14),
                           border: Border.all(color: AppColors.border),
                         ),
-                        child: const Icon(Icons.more_horiz_rounded,
-                            color: Colors.white70, size: 20),
+                        child: const Icon(
+                          Icons.more_horiz_rounded,
+                          size: 20,
+                          color: AppColors.text3,
+                        ),
                       ),
                     ),
                   ],
@@ -963,4 +970,3 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
     );
   }
 }
-

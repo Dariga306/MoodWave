@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../theme/app_colors.dart';
-import '../extra_screens.dart';
+import '../city_charts_screen.dart';
+import '../discover_screen.dart';
+import '../extra_screens.dart' hide DiscoverScreen, CityChartsScreen;
 import '../weather_screen.dart';
-import '../ai_playlist_screen.dart';
 
 // ─── Модель карточки Explore ─────────────────────────────────────────────────
 
@@ -12,7 +13,7 @@ class _ExploreItem {
   final String emoji;
   final String label;
   final LinearGradient gradient;
-  final bool isLive;   // показывать LIVE-бейджик
+  final bool isLive; // показывать LIVE-бейджик
   final WidgetBuilder destination;
 
   const _ExploreItem({
@@ -40,28 +41,14 @@ class ExploreSection extends StatelessWidget {
           emoji: '🏙',
           label: 'Charts',
           gradient: AppColors.gradPurple,
-          isLive: true,
           destination: (_) => const CityChartsScreen(),
         ),
         _ExploreItem(
-          emoji: '📻',
-          label: 'Radio',
-          gradient: AppColors.gradMixed,
-          isLive: true,
-          destination: (_) => const RadioScreen(),
-        ),
-        _ExploreItem(
-          emoji: '🎉',
-          label: 'Party',
+          emoji: '🎙',
+          label: 'Live Room',
           gradient: AppColors.gradPink,
           isLive: true,
           destination: (_) => const BrowseRoomsScreen(),
-        ),
-        _ExploreItem(
-          emoji: '✦',
-          label: 'AI Mix',
-          gradient: AppColors.gradOrange,
-          destination: (_) => const AIPlaylistScreen(),
         ),
         _ExploreItem(
           emoji: '🌨',
@@ -101,8 +88,8 @@ class _ExploreCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => Navigator.push(
-          context, MaterialPageRoute(builder: item.destination)),
+      onTap: () =>
+          Navigator.push(context, MaterialPageRoute(builder: item.destination)),
       child: Container(
         decoration: BoxDecoration(
           gradient: item.gradient,
@@ -115,8 +102,7 @@ class _ExploreCard extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(item.emoji,
-                      style: const TextStyle(fontSize: 22)),
+                  Text(item.emoji, style: const TextStyle(fontSize: 22)),
                   const SizedBox(height: 4),
                   Text(
                     item.label,

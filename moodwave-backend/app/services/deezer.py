@@ -166,9 +166,15 @@ def _map_track(item: dict, rank: int) -> dict:
             or album.get("cover_big")
             or album.get("cover_medium")
         ),
+        "artist_picture": (
+            artist.get("picture_xl")
+            or artist.get("picture_big")
+            or artist.get("picture_medium")
+        ),
         "preview_url": item.get("preview") or None,
         "duration_ms": int(item.get("duration", 0) or 0) * 1000,
         "rank": rank,
+        "score": int(item.get("rank", 0) or 0),
     }
 
 
@@ -582,7 +588,7 @@ async def get_genre_chart_tracks(
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-async def get_chart_tracks(limit: int =100) -> list[dict]:
+async def get_chart_tracks(limit: int = 100) -> list[dict]:
     try:
         data = await _get_json(
             "/chart/0/tracks",
@@ -596,6 +602,177 @@ async def get_chart_tracks(limit: int =100) -> list[dict]:
 
     except Exception:
         return []
+
+
+# City → regional genre hints for blending city-specific flavor into charts
+CITY_GENRE_HINTS: dict[str, list[str]] = {
+    "dubai": ["electronic", "pop"],
+    "abu dhabi": ["electronic", "pop"],
+    "riyadh": ["pop", "r&b"],
+    "doha": ["pop"],
+    "muscat": ["pop"],
+    "cairo": ["pop", "r&b"],
+    "tokyo": ["k-pop", "pop"],
+    "osaka": ["k-pop", "pop"],
+    "seoul": ["k-pop", "pop"],
+    "beijing": ["pop", "k-pop"],
+    "shanghai": ["pop", "electronic"],
+    "singapore": ["pop", "k-pop"],
+    "bangkok": ["pop", "k-pop"],
+    "jakarta": ["pop", "r&b"],
+    "mumbai": ["pop", "indie"],
+    "delhi": ["pop", "hip-hop"],
+    "lagos": ["afrobeats", "r&b"],
+    "nairobi": ["afrobeats", "pop"],
+    "accra": ["afrobeats", "hip-hop"],
+    "johannesburg": ["afrobeats", "hip-hop"],
+    "mexico city": ["latin", "pop"],
+    "bogota": ["latin", "hip-hop"],
+    "sao paulo": ["latin", "pop"],
+    "buenos aires": ["latin", "alternative"],
+    "lima": ["latin", "pop"],
+    "santiago": ["latin", "rock"],
+    "miami": ["latin", "pop"],
+    "new york": ["hip-hop", "r&b"],
+    "los angeles": ["hip-hop", "pop"],
+    "toronto": ["hip-hop", "r&b"],
+    "chicago": ["hip-hop", "soul"],
+    "houston": ["hip-hop", "r&b"],
+    "atlanta": ["hip-hop", "r&b"],
+    "london": ["pop", "indie"],
+    "paris": ["pop", "electronic"],
+    "berlin": ["electronic", "alternative"],
+    "amsterdam": ["electronic", "pop"],
+    "ibiza": ["electronic", "dance"],
+    "madrid": ["latin", "pop"],
+    "barcelona": ["latin", "pop"],
+    "milan": ["pop", "electronic"],
+    "rome": ["pop", "rock"],
+    "sydney": ["pop", "indie"],
+    "melbourne": ["indie", "pop"],
+    "moscow": ["pop", "hip-hop"],
+    "saint petersburg": ["indie", "alternative"],
+    "astana": ["pop", "hip-hop"],
+    "almaty": ["pop", "hip-hop"],
+    "tashkent": ["pop", "hip-hop"],
+    "bishkek": ["pop", "hip-hop"],
+    "baku": ["pop", "electronic"],
+    "tbilisi": ["pop", "electronic"],
+    "istanbul": ["pop", "electronic"],
+    "tel aviv": ["pop", "electronic"],
+    "warsaw": ["pop", "electronic"],
+    "kyiv": ["pop", "hip-hop"],
+    "prague": ["rock", "pop"],
+    "vienna": ["pop", "classical"],
+    "stockholm": ["pop", "indie"],
+    "oslo": ["pop", "indie"],
+    "copenhagen": ["pop", "electronic"],
+    "helsinki": ["pop", "metal"],
+    "riga": ["pop", "electronic"],
+    "vilnius": ["pop", "electronic"],
+}
+
+CITY_SEARCH_HINTS: dict[str, list[str]] = {
+    "dubai": ["amr diab", "elissa", "nancy ajram", "arabic pop hits"],
+    "abu dhabi": ["amr diab", "arabic pop hits"],
+    "riyadh": ["mohammed عبده", "saudi pop", "arabic hits"],
+    "doha": ["arabic hits", "middle east pop"],
+    "cairo": ["amr diab", "tamer hosny", "egyptian pop"],
+    "new york": ["kendrick lamar", "drake", "sza", "metro boomin"],
+    "los angeles": ["billie eilish", "kendrick lamar", "tyler the creator"],
+    "atlanta": ["future", "lil baby", "gunna", "21 savage"],
+    "london": ["central cee", "dua lipa", "fred again", "skepta"],
+    "paris": ["aya nakamura", "gims", "french pop"],
+    "berlin": ["paula hartmann", "german electronic", "techno hits"],
+    "amsterdam": ["martin garrix", "afrojack", "dance hits"],
+    "ibiza": ["calvin harris", "swedish house mafia", "ibiza dance"],
+    "tokyo": ["yoasobi", "ado", "j-pop hits"],
+    "seoul": ["newjeans", "aespa", "bts", "k-pop hits"],
+    "bangkok": ["thai pop", "k-pop hits", "milli"],
+    "jakarta": ["indonesian pop", "raisa", "tiara andini"],
+    "mumbai": ["bollywood hits", "arijit singh", "shreya ghoshal"],
+    "delhi": ["bollywood hits", "badshah", "arijit singh"],
+    "lagos": ["burna boy", "tems", "wizkid", "afrobeats hits"],
+    "nairobi": ["afrobeats hits", "sauti sol", "bensoul"],
+    "johannesburg": ["amapiano hits", "kabza de small", "tyla"],
+    "mexico city": ["peso pluma", "latin hits", "carin leon"],
+    "bogota": ["karol g", "feid", "latin hits"],
+    "sao paulo": ["anitta", "luisa sonza", "brazil hits"],
+    "buenos aires": ["bizarrap", "duki", "argentina hits"],
+    "madrid": ["rosalia", "aitana", "spanish pop"],
+    "barcelona": ["rosalia", "quevedo", "spanish hits"],
+    "istanbul": ["turkish pop hits", "tarkan", "sezen aksu"],
+    "astana": ["молданазар", "ninety one", "q-pop hits", "kazakh pop"],
+    "almaty": ["молданазар", "ninety one", "dose", "kazakh pop"],
+    "moscow": ["anna asti", "bearwolf", "russian pop hits"],
+}
+
+
+async def get_city_boost_tracks(city: str, limit: int = 20) -> list[dict]:
+    city_lower = city.strip().lower()
+    queries = CITY_SEARCH_HINTS.get(city_lower, [])
+    if not queries:
+        return []
+
+    per_query = max(3, min(6, limit // max(len(queries), 1)))
+    results = await asyncio.gather(
+        *[search_tracks(query, limit=per_query) for query in queries],
+        return_exceptions=True,
+    )
+
+    seen: set[str] = set()
+    tracks: list[dict] = []
+    for batch in results:
+        if isinstance(batch, Exception) or not isinstance(batch, list):
+            continue
+        for track in batch:
+            tid = track.get("deezer_id") or track.get("spotify_id")
+            if tid and tid not in seen:
+                seen.add(tid)
+                tracks.append(track)
+            if len(tracks) >= limit:
+                return tracks[:limit]
+    return tracks[:limit]
+
+
+async def get_city_chart_tracks(city: str, limit: int = 20) -> list[dict]:
+    """
+    City-flavored charts using real Deezer data.
+    Blends global chart with regional genre tracks for known cities.
+    """
+    city_lower = city.strip().lower()
+    genre_hints = CITY_GENRE_HINTS.get(city_lower)
+    city_boost = await get_city_boost_tracks(city, max(6, limit // 2))
+
+    if not genre_hints and not city_boost:
+        return await get_chart_tracks(limit)
+
+    per_genre = max(limit // max(len(genre_hints or []), 1), 5)
+    tasks = [get_chart_tracks(limit)]
+    tasks.extend(get_genre_chart_tracks(g, per_genre) for g in (genre_hints or []))
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    seen: set[str] = set()
+    tracks: list[dict] = []
+
+    for t in city_boost:
+        tid = t.get("deezer_id") or t.get("spotify_id")
+        if tid and tid not in seen:
+            seen.add(tid)
+            tracks.append(t)
+
+    for batch in results:
+        if isinstance(batch, Exception) or not isinstance(batch, list):
+            continue
+        for t in batch:
+            tid = t.get("deezer_id") or t.get("spotify_id")
+            if tid and tid not in seen:
+                seen.add(tid)
+                tracks.append(t)
+        if len(tracks) >= limit * 2:
+            break
+
+    return tracks[:limit]
 
 
 # ──────────────────────────────────────────────────────────────────────────────

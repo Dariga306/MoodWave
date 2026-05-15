@@ -247,7 +247,13 @@ def _extract_genres(track: Optional[TrackCache]) -> list[str]:
 
 async def _invalidate_chart_caches(redis) -> None:
     try:
-        keys = [key async for key in redis.scan_iter(match="charts:v2:city:*")]
+        keys = []
+        async for key in redis.scan_iter(match="charts:v2:city:*"):
+            keys.append(key)
+        async for key in redis.scan_iter(match="charts:v3:city:*"):
+            keys.append(key)
+        async for key in redis.scan_iter(match="charts:discover:*"):
+            keys.append(key)
         if keys:
             await redis.delete(*keys)
     except Exception:
@@ -554,10 +560,41 @@ async def get_flashback_tracks(
     return result
 
 
+_MIX_EMOJIS: dict[str, str] = {
+    "pop": "🎵", "indie rock": "🎸", "alt pop": "🌙", "electronic": "⚡",
+    "r&b": "🎤", "hip-hop": "🔥", "hip hop": "🔥", "rap": "🔥",
+    "jazz": "🎷", "classical": "🎻", "rock": "🎸", "dance": "💃",
+    "k-pop": "⭐", "kpop": "⭐", "latin": "🌴", "reggae": "🌊",
+    "soul": "💜", "funk": "🕺", "metal": "🤘", "country": "🤠",
+    "ambient": "🌌", "lo-fi": "☕", "house": "🏠", "techno": "🔊",
+    "synthwave": "🌆", "dream pop": "💭", "alternative": "🌀",
+    "trip hop": "🌙", "afrobeats": "🌍", "chamber pop": "🎼",
+}
+
+_MIX_MOODS: dict[str, str] = {
+    "pop": "Top pop hits right now",
+    "indie rock": "Indie rock favourites",
+    "alt pop": "Alternative pop essentials",
+    "electronic": "Electronic beats & vibes",
+    "r&b": "R&B grooves",
+    "hip-hop": "Hip-hop heat",
+    "jazz": "Jazz essentials",
+    "classical": "Classical masterpieces",
+    "rock": "Rock anthems",
+    "dance": "Dance floor bangers",
+    "k-pop": "K-pop chart toppers",
+    "latin": "Latin heat",
+    "soul": "Soul & emotion",
+    "ambient": "Chill ambient sounds",
+    "lo-fi": "Lo-fi beats to focus",
+    "house": "Deep house vibes",
+}
+
+
 @router.get(
     "/me/genre-mixes",
     summary="Get genre mixes",
-    description="Builds lightweight personalized genre mixes from the user's listening history and saved genres.",
+    description="Builds genre mixes from Deezer charts based on user's saved genres.",
 )
 async def get_genre_mixes(
     limit: int = Query(default=6, ge=1, le=12),
@@ -575,54 +612,57 @@ async def get_genre_mixes(
     ).scalars().all()
 
     if not preferred_genres:
-        return []
+        # Fallback: global chart as a single "Trending" mix
+        tracks = await deezer_service.get_chart_tracks(tracks_per_mix)
+        if not tracks:
+            return []
+        return [{
+            "id": "trending",
+            "title": "Trending Mix",
+            "subtitle": "What the world is listening to",
+            "emoji": "🔥",
+            "genre": "Pop",
+            "cover_url": tracks[0].get("cover_url"),
+            "tracks": [_normalize_mix_track(t) for t in tracks],
+        }]
 
-    listening_rows = (
-        await db.execute(
-            select(TrackCache, func.count(ListeningHistory.id).label("play_count"))
-            .join(ListeningHistory, ListeningHistory.spotify_track_id == TrackCache.spotify_id)
-            .where(ListeningHistory.user_id == current_user.id)
-            .group_by(TrackCache.id)
-            .order_by(desc("play_count"), desc(func.max(ListeningHistory.created_at)))
-            .limit(400)
-        )
-    ).all()
+    # Fetch Deezer genre charts concurrently
+    genre_list = list(preferred_genres)
+    results = await asyncio.gather(
+        *[deezer_service.get_genre_chart_tracks(g, tracks_per_mix) for g in genre_list],
+        return_exceptions=True,
+    )
 
     mixes: list[dict] = []
-    used_track_ids: set[str] = set()
-    for genre in preferred_genres:
-        genre_key = genre.lower()
-        genre_tracks: list[dict] = []
-        for track, play_count in listening_rows:
-            track_genres = [g.lower() for g in (track.genres or []) if isinstance(g, str)]
-            if genre_key not in track_genres or track.spotify_id in used_track_ids:
-                continue
-            genre_tracks.append({
-                "spotify_id": track.spotify_id,
-                "title": track.title,
-                "artist": track.artist,
-                "cover_url": track.cover_url,
-                "preview_url": track.preview_url,
-                "duration_ms": track.duration_ms,
-                "play_count": int(play_count or 0),
-            })
-            used_track_ids.add(track.spotify_id)
-            if len(genre_tracks) >= tracks_per_mix:
-                break
-
-        if not genre_tracks:
+    for genre, batch in zip(genre_list, results):
+        if isinstance(batch, Exception) or not batch:
             continue
-
+        genre_key = genre.lower()
+        emoji = _MIX_EMOJIS.get(genre_key, "🎵")
+        subtitle = _MIX_MOODS.get(genre_key, f"Top {genre.title()} tracks")
         mixes.append({
             "id": genre_key.replace(" ", "_"),
             "title": f"{genre.title()} Mix",
-            "subtitle": f"{len(genre_tracks)} tracks built from your taste",
+            "subtitle": subtitle,
+            "emoji": emoji,
             "genre": genre,
-            "cover_url": genre_tracks[0]["cover_url"],
-            "tracks": genre_tracks,
+            "cover_url": batch[0].get("cover_url"),
+            "tracks": [_normalize_mix_track(t) for t in batch[:tracks_per_mix]],
         })
 
     return mixes
+
+
+def _normalize_mix_track(t: dict) -> dict:
+    return {
+        "spotify_id": t.get("spotify_id") or t.get("deezer_id", ""),
+        "title": t.get("title", ""),
+        "artist": t.get("artist", ""),
+        "cover_url": t.get("cover_url"),
+        "preview_url": t.get("preview_url"),
+        "duration_ms": t.get("duration_ms"),
+        "play_count": 0,
+    }
 
 
 @router.get(
