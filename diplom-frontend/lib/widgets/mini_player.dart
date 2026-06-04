@@ -5,6 +5,119 @@ import 'package:provider/provider.dart';
 import '../providers/player_provider.dart';
 import '../screens/player_screen.dart';
 import '../theme/app_colors.dart';
+import '../utils/app_navigator.dart';
+
+class MiniPlayerOverlayController {
+  static final ValueNotifier<bool> hidden = ValueNotifier<bool>(false);
+  static final ValueNotifier<double> bottomOffset = ValueNotifier<double>(0);
+  static final ValueNotifier<bool> topMode = ValueNotifier<bool>(false);
+  static int _hideCount = 0;
+  static int _suppressCount = 0;
+  static int _topCount = 0;
+
+  // Direct reference to the overlay state so _syncHidden can force a rebuild
+  // immediately, bypassing any ValueListenableBuilder scheduling delay.
+  static _GlobalMiniPlayerOverlayState? _overlayState;
+
+  static void _syncHidden() {
+    hidden.value = _hideCount > 0 || _suppressCount > 0;
+    _overlayState?._forceRebuild();
+  }
+
+  static void hide() {
+    _hideCount++;
+    _syncHidden();
+  }
+
+  static void show() {
+    if (_hideCount > 0) _hideCount--;
+    _syncHidden();
+  }
+
+  static void suppress() {
+    _suppressCount++;
+    _syncHidden();
+  }
+
+  static void unsuppress() {
+    if (_suppressCount > 0) _suppressCount--;
+    _syncHidden();
+  }
+
+  static void forceVisible() {
+    _hideCount = 0;
+    _syncHidden();
+  }
+
+  static void setBottomOffset(double value) {
+    bottomOffset.value = value;
+    _overlayState?._forceRebuild();
+  }
+
+  static void pushTopMode() {
+    _topCount++;
+    topMode.value = _topCount > 0;
+    _overlayState?._forceRebuild();
+  }
+
+  static void popTopMode() {
+    if (_topCount > 0) _topCount--;
+    topMode.value = _topCount > 0;
+    _overlayState?._forceRebuild();
+  }
+}
+
+class GlobalMiniPlayerOverlay extends StatefulWidget {
+  const GlobalMiniPlayerOverlay({super.key});
+
+  @override
+  State<GlobalMiniPlayerOverlay> createState() =>
+      _GlobalMiniPlayerOverlayState();
+}
+
+class _GlobalMiniPlayerOverlayState extends State<GlobalMiniPlayerOverlay> {
+  @override
+  void initState() {
+    super.initState();
+    MiniPlayerOverlayController._overlayState = this;
+  }
+
+  @override
+  void dispose() {
+    if (MiniPlayerOverlayController._overlayState == this) {
+      MiniPlayerOverlayController._overlayState = null;
+    }
+    super.dispose();
+  }
+
+  void _forceRebuild() {
+    if (!mounted) return;
+    // Defer setState to avoid "setState called during build" when suppress()
+    // is invoked from a screen's initState (which runs inside the build phase).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (MiniPlayerOverlayController.hidden.value) return const SizedBox.shrink();
+    final padding = MediaQuery.of(context).padding;
+    final bOffset = MiniPlayerOverlayController.bottomOffset.value;
+    final tMode = MiniPlayerOverlayController.topMode.value;
+    final effectiveBottomOffset = tMode ? 0.0 : (bOffset <= 0 ? 74.0 : bOffset);
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: tMode ? padding.top + 8 : null,
+      bottom: tMode ? null : padding.bottom + effectiveBottomOffset,
+      child: const Material(
+        color: Colors.transparent,
+        child: MiniPlayer(),
+      ),
+    );
+  }
+}
 
 class MiniPlayer extends StatefulWidget {
   const MiniPlayer({super.key});
@@ -83,14 +196,15 @@ class _MiniPlayerState extends State<MiniPlayer>
           duration:
               _dismissing ? const Duration(milliseconds: 200) : Duration.zero,
           child: GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => PlayerScreen(track: track)),
-            ),
+            onTap: () {
+              rootNavigatorKey.currentState?.push(
+                MaterialPageRoute(builder: (_) => PlayerScreen(track: track)),
+              );
+            },
             onPanUpdate: _onDragUpdate,
             onPanEnd: (d) => _onDragEnd(d, provider),
             child: Container(
-              margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
               height: 66,
               decoration: BoxDecoration(
                 color: const Color(0xFF1E1040),

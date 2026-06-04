@@ -10,6 +10,8 @@ import 'package:provider/provider.dart';
 import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bottom_nav_bar.dart';
+import 'package:moodwave/widgets/mini_player.dart';
 import '../utils/lyrics_matcher.dart';
 import 'artist_screen.dart';
 import 'lyrics_screen.dart';
@@ -249,6 +251,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   @override
   void initState() {
     super.initState();
+    MiniPlayerOverlayController.suppress();
+    GlobalBottomNavController.hide();
     _playback = context.read<PlayerProvider>();
     _track = Map<String, dynamic>.from(
       _playback.track ?? widget.track ?? const {},
@@ -286,6 +290,8 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   @override
   void dispose() {
+    MiniPlayerOverlayController.unsuppress();
+    GlobalBottomNavController.show();
     _sleepTimer?.cancel();
     _floatController.dispose();
     _playback.removeListener(_handlePlaybackChanged);

@@ -1,13 +1,18 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
+import '../widgets/bottom_nav_bar.dart';
+import 'package:moodwave/widgets/mini_player.dart';
 import '../theme/app_colors.dart';
 import '../utils/error_helper.dart';
 import '../utils/media_url.dart';
@@ -82,6 +87,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   void initState() {
     super.initState();
+    MiniPlayerOverlayController.suppress();
+    GlobalBottomNavController.hide();
     _nameCtrl = TextEditingController(
         text: widget.user['display_name'] ?? widget.user['first_name'] ?? '');
     _usernameCtrl = TextEditingController(text: widget.user['username'] ?? '');
@@ -152,15 +159,27 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final picker = ImagePicker();
     final XFile? image = await picker.pickImage(
       source: ImageSource.gallery,
-      maxWidth: 400,
-      maxHeight: 400,
+      maxWidth: 1600,
+      maxHeight: 1600,
       imageQuality: 85,
     );
     if (image == null) return;
     final bytes = await image.readAsBytes();
     if (!mounted) return;
+    final cropped = await Navigator.of(context).push<Uint8List>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _ImageCropScreen(
+          imageBytes: bytes,
+          title: 'Adjust avatar',
+          aspectRatio: 1,
+          outputWidth: 512,
+        ),
+      ),
+    );
+    if (!mounted || cropped == null) return;
     setState(() {
-      _avatarBytes = bytes;
+      _avatarBytes = cropped;
       _showAvatarPicker = false;
     });
   }
@@ -169,15 +188,26 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final picker = ImagePicker();
     final XFile? image = await picker.pickImage(
       source: ImageSource.gallery,
-      maxWidth: 1200,
-      maxHeight: 400,
+      maxWidth: 1600,
       imageQuality: 85,
     );
     if (image == null) return;
     final bytes = await image.readAsBytes();
     if (!mounted) return;
+    final cropped = await Navigator.of(context).push<Uint8List>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _ImageCropScreen(
+          imageBytes: bytes,
+          title: 'Adjust banner',
+          aspectRatio: 2.22,
+          outputWidth: 1280,
+        ),
+      ),
+    );
+    if (!mounted || cropped == null) return;
     setState(() {
-      _bannerBytes = bytes;
+      _bannerBytes = cropped;
       _showBannerPicker = false;
     });
   }
@@ -382,6 +412,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   void dispose() {
+    MiniPlayerOverlayController.unsuppress();
+    GlobalBottomNavController.show();
     _nameCtrl.dispose();
     _usernameCtrl.dispose();
     _cityCtrl.dispose();
@@ -1128,6 +1160,267 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               Icons.chevron_right_rounded,
               color: AppColors.text3,
               size: 22,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ImageCropScreen extends StatefulWidget {
+  final Uint8List imageBytes;
+  final String title;
+  final double aspectRatio;
+  final int outputWidth;
+
+  const _ImageCropScreen({
+    required this.imageBytes,
+    required this.title,
+    required this.aspectRatio,
+    required this.outputWidth,
+  });
+
+  @override
+  State<_ImageCropScreen> createState() => _ImageCropScreenState();
+}
+
+class _ImageCropScreenState extends State<_ImageCropScreen> {
+  final _boundaryKey = GlobalKey();
+  bool _saving = false;
+  ui.Image? _decodedImage;
+  double _scale = 1;
+  double _startScale = 1;
+  Offset _offset = Offset.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    ui.decodeImageFromList(widget.imageBytes, (image) {
+      if (!mounted) {
+        image.dispose();
+        return;
+      }
+      setState(() => _decodedImage = image);
+    });
+  }
+
+  @override
+  void dispose() {
+    _decodedImage?.dispose();
+    super.dispose();
+  }
+
+  Size _coverSize(Size cropSize) {
+    final image = _decodedImage;
+    if (image == null) return cropSize;
+    final imageAspect = image.width / image.height;
+    final cropAspect = cropSize.width / cropSize.height;
+    if (imageAspect > cropAspect) {
+      return Size(cropSize.height * imageAspect, cropSize.height);
+    }
+    return Size(cropSize.width, cropSize.width / imageAspect);
+  }
+
+  Offset _clampOffset(Offset value, Size cropSize, Size baseSize) {
+    final scaledWidth = baseSize.width * _scale;
+    final scaledHeight = baseSize.height * _scale;
+    final maxDx = math.max(0.0, (scaledWidth - cropSize.width) / 2);
+    final maxDy = math.max(0.0, (scaledHeight - cropSize.height) / 2);
+    return Offset(
+      value.dx.clamp(-maxDx, maxDx).toDouble(),
+      value.dy.clamp(-maxDy, maxDy).toDouble(),
+    );
+  }
+
+  void _resetCrop() {
+    setState(() {
+      _scale = 1;
+      _startScale = 1;
+      _offset = Offset.zero;
+    });
+  }
+
+  Future<void> _saveCrop() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      final boundary = _boundaryKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) return;
+      final pixelRatio = widget.outputWidth / boundary.size.width;
+      final ui.Image image = await boundary.toImage(pixelRatio: pixelRatio);
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      if (!mounted || data == null) return;
+      Navigator.of(context).pop(data.buffer.asUint8List());
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final cropWidth = (screenWidth - 40).clamp(260.0, 360.0).toDouble();
+    final cropHeight = cropWidth / widget.aspectRatio;
+    final isAvatar = widget.aspectRatio == 1;
+    final cropSize = Size(cropWidth, cropHeight);
+    final baseSize = _coverSize(cropSize);
+
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        backgroundColor: AppColors.bg,
+        elevation: 0,
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.close_rounded, color: AppColors.text),
+        ),
+        title: Text(
+          widget.title,
+          style: GoogleFonts.outfit(
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+            color: AppColors.text,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : _saveCrop,
+            child: _saving
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.purpleLight,
+                    ),
+                  )
+                : Text(
+                    'Done',
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.purpleLight,
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            const Spacer(),
+            Center(
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    width: cropWidth + 18,
+                    height: cropHeight + 18,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(isAvatar ? 999 : 28),
+                      border: Border.all(color: Colors.white.withOpacity(0.12)),
+                    ),
+                  ),
+                  RepaintBoundary(
+                    key: _boundaryKey,
+                    child: ClipRRect(
+                      borderRadius:
+                          BorderRadius.circular(isAvatar ? cropWidth / 2 : 22),
+                      child: SizedBox(
+                        width: cropWidth,
+                        height: cropHeight,
+                        child: GestureDetector(
+                          onScaleStart: (_) => _startScale = _scale,
+                          onScaleUpdate: (details) {
+                            setState(() {
+                              _scale =
+                                  (_startScale * details.scale).clamp(1.0, 5.0);
+                              _offset = _clampOffset(
+                                _offset + details.focalPointDelta,
+                                cropSize,
+                                baseSize,
+                              );
+                            });
+                          },
+                          child: ColoredBox(
+                            color: Colors.black,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                Transform.translate(
+                                  offset: _offset,
+                                  child: Transform.scale(
+                                    scale: _scale,
+                                    child: SizedBox(
+                                      width: baseSize.width,
+                                      height: baseSize.height,
+                                      child: Image.memory(
+                                        widget.imageBytes,
+                                        fit: BoxFit.fill,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                'Move and zoom the image so the best part sits inside the frame.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  height: 1.35,
+                  color: AppColors.text3,
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            TextButton.icon(
+              onPressed: _resetCrop,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: Text(
+                'Reset position',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.w700),
+              ),
+              style: TextButton.styleFrom(foregroundColor: AppColors.text2),
+            ),
+            const Spacer(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: GestureDetector(
+                onTap: _saving ? null : _saveCrop,
+                child: Container(
+                  height: 54,
+                  decoration: BoxDecoration(
+                    gradient: AppColors.primaryBtn,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    'Use this image',
+                    style: GoogleFonts.outfit(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
             ),
           ],
         ),

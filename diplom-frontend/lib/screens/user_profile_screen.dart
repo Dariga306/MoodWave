@@ -3,12 +3,14 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bottom_nav_bar.dart';
+import 'package:moodwave/widgets/mini_player.dart';
 import '../utils/media_url.dart';
 import 'chat_screen.dart';
+import 'modals.dart' as modals;
 import 'player_screen.dart';
 import 'playlist_screen.dart';
 
@@ -136,7 +138,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   @override
   void initState() {
     super.initState();
+    MiniPlayerOverlayController.suppress();
     _load();
+  }
+
+  @override
+  void dispose() {
+    MiniPlayerOverlayController.unsuppress();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -166,14 +175,19 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   String get _profileShareLink {
-    final handle =
-        _username.isNotEmpty ? '@$_username' : 'user-${widget.userId}';
-    return 'moodwave://profile/$handle';
+    final handle = _username.isNotEmpty ? _username : 'user-${widget.userId}';
+    return 'https://moodwave.app/profile/$handle';
   }
 
   Future<void> _shareProfile() async {
-    final text = 'Check out $_displayName on MoodWave\n$_profileShareLink';
-    await Share.share(text, subject: 'MoodWave profile');
+    modals.showShareProfile(
+      context,
+      profile: {
+        ..._user,
+        'id': widget.userId,
+        'profile_url': _profileShareLink,
+      },
+    );
   }
 
   Future<void> _copyProfileLink() async {
@@ -218,14 +232,31 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       if (blockedByMe) {
         await ApiService().unblockUser(widget.userId);
         if (!mounted) return;
+        _setBlockedByMe(false);
         _showSnack('User unblocked');
       } else {
         await ApiService().blockUser(widget.userId);
         if (!mounted) return;
+        _setBlockedByMe(true);
         _showSnack('User blocked');
       }
       await _load();
     } on DioException catch (e) {
+      final detail = _detailFromError(e, fallback: '');
+      if (!blockedByMe && detail.toLowerCase().contains('already blocked')) {
+        if (!mounted) return;
+        _setBlockedByMe(true);
+        _showSnack('User blocked');
+        await _load();
+        return;
+      }
+      if (blockedByMe && detail.toLowerCase().contains('block not found')) {
+        if (!mounted) return;
+        _setBlockedByMe(false);
+        _showSnack('User unblocked');
+        await _load();
+        return;
+      }
       _showSnack(
         _detailFromError(e,
             fallback: blockedByMe
@@ -242,71 +273,73 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   Future<void> _showProfileMenu() async {
     final blockedByMe = _relation['blocked_by_me'] == true;
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        Widget item(IconData icon, String label, VoidCallback onTap,
-            {Color? color}) {
-          final resolvedColor = color ?? AppColors.text;
-          return InkWell(
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-              child: Row(
+    MiniPlayerOverlayController.suppress();
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) {
+          Widget item(IconData icon, String label, VoidCallback onTap,
+              {Color? color}) {
+            final resolvedColor = color ?? AppColors.text;
+            return InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                child: Row(
+                  children: [
+                    Icon(icon, color: resolvedColor, size: 20),
+                    const SizedBox(width: 14),
+                    Text(
+                      label,
+                      style: GoogleFonts.outfit(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: resolvedColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          return SafeArea(
+            top: false,
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              padding: const EdgeInsets.only(top: 8, bottom: 10),
+              decoration: BoxDecoration(
+                color: AppColors.surface2,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(icon, color: resolvedColor, size: 20),
-                  const SizedBox(width: 14),
-                  Text(
-                    label,
-                    style: GoogleFonts.outfit(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: resolvedColor,
+                  Container(
+                    width: 44,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(999),
                     ),
                   ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        return SafeArea(
-          top: false,
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            padding: const EdgeInsets.only(top: 8, bottom: 10),
-            decoration: BoxDecoration(
-              color: AppColors.surface2,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 44,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.18),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                item(Icons.share_outlined, 'Share profile', () {
-                  Navigator.pop(ctx);
-                  _shareProfile();
-                }),
-                item(Icons.link_rounded, 'Copy profile link', () {
-                  Navigator.pop(ctx);
-                  _copyProfileLink();
-                }),
-                if (_username.isNotEmpty)
-                  item(Icons.alternate_email_rounded, 'Copy username', () {
+                  const SizedBox(height: 10),
+                  item(Icons.share_outlined, 'Share profile', () {
                     Navigator.pop(ctx);
-                    _copyUsername();
+                    _shareProfile();
                   }),
-                if (_playlists.isNotEmpty)
+                  item(Icons.link_rounded, 'Copy profile link', () {
+                    Navigator.pop(ctx);
+                    _copyProfileLink();
+                  }),
+                  if (_username.isNotEmpty)
+                    item(Icons.alternate_email_rounded, 'Copy username', () {
+                      Navigator.pop(ctx);
+                      _copyUsername();
+                    }),
                   item(Icons.queue_music_rounded, 'View playlists', () {
                     Navigator.pop(ctx);
                     Navigator.push(
@@ -320,21 +353,26 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       ),
                     );
                   }),
-                item(
-                  blockedByMe ? Icons.lock_open_rounded : Icons.block_rounded,
-                  blockedByMe ? 'Unblock user' : 'Block user',
-                  () {
-                    Navigator.pop(ctx);
-                    _toggleBlock();
-                  },
-                  color: blockedByMe ? AppColors.text : const Color(0xFFFF7676),
-                ),
-              ],
+                  item(
+                    blockedByMe ? Icons.lock_open_rounded : Icons.block_rounded,
+                    blockedByMe ? 'Unblock user' : 'Block user',
+                    () {
+                      Navigator.pop(ctx);
+                      _toggleBlock();
+                    },
+                    color: blockedByMe
+                        ? AppColors.text
+                        : const Color(0xFFFF7676),
+                  ),
+                ],
+              ),
             ),
-          ),
-        );
-      },
-    );
+          );
+        },
+      );
+    } finally {
+      MiniPlayerOverlayController.unsuppress();
+    }
   }
 
   Future<void> _toggleFollow() async {
@@ -410,8 +448,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       );
       await _load();
     } on DioException catch (e) {
-      _showSnack(_detailFromError(e, fallback: 'Could not open chat'),
-          isError: true);
+      if (e.response?.statusCode != 403) {
+        _showSnack(_detailFromError(e, fallback: 'Could not open chat'),
+            isError: true);
+      }
     } catch (_) {
       _showSnack('Could not open chat', isError: true);
     } finally {
@@ -457,6 +497,16 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     );
   }
 
+  void _setBlockedByMe(bool value) {
+    final next = Map<String, dynamic>.from(_data ?? const {});
+    final relation = Map<String, dynamic>.from(
+      (next['relation'] as Map?) ?? const {},
+    );
+    relation['blocked_by_me'] = value;
+    next['relation'] = relation;
+    setState(() => _data = next);
+  }
+
   String _detailFromError(DioException e, {required String fallback}) {
     final data = e.response?.data;
     if (data is Map && data['detail'] != null) {
@@ -469,6 +519,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: _loading && _data == null
           ? const Center(
               child: CircularProgressIndicator(

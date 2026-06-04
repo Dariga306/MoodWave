@@ -11,6 +11,8 @@ import '../utils/show_snackbar.dart';
 import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
 import 'equalizer_screen.dart';
+import '../widgets/bottom_nav_bar.dart';
+import 'package:moodwave/widgets/mini_player.dart';
 import 'login_screen.dart';
 import 'notification_settings_screen.dart';
 import 'privacy_settings_screen.dart';
@@ -31,7 +33,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    MiniPlayerOverlayController.suppress();
+    GlobalBottomNavController.hide();
     _loadPrefs();
+  }
+
+  @override
+  void dispose() {
+    MiniPlayerOverlayController.unsuppress();
+    GlobalBottomNavController.show();
+    super.dispose();
   }
 
   Future<void> _loadPrefs() async {
@@ -203,6 +214,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         builder: (_) =>
             EditProfileScreen(user: Map<String, dynamic>.from(user)),
       ),
+    );
+  }
+
+  void _openBlockedUsers() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const _BlockedUsersScreen()),
     );
   }
 
@@ -565,6 +583,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       name: 'Privacy',
                       sub: 'Who can see your activity'),
                 ),
+                GestureDetector(
+                  onTap: _openBlockedUsers,
+                  child: _SettingRow(
+                      emoji: '🚫',
+                      bg: const Color(0xFFef4444).withOpacity(0.14),
+                      name: 'Blocked users',
+                      sub: 'View and unblock accounts'),
+                ),
               ]),
               _SettingsGroup(label: 'Playback', children: [
                 GestureDetector(
@@ -750,6 +776,324 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 24),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BlockedUsersScreen extends StatefulWidget {
+  const _BlockedUsersScreen();
+
+  @override
+  State<_BlockedUsersScreen> createState() => _BlockedUsersScreenState();
+}
+
+class _BlockedUsersScreenState extends State<_BlockedUsersScreen> {
+  late Future<List<Map<String, dynamic>>> _future;
+  final Set<int> _unblocking = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _future = ApiService().getBlockedUsers();
+  }
+
+  Future<void> _reload() async {
+    setState(() => _future = ApiService().getBlockedUsers());
+  }
+
+  Future<void> _unblock(Map<String, dynamic> user) async {
+    final id = (user['id'] as num?)?.toInt();
+    if (id == null || _unblocking.contains(id)) return;
+    setState(() => _unblocking.add(id));
+    try {
+      await ApiService().unblockUser(id);
+    } catch (_) {
+      // silently ignore — treat as unblocked regardless
+    } finally {
+      if (mounted) setState(() => _unblocking.remove(id));
+    }
+    if (mounted) await _reload();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
+              child: Row(
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppColors.glass,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: const Icon(
+                        Icons.arrow_back_rounded,
+                        size: 18,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Blocked users',
+                    style: GoogleFonts.outfit(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.text,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: FutureBuilder<List<Map<String, dynamic>>>(
+                future: _future,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.purpleLight,
+                      ),
+                    );
+                  }
+                  if (snapshot.hasError) {
+                    return _BlockedState(
+                      icon: Icons.error_outline_rounded,
+                      title: 'Could not load blocked users',
+                      subtitle: 'Pull back and try again later.',
+                      action: _reload,
+                    );
+                  }
+                  final users = snapshot.data ?? const [];
+                  if (users.isEmpty) {
+                    return const _BlockedState(
+                      icon: Icons.check_circle_outline_rounded,
+                      title: 'No blocked users',
+                      subtitle: 'Accounts you block will appear here.',
+                    );
+                  }
+                  return ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+                    itemCount: users.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final user = users[index];
+                      final id = (user['id'] as num?)?.toInt();
+                      final name =
+                          (user['display_name'] ?? user['username'] ?? 'User')
+                              .toString();
+                      final username = (user['username'] ?? '').toString();
+                      final avatar = (user['avatar_url'] ?? '').toString();
+                      final busy = id != null && _unblocking.contains(id);
+                      return Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Row(
+                          children: [
+                            _BlockedAvatar(url: avatar, name: name),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.text,
+                                    ),
+                                  ),
+                                  if (username.isNotEmpty)
+                                    Text(
+                                      '@$username',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.outfit(
+                                        fontSize: 12,
+                                        color: AppColors.text3,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            GestureDetector(
+                              onTap: busy ? null : () => _unblock(user),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 9,
+                                ),
+                                decoration: BoxDecoration(
+                                  gradient: busy
+                                      ? null
+                                      : const LinearGradient(
+                                          colors: [
+                                            AppColors.purple,
+                                            AppColors.purpleLight,
+                                          ],
+                                        ),
+                                  color: busy ? AppColors.surface3 : null,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: busy
+                                    ? const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: AppColors.text3,
+                                        ),
+                                      )
+                                    : Text(
+                                        'Unblock',
+                                        style: GoogleFonts.outfit(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w800,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BlockedAvatar extends StatelessWidget {
+  final String url;
+  final String name;
+
+  const _BlockedAvatar({required this.url, required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: AppColors.gradMixed,
+      ),
+      child: ClipOval(
+        child: url.isNotEmpty
+            ? Image.network(
+                url,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Center(
+                  child: Text(
+                    initial,
+                    style: GoogleFonts.outfit(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              )
+            : Center(
+                child: Text(
+                  initial,
+                  style: GoogleFonts.outfit(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+class _BlockedState extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback? action;
+
+  const _BlockedState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.action,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 42, color: AppColors.purpleLight),
+            const SizedBox(height: 14),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.outfit(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.outfit(
+                fontSize: 13,
+                height: 1.4,
+                color: AppColors.text3,
+              ),
+            ),
+            if (action != null) ...[
+              const SizedBox(height: 18),
+              TextButton(
+                onPressed: action,
+                child: Text(
+                  'Try again',
+                  style: GoogleFonts.outfit(
+                    color: AppColors.purpleLight,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );

@@ -1087,7 +1087,7 @@ class _SearchTabState extends State<SearchTab> {
                 ),
               ],
 
-              const SizedBox(height: 20),
+              const SizedBox(height: 80),
             ],
           ),
         ),

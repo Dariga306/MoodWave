@@ -265,12 +265,6 @@ class _ProfileTabState extends State<ProfileTab> {
                               ),
                               shape: BoxShape.circle,
                               border: Border.all(color: AppColors.bg, width: 3),
-                              boxShadow: [
-                                BoxShadow(
-                                    color:
-                                        AppColors.purpleDark.withOpacity(0.4),
-                                    blurRadius: 20),
-                              ],
                             ),
                             child: avatarUrl.isNotEmpty
                                 ? ClipOval(

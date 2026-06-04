@@ -29,6 +29,7 @@ CITY_NAME_ALIASES = {
 WEATHER_TO_MOOD = {
     "clear": "energetic",
     "clouds": "chill",
+    "partly_cloudy": "chill",
     "rain": "melancholy",
     "drizzle": "melancholy",
     "snow": "cozy",
@@ -38,13 +39,14 @@ WEATHER_TO_MOOD = {
 }
 
 CONDITION_LABELS = {
-    "clear": "Clear Sky",
+    "clear": "Sunny",
     "clouds": "Cloudy",
+    "partly_cloudy": "Partly Cloudy",
     "rain": "Rainy",
-    "drizzle": "Light Rain",
-    "snow": "Snowy",
-    "thunderstorm": "Thunderstorm",
-    "storm": "Stormy",
+    "drizzle": "Rainy",
+    "snow": "Snow",
+    "thunderstorm": "Storm",
+    "storm": "Storm",
     "mist": "Misty",
     "fog": "Foggy",
     "haze": "Hazy",
@@ -54,6 +56,25 @@ CONDITION_LABELS = {
 
 def condition_label(condition: str) -> str:
     return CONDITION_LABELS.get(condition.lower().strip(), condition.strip().title())
+
+
+def main_weather_condition(condition: str, description: str = "", clouds_pct: int = 0) -> str:
+    """Collapse upstream weather into the six UI scenarios used by the app."""
+    c = condition.lower().strip()
+    d = description.lower()
+    if c == "clear":
+        return "clear"
+    if c in {"thunderstorm", "storm"} or "thunder" in d or "storm" in d:
+        return "storm"
+    if c in {"rain", "drizzle"} or "rain" in d or "drizzle" in d:
+        return "rain"
+    if c == "snow" or "snow" in d or "blizzard" in d:
+        return "snow"
+    if c in {"clouds", "mist", "fog", "haze", "smoke"}:
+        if "few" in d or "scattered" in d or "broken" in d or 0 < clouds_pct < 85:
+            return "partly_cloudy"
+        return "clouds"
+    return "clouds"
 
 
 def cloud_subtype(description: str) -> str:
@@ -96,8 +117,16 @@ async def get_weather(city: str, redis) -> dict:
         # Ensure temp is always float (backfill stale int entries)
         if "temp" in data and not isinstance(data["temp"], float):
             data["temp"] = float(data["temp"]) if data["temp"] is not None else None
+        if "condition" in data:
+            data["condition"] = main_weather_condition(
+                str(data.get("condition", "")),
+                str(data.get("description", "")),
+                int(data.get("clouds_pct", 0) or 0),
+            )
         # Backfill condition_label for stale cache entries
         if "condition_label" not in data and "condition" in data:
+            data["condition_label"] = condition_label(data["condition"])
+        elif "condition" in data:
             data["condition_label"] = condition_label(data["condition"])
         return data
 
@@ -115,6 +144,11 @@ async def get_weather(city: str, redis) -> dict:
         )
         result = dict(result)
         result["temp"] = float(result["temp"])
+        result["condition"] = main_weather_condition(
+            str(result.get("condition", "")),
+            str(result.get("description", "")),
+            int(result.get("clouds_pct", 0) or 0),
+        )
         result["condition_label"] = condition_label(result["condition"])
         result["condition_subtype"] = cloud_subtype(result.get("description", ""))
         await redis.setex(cache_key, WEATHER_CACHE_TTL, json.dumps(result))
@@ -142,19 +176,25 @@ async def get_weather(city: str, redis) -> dict:
     data = response.json()
     raw_condition = str(data["weather"][0]["main"]).lower()
     raw_description = str(data["weather"][0]["description"])
+    clouds_pct = int(data.get("clouds", {}).get("all", 0))
+    normalized_condition = main_weather_condition(
+        raw_condition,
+        raw_description,
+        clouds_pct,
+    )
     result = {
         "city": _normalize_city_name(city, str(data.get("name", city))),
         "temp": float(data["main"]["temp"]),
         "feels_like": float(data["main"].get("feels_like", data["main"]["temp"])),
         "humidity": int(data["main"].get("humidity", 0)),
         "wind_speed": float(data.get("wind", {}).get("speed", 0)),
-        "condition": raw_condition,
-        "condition_label": condition_label(raw_condition),
+        "condition": normalized_condition,
+        "condition_label": condition_label(normalized_condition),
         "condition_subtype": cloud_subtype(raw_description),
         "icon": data["weather"][0]["icon"],
         "description": raw_description,
-        "mood_tag": map_weather_to_mood_tag(raw_condition),
-        "clouds_pct": int(data.get("clouds", {}).get("all", 0)),
+        "mood_tag": map_weather_to_mood_tag(normalized_condition),
+        "clouds_pct": clouds_pct,
     }
     await redis.setex(cache_key, WEATHER_CACHE_TTL, json.dumps(result))
     return result

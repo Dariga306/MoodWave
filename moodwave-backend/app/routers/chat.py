@@ -95,6 +95,14 @@ class SendRoomInviteRequest(BaseModel):
     is_public: bool = False
 
 
+class SendProfileRequest(BaseModel):
+    user_id: int
+    display_name: str = Field(min_length=1)
+    username: str = ""
+    avatar_url: Optional[str] = None
+    profile_url: str = ""
+
+
 class ReactRequest(BaseModel):
     message_id: Optional[str] = Field(default=None, min_length=1)
     emoji: str = Field(min_length=1, max_length=8)
@@ -1582,7 +1590,7 @@ async def send_playlist_to_group(
             "playlist_id": body.playlist_id,
             "playlist_title": body.title,
             "playlist_cover_url": body.cover_url,
-            "track_count": body.track_count,
+            "playlist_track_count": body.track_count,
             "note": body.note,
         },
     )
@@ -2136,6 +2144,107 @@ async def send_room_invite_to_thread(
         push_title="Live Room invite",
         push_body=f"🎧 {_sender_name(current_user)} invited you to listen together",
         data={"event": "new_message", "chat_id": chat.id, "room_id": body.room_id},
+    )
+
+
+@router.post(
+    "/{match_id}/send-profile",
+    summary="Send profile card in chat",
+)
+async def send_profile(
+    match_id: int,
+    request: Request,
+    body: SendProfileRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    match = await _get_match(match_id, current_user, db)
+    partner = await _get_partner(match, current_user, db)
+    if await users_are_blocked(db, current_user.id, partner.id):
+        raise HTTPException(status_code=403, detail="User is blocked")
+    chat = await _get_or_create_chat(match, db)
+    return await _send_payload(
+        request=request,
+        chat=chat,
+        partner=partner,
+        current_user=current_user,
+        payload={
+            "type": "profile",
+            "profile_user_id": body.user_id,
+            "profile_display_name": body.display_name,
+            "profile_username": body.username,
+            "profile_avatar_url": body.avatar_url or "",
+            "profile_url": body.profile_url,
+        },
+        db=db,
+        push_title="Profile shared",
+        push_body=f"👤 {_sender_name(current_user)} shared a profile",
+        data={"event": "new_message", "match_id": match.id},
+    )
+
+
+@router.post(
+    "/thread/{chat_id}/send-profile",
+    summary="Send profile card in direct chat",
+)
+async def send_profile_to_thread(
+    chat_id: int,
+    request: Request,
+    body: SendProfileRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    chat = await _get_chat_by_id(chat_id, current_user, db)
+    partner = await db.get(User, _chat_partner_id(chat, current_user.id))
+    if not partner:
+        raise HTTPException(status_code=404, detail="Chat partner not found")
+    if await users_are_blocked(db, current_user.id, partner.id):
+        raise HTTPException(status_code=403, detail="User is blocked")
+    return await _send_payload(
+        request=request,
+        chat=chat,
+        partner=partner,
+        current_user=current_user,
+        payload={
+            "type": "profile",
+            "profile_user_id": body.user_id,
+            "profile_display_name": body.display_name,
+            "profile_username": body.username,
+            "profile_avatar_url": body.avatar_url or "",
+            "profile_url": body.profile_url,
+        },
+        db=db,
+        push_title="Profile shared",
+        push_body=f"👤 {_sender_name(current_user)} shared a profile",
+        data={"event": "new_message", "chat_id": chat.id},
+    )
+
+
+@router.post(
+    "/groups/{group_chat_id}/send-profile",
+    summary="Send profile card in group chat",
+)
+async def send_profile_to_group(
+    group_chat_id: int,
+    request: Request,
+    body: SendProfileRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = await _get_group_chat_by_id(group_chat_id, current_user, db)
+    return await _send_group_payload(
+        request=request,
+        group=group,
+        current_user=current_user,
+        db=db,
+        payload={
+            "type": "profile",
+            "profile_user_id": body.user_id,
+            "profile_display_name": body.display_name,
+            "profile_username": body.username,
+            "profile_avatar_url": body.avatar_url or "",
+            "profile_url": body.profile_url,
+        },
     )
 
 

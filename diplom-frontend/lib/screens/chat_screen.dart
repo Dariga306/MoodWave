@@ -20,6 +20,8 @@ import 'user_profile_screen.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../utils/media_url.dart';
+import '../widgets/bottom_nav_bar.dart';
+import 'package:moodwave/widgets/mini_player.dart';
 
 const _kPhrases = [
   ('Слушай это прямо сейчас', '🎵'),
@@ -249,6 +251,8 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    MiniPlayerOverlayController.suppress();
+    GlobalBottomNavController.hide();
     _firebaseChatId = widget.firebaseChatId ?? '';
     _loadMuteState();
     _loadDeletedForMe();
@@ -270,6 +274,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    MiniPlayerOverlayController.unsuppress();
+    GlobalBottomNavController.show();
     _pollTimer?.cancel();
     _statusTimer?.cancel();
     _searchHighlightTimer?.cancel();
@@ -955,6 +961,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _showSendError(Object error, {required String fallback}) {
+    if (error is DioException && error.response?.statusCode == 403) return;
     String message = fallback;
     if (error is DioException) {
       final data = error.response?.data;
@@ -2229,6 +2236,12 @@ class _ChatScreenState extends State<ChatScreen> {
                             partnerInitial: bubbleInitial,
                             partnerAvatarUrl: bubbleAvatarUrl,
                             footer: messageFooter,
+                          ),
+                        'profile' => _ProfileMessage(
+                            msg: msg,
+                            isMe: isMe,
+                            partnerInitial: bubbleInitial,
+                            partnerAvatarUrl: bubbleAvatarUrl,
                           ),
                         'image' => _ImageMessage(
                             msg: msg,
@@ -3953,6 +3966,163 @@ class _PlaylistMessage extends StatelessWidget {
       partnerAvatarUrl: partnerAvatarUrl,
       timeStr: timeStr,
       footer: footer,
+      child: card,
+    );
+  }
+}
+
+class _ProfileMessage extends StatelessWidget {
+  final Map<String, dynamic> msg;
+  final bool isMe;
+  final String partnerInitial;
+  final String partnerAvatarUrl;
+
+  const _ProfileMessage({
+    required this.msg,
+    required this.isMe,
+    required this.partnerInitial,
+    required this.partnerAvatarUrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final displayName = msg['profile_display_name']?.toString() ?? 'User';
+    final username = msg['profile_username']?.toString() ?? '';
+    final avatarUrl = msg['profile_avatar_url']?.toString() ?? '';
+    final profileUserId = (msg['profile_user_id'] as num?)?.toInt() ?? 0;
+    final sentAt = msg['sent_at'] as String? ?? '';
+    final timeStr = _formatChatTime(sentAt);
+
+    final card = GestureDetector(
+      onTap: () {
+        if (profileUserId > 0) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => UserProfileScreen(userId: profileUserId),
+            ),
+          );
+        }
+      },
+      child: Container(
+        width: 260,
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF1a0533), Color(0xFF2d1060), Color(0xFF0d1a3d)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0x33A855F7)),
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              ClipOval(
+                child: Container(
+                  width: 46,
+                  height: 46,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF7c3aed), Color(0xFFec4899)],
+                    ),
+                  ),
+                  child: avatarUrl.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: avatarUrl,
+                          fit: BoxFit.cover,
+                          errorWidget: (_, __, ___) => Center(
+                            child: Text(
+                              displayName.isNotEmpty
+                                  ? displayName[0].toUpperCase()
+                                  : 'U',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white),
+                            ),
+                          ),
+                        )
+                      : Center(
+                          child: Text(
+                            displayName.isNotEmpty
+                                ? displayName[0].toUpperCase()
+                                : 'U',
+                            style: GoogleFonts.outfit(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white),
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.outfit(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white),
+                    ),
+                    if (username.isNotEmpty)
+                      Text(
+                        '@$username',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                            fontSize: 12, color: const Color(0xB3C8B4FF)),
+                      ),
+                  ],
+                ),
+              ),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              const Icon(Icons.graphic_eq_rounded,
+                  size: 10, color: Colors.white38),
+              const SizedBox(width: 4),
+              Text('MoodWave',
+                  style: GoogleFonts.outfit(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white38)),
+            ]),
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                    colors: [Color(0xFF7c3aed), Color(0xFFec4899)]),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'Open Profile',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.outfit(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    return _MessageFrame(
+      isMe: isMe,
+      partnerInitial: partnerInitial,
+      partnerAvatarUrl: partnerAvatarUrl,
+      timeStr: timeStr,
       child: card,
     );
   }

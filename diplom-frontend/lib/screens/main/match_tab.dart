@@ -1,7 +1,9 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/media_url.dart';
 import '../chat_screen.dart';
 
 class MatchTab extends StatefulWidget {
@@ -256,6 +258,8 @@ class _MatchTabState extends State<MatchTab> {
     final icebreaker =
         candidate['icebreaker'] ?? 'You have similar music taste!';
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
+    final avatarUrl = buildMediaUrl((candidate['avatar_url'] ?? '').toString());
+    final bannerUrl = buildMediaUrl((candidate['banner_url'] ?? '').toString());
 
     return Column(
       children: [
@@ -296,6 +300,39 @@ class _MatchTabState extends State<MatchTab> {
                   ),
                   child: Stack(
                     children: [
+                      if (bannerUrl.isNotEmpty)
+                        Positioned.fill(
+                          child: ClipRRect(
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(28),
+                              topRight: Radius.circular(28),
+                            ),
+                            child: CachedNetworkImage(
+                              imageUrl: bannerUrl,
+                              fit: BoxFit.cover,
+                              errorWidget: (_, __, ___) =>
+                                  const SizedBox.shrink(),
+                            ),
+                          ),
+                        ),
+                      Positioned.fill(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(28),
+                              topRight: Radius.circular(28),
+                            ),
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.black.withOpacity(0.05),
+                                AppColors.bg.withOpacity(0.58),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                       if (city.isNotEmpty)
                         Positioned(
                           top: 16,
@@ -343,13 +380,26 @@ class _MatchTabState extends State<MatchTab> {
                                   blurRadius: 30),
                             ],
                           ),
-                          child: Center(
-                            child: Text(initial,
-                                style: GoogleFonts.outfit(
-                                    fontSize: 36,
-                                    fontWeight: FontWeight.w800,
-                                    color: Colors.white)),
-                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: avatarUrl.isNotEmpty
+                              ? CachedNetworkImage(
+                                  imageUrl: avatarUrl,
+                                  fit: BoxFit.cover,
+                                  errorWidget: (_, __, ___) => Center(
+                                    child: Text(initial,
+                                        style: GoogleFonts.outfit(
+                                            fontSize: 36,
+                                            fontWeight: FontWeight.w800,
+                                            color: Colors.white)),
+                                  ),
+                                )
+                              : Center(
+                                  child: Text(initial,
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 36,
+                                          fontWeight: FontWeight.w800,
+                                          color: Colors.white)),
+                                ),
                         ),
                       ),
                     ],

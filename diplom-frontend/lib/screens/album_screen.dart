@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bottom_nav_bar.dart';
 import '../widgets/common_widgets.dart';
 import 'artist_screen.dart';
 import 'player_screen.dart';
@@ -70,7 +71,10 @@ class _AlbumScreenState extends State<AlbumScreen> {
       if (_isLiked) {
         await ApiService().unlikeAlbum(albumId);
         if (!mounted) return;
-        setState(() { _isLiked = false; _likeLoading = false; });
+        setState(() {
+          _isLiked = false;
+          _likeLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Album removed from Library')),
         );
@@ -82,7 +86,10 @@ class _AlbumScreenState extends State<AlbumScreen> {
           coverUrl: cover,
         );
         if (!mounted) return;
-        setState(() { _isLiked = true; _likeLoading = false; });
+        setState(() {
+          _isLiked = true;
+          _likeLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Album saved to Library')),
         );
@@ -93,7 +100,8 @@ class _AlbumScreenState extends State<AlbumScreen> {
   }
 
   String _fmt(dynamic durationMs) {
-    final ms = durationMs is int ? durationMs : int.tryParse('$durationMs') ?? 0;
+    final ms =
+        durationMs is int ? durationMs : int.tryParse('$durationMs') ?? 0;
     if (ms <= 0) return '';
     return '${ms ~/ 60000}:${((ms % 60000) ~/ 1000).toString().padLeft(2, '0')}';
   }
@@ -106,37 +114,50 @@ class _AlbumScreenState extends State<AlbumScreen> {
           .toString();
 
   void _playAll(List<dynamic> tracks) {
-    var list = tracks.whereType<Map>().map((t) => Map<String, dynamic>.from(t)).toList();
+    var list = tracks
+        .whereType<Map>()
+        .map((t) => Map<String, dynamic>.from(t))
+        .toList();
     if (list.isEmpty) return;
     if (context.read<PlayerProvider>().shuffleOn) {
       list.shuffle(Random());
     }
     final first = Map<String, dynamic>.from(list.first)..['queue'] = list;
-    Navigator.push(context, MaterialPageRoute(builder: (_) => PlayerScreen(track: first)));
+    Navigator.push(
+        context, MaterialPageRoute(builder: (_) => PlayerScreen(track: first)));
   }
 
   void _shufflePlay(List<dynamic> tracks) {
-    final list = tracks.whereType<Map>().map((t) => Map<String, dynamic>.from(t)).toList();
+    final list = tracks
+        .whereType<Map>()
+        .map((t) => Map<String, dynamic>.from(t))
+        .toList();
     if (list.isEmpty) return;
     list.shuffle(Random());
     final first = Map<String, dynamic>.from(list.first)..['queue'] = list;
-    Navigator.push(context, MaterialPageRoute(builder: (_) => PlayerScreen(track: first)));
+    Navigator.push(
+        context, MaterialPageRoute(builder: (_) => PlayerScreen(track: first)));
   }
 
   @override
   Widget build(BuildContext context) {
     final tracks = (_album?['tracks'] as List?) ?? [];
     final coverUrl = _album?['cover_xl']?.toString() ?? widget.initialCover;
-    final title = _album?['title']?.toString() ?? widget.initialTitle ?? 'Album';
+    final title =
+        _album?['title']?.toString() ?? widget.initialTitle ?? 'Album';
     final artist = _album?['artist']?.toString() ?? '';
     final artistId = _album?['artist_id'];
     final year = _year(_album?['release_date']?.toString());
-    final nbTracks = tracks.isNotEmpty ? tracks.length : (_album?['nb_tracks'] ?? 0);
+    final nbTracks =
+        tracks.isNotEmpty ? tracks.length : (_album?['nb_tracks'] ?? 0);
 
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purpleLight))
+          ? const Center(
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: AppColors.purpleLight))
           : CustomScrollView(
               slivers: [
                 // ── Spotify-style large cover header ──────────────────────
@@ -157,10 +178,12 @@ class _AlbumScreenState extends State<AlbumScreen> {
                                     fit: BoxFit.cover,
                                     placeholder: (_, __) => const SizedBox(),
                                     errorWidget: (_, __, ___) => const Center(
-                                        child: Text('💿', style: TextStyle(fontSize: 80))),
+                                        child: Text('💿',
+                                            style: TextStyle(fontSize: 80))),
                                   )
                                 : const Center(
-                                    child: Text('💿', style: TextStyle(fontSize: 80))),
+                                    child: Text('💿',
+                                        style: TextStyle(fontSize: 80))),
                           ),
                           // Gradient scrim
                           Container(
@@ -186,8 +209,10 @@ class _AlbumScreenState extends State<AlbumScreen> {
                                     color: Colors.black45,
                                     shape: BoxShape.circle,
                                   ),
-                                  child: const Icon(Icons.arrow_back_ios_new_rounded,
-                                      size: 16, color: Colors.white),
+                                  child: const Icon(
+                                      Icons.arrow_back_ios_new_rounded,
+                                      size: 16,
+                                      color: Colors.white),
                                 ),
                               ),
                             ),
@@ -248,21 +273,26 @@ class _AlbumScreenState extends State<AlbumScreen> {
                                 onTap: _likeLoading ? null : _toggleLike,
                                 child: _likeLoading
                                     ? const SizedBox(
-                                        width: 28, height: 28,
+                                        width: 28,
+                                        height: 28,
                                         child: CircularProgressIndicator(
-                                            strokeWidth: 2, color: AppColors.pink))
+                                            strokeWidth: 2,
+                                            color: AppColors.pink))
                                     : Icon(
                                         _isLiked
                                             ? Icons.bookmark_rounded
                                             : Icons.bookmark_border_rounded,
-                                        color: _isLiked ? AppColors.purpleLight : AppColors.text3,
+                                        color: _isLiked
+                                            ? AppColors.purpleLight
+                                            : AppColors.text3,
                                         size: 28,
                                       ),
                               ),
                               const SizedBox(width: 16),
                               // Three dots
                               GestureDetector(
-                                onTap: () => _showAlbumMenu(tracks, artist, artistId),
+                                onTap: () =>
+                                    _showAlbumMenu(tracks, artist, artistId),
                                 child: const Icon(Icons.more_vert_rounded,
                                     color: AppColors.text3, size: 26),
                               ),
@@ -276,13 +306,15 @@ class _AlbumScreenState extends State<AlbumScreen> {
                                       provider.toggleShuffle();
                                     },
                                     child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 200),
+                                      duration:
+                                          const Duration(milliseconds: 200),
                                       width: 44,
                                       height: 44,
                                       margin: const EdgeInsets.only(right: 14),
                                       decoration: BoxDecoration(
                                         color: provider.shuffleOn
-                                            ? AppColors.purpleLight.withOpacity(0.2)
+                                            ? AppColors.purpleLight
+                                                .withOpacity(0.2)
                                             : AppColors.surface,
                                         shape: BoxShape.circle,
                                         border: Border.all(
@@ -348,19 +380,24 @@ class _AlbumScreenState extends State<AlbumScreen> {
                 SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
-                      final track = Map<String, dynamic>.from(tracks[index] as Map)
-                        ..['queue'] = tracks;
-                      final trackTitle = track['title']?.toString() ?? 'Unknown';
+                      final track =
+                          Map<String, dynamic>.from(tracks[index] as Map)
+                            ..['queue'] = tracks;
+                      final trackTitle =
+                          track['title']?.toString() ?? 'Unknown';
                       final duration = _fmt(track['duration_ms']);
 
                       return InkWell(
                         onTap: () => Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => PlayerScreen(track: track)),
+                          MaterialPageRoute(
+                              builder: (_) => PlayerScreen(track: track)),
                         ),
-                        onLongPress: () => _showTrackOptions(track, artist, artistId),
+                        onLongPress: () =>
+                            _showTrackOptions(track, artist, artistId),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
                           decoration: const BoxDecoration(
                             border: Border(
                                 bottom: BorderSide(color: Color(0x0AFFFFFF))),
@@ -391,7 +428,8 @@ class _AlbumScreenState extends State<AlbumScreen> {
                                           color: Colors.white)),
                                   Text(artist,
                                       style: GoogleFonts.outfit(
-                                          fontSize: 12, color: AppColors.text3)),
+                                          fontSize: 12,
+                                          color: AppColors.text3)),
                                 ],
                               ),
                             ),
@@ -400,7 +438,8 @@ class _AlbumScreenState extends State<AlbumScreen> {
                                     fontSize: 12, color: AppColors.text3)),
                             const SizedBox(width: 6),
                             GestureDetector(
-                              onTap: () => _showTrackOptions(track, artist, artistId),
+                              onTap: () =>
+                                  _showTrackOptions(track, artist, artistId),
                               child: const Padding(
                                 padding: EdgeInsets.all(4),
                                 child: Icon(Icons.more_vert_rounded,
@@ -432,20 +471,28 @@ class _AlbumScreenState extends State<AlbumScreen> {
           children: [
             const SizedBox(height: 8),
             Container(
-              width: 36, height: 4,
+              width: 36,
+              height: 4,
               decoration: BoxDecoration(
-                  color: Colors.white24, borderRadius: BorderRadius.circular(100)),
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(100)),
             ),
             const SizedBox(height: 16),
             _MenuItem(
               icon: Icons.play_circle_outline_rounded,
               label: 'Play all',
-              onTap: () { Navigator.pop(context); _playAll(tracks); },
+              onTap: () {
+                Navigator.pop(context);
+                _playAll(tracks);
+              },
             ),
             _MenuItem(
               icon: Icons.shuffle_rounded,
               label: 'Shuffle play',
-              onTap: () { Navigator.pop(context); _shufflePlay(tracks); },
+              onTap: () {
+                Navigator.pop(context);
+                _shufflePlay(tracks);
+              },
             ),
             if (artist.isNotEmpty && artistId != null)
               _MenuItem(
@@ -471,7 +518,8 @@ class _AlbumScreenState extends State<AlbumScreen> {
     );
   }
 
-  void _showTrackOptions(Map<String, dynamic> track, String albumArtist, dynamic artistId) {
+  void _showTrackOptions(
+      Map<String, dynamic> track, String albumArtist, dynamic artistId) {
     showTrackMenu(
       context,
       track,
@@ -498,7 +546,8 @@ class _MenuItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  const _MenuItem({required this.icon, required this.label, required this.onTap});
+  const _MenuItem(
+      {required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {

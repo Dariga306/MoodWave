@@ -485,6 +485,41 @@ async def remove_friend(
     return {"message": "Friend removed"}
 
 
+@router.get(
+    "/users/me/blocked",
+    summary="List blocked users",
+    description="Returns users blocked by the current user, newest first.",
+)
+async def list_blocked_users(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        await db.execute(
+            select(User, Block.created_at)
+            .join(Block, Block.blocked_id == User.id)
+            .where(Block.blocker_id == current_user.id)
+            .order_by(Block.created_at.desc())
+        )
+    ).all()
+
+    return [
+        {
+            "id": user.id,
+            "username": user.username,
+            "display_name": user.display_name
+            or " ".join(
+                part for part in [user.first_name, user.last_name] if part
+            ).strip()
+            or user.username,
+            "avatar_url": user.avatar_url,
+            "banner_url": user.banner_url,
+            "blocked_at": blocked_at.isoformat() if blocked_at else None,
+        }
+        for user, blocked_at in rows
+    ]
+
+
 @router.post(
     "/users/{user_id}/block",
     summary="Block user",
@@ -507,7 +542,7 @@ async def block_user(
         select(Block).where(Block.blocker_id == current_user.id, Block.blocked_id == user_id)
     )
     if exists:
-        raise HTTPException(status_code=400, detail="Already blocked")
+        return {"message": "User blocked", "already_blocked": True}
 
     db.add(Block(blocker_id=current_user.id, blocked_id=user_id))
     await db.execute(
@@ -550,7 +585,7 @@ async def unblock_user(
         )
     )
     if not block:
-        raise HTTPException(status_code=404, detail="Block not found")
+        return {"message": "User unblocked", "already_unblocked": True}
 
     await db.delete(block)
     await db.commit()
@@ -985,6 +1020,8 @@ async def get_user_now_playing(
         raise HTTPException(status_code=404, detail="User not found")
     redis = request.app.state.redis
     await _touch_presence(redis, current_user.id)
+    if user.id != current_user.id and await users_are_blocked(db, current_user.id, user.id):
+        return {"now_playing": None, "activity_status": "", "is_online": False, "presence_status": "offline", "last_seen_at": None}
     now_playing = None
     activity_status = ""
     if user.show_activity:

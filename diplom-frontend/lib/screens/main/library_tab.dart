@@ -763,23 +763,6 @@ class _LibraryTabState extends State<LibraryTab> {
       user?['avatar_url'] as String?,
       version: user?['updated_at'],
     );
-    final avatarPreset = user?['avatar_preset'] as int? ?? 0;
-    const avatarGradients = [
-      [Color(0xFF7c3aed), Color(0xFFec4899)],
-      [Color(0xFF06b6d4), Color(0xFF3b82f6)],
-      [Color(0xFF22c55e), Color(0xFF14b8a6)],
-      [Color(0xFFf97316), Color(0xFFec4899)],
-      [Color(0xFF6366f1), Color(0xFFa855f7)],
-      [Color(0xFFf59e0b), Color(0xFF22c55e)],
-      [Color(0xFFef4444), Color(0xFFf97316)],
-      [Color(0xFF0ea5e9), Color(0xFF8b5cf6)],
-      [Color(0xFF84cc16), Color(0xFF06b6d4)],
-      [Color(0xFFec4899), Color(0xFF8b5cf6)],
-      [Color(0xFF64748b), Color(0xFF0f172a)],
-      [Color(0xFFfde047), Color(0xFFf97316)],
-    ];
-    final avatarColors =
-        avatarGradients[avatarPreset.clamp(0, avatarGradients.length - 1)];
     final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U';
 
     return Scaffold(
@@ -808,15 +791,10 @@ class _LibraryTabState extends State<LibraryTab> {
                           width: 36,
                           height: 36,
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: avatarColors,
-                            ),
+                            color: avatarUrl.isNotEmpty
+                                ? AppColors.surface2
+                                : const Color(0xFF242332),
                             shape: BoxShape.circle,
-                            border: Border.all(
-                                color: AppColors.purple.withOpacity(0.4),
-                                width: 1.5),
                           ),
                           child: avatarUrl.isNotEmpty
                               ? ClipOval(
@@ -1199,7 +1177,7 @@ class _LibraryTabState extends State<LibraryTab> {
                 ),
               ),
 
-            const SliverToBoxAdapter(child: SizedBox(height: 20)),
+            const SliverToBoxAdapter(child: SizedBox(height: 80)),
           ],
         ),
       ),

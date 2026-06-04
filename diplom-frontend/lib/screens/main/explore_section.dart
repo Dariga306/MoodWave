@@ -13,7 +13,7 @@ class _ExploreItem {
   final String emoji;
   final String label;
   final LinearGradient gradient;
-  final bool isLive; // показывать LIVE-бейджик
+  final bool isLive;
   final WidgetBuilder destination;
 
   const _ExploreItem({
@@ -32,26 +32,26 @@ class ExploreSection extends StatelessWidget {
 
   List<_ExploreItem> _items() => [
         _ExploreItem(
-          emoji: '🌍',
+          emoji: '🧭',
           label: 'Discover',
           gradient: AppColors.gradBlue,
           destination: (_) => const DiscoverScreen(),
         ),
         _ExploreItem(
-          emoji: '🏙',
+          emoji: '🏙️',
           label: 'Charts',
           gradient: AppColors.gradPurple,
           destination: (_) => const CityChartsScreen(),
         ),
         _ExploreItem(
-          emoji: '🎙',
+          emoji: '🎙️',
           label: 'Live Room',
           gradient: AppColors.gradPink,
           isLive: true,
           destination: (_) => const BrowseRoomsScreen(),
         ),
         _ExploreItem(
-          emoji: '🌨',
+          emoji: '⛅',
           label: 'Weather',
           gradient: AppColors.gradCyan,
           destination: (_) => const WeatherScreen(),
@@ -70,7 +70,7 @@ class ExploreSection extends StatelessWidget {
           crossAxisCount: 2,
           mainAxisSpacing: 10,
           crossAxisSpacing: 10,
-          childAspectRatio: 2.6,
+          childAspectRatio: 2.3,
         ),
         itemCount: items.length,
         itemBuilder: (ctx, i) => _ExploreCard(item: items[i]),
@@ -99,15 +99,28 @@ class _ExploreCard extends StatelessWidget {
           children: [
             // Emoji + label по центру
             Center(
-              child: Column(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(item.emoji, style: const TextStyle(fontSize: 22)),
-                  const SizedBox(height: 4),
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.18),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text(
+                        item.emoji,
+                        style: const TextStyle(fontSize: 18),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Text(
                     item.label,
                     style: GoogleFonts.outfit(
-                      fontSize: 12,
+                      fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: Colors.white,
                     ),

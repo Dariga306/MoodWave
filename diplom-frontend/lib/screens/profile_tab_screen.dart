@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/bottom_nav_bar.dart';
 import 'main/profile_tab.dart';
 
 /// Wraps ProfileTab as a standalone pushable route (used from Library avatar)
@@ -9,6 +10,7 @@ class ProfileTabScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF08080f),
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: Stack(
         children: [
           const ProfileTab(),

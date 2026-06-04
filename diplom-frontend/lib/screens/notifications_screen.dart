@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bottom_nav_bar.dart';
 import '../utils/media_url.dart';
 import 'notification_settings_screen.dart';
 import 'user_profile_screen.dart';
@@ -123,6 +124,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -443,8 +445,9 @@ class _MatchCard extends StatelessWidget {
     final time = notif['time'] as String? ?? '';
     final avatarUrl = buildMediaUrl((notif['avatar_url'] ?? '').toString());
     final rawUserId = notif['user_id'];
-    final userId =
-        rawUserId is int ? rawUserId : int.tryParse(rawUserId?.toString() ?? '');
+    final userId = rawUserId is int
+        ? rawUserId
+        : int.tryParse(rawUserId?.toString() ?? '');
 
     return GestureDetector(
       onTap: () {
@@ -459,7 +462,9 @@ class _MatchCard extends StatelessWidget {
       },
       child: Container(
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
-        color: isRead ? Colors.transparent : AppColors.purpleLight.withOpacity(0.04),
+        color: isRead
+            ? Colors.transparent
+            : AppColors.purpleLight.withOpacity(0.04),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           if (!isRead) _unreadDot() else const SizedBox(width: 8),
           const SizedBox(width: 6),
@@ -507,37 +512,38 @@ class _MatchCard extends StatelessWidget {
           ]),
           const SizedBox(width: 14),
           Expanded(
-              child:
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            RichText(
-                text: TextSpan(
-              style: GoogleFonts.outfit(
-                  fontSize: 14, height: 1.5, color: AppColors.text),
-              children: [
-                TextSpan(text: '$pct% match found — meet '),
-                TextSpan(
-                    text: name,
-                    style: GoogleFonts.outfit(
-                        color: AppColors.purpleLight,
-                        fontWeight: FontWeight.w600)),
-                if (city.isNotEmpty) TextSpan(text: ' from $city'),
-              ],
-            )),
-            const SizedBox(height: 4),
-            Row(children: [
-              Text(time,
-                  style:
-                      GoogleFonts.outfit(fontSize: 12, color: AppColors.text3)),
-              if (userId != null) ...[
-                const Spacer(),
-                Text('View profile',
-                    style: GoogleFonts.outfit(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.purpleLight)),
-              ],
-            ]),
-          ])),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                RichText(
+                    text: TextSpan(
+                  style: GoogleFonts.outfit(
+                      fontSize: 14, height: 1.5, color: AppColors.text),
+                  children: [
+                    TextSpan(text: '$pct% match found — meet '),
+                    TextSpan(
+                        text: name,
+                        style: GoogleFonts.outfit(
+                            color: AppColors.purpleLight,
+                            fontWeight: FontWeight.w600)),
+                    if (city.isNotEmpty) TextSpan(text: ' from $city'),
+                  ],
+                )),
+                const SizedBox(height: 4),
+                Row(children: [
+                  Text(time,
+                      style: GoogleFonts.outfit(
+                          fontSize: 12, color: AppColors.text3)),
+                  if (userId != null) ...[
+                    const Spacer(),
+                    Text('View profile',
+                        style: GoogleFonts.outfit(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.purpleLight)),
+                  ],
+                ]),
+              ])),
         ]),
       ),
     );
@@ -581,9 +587,8 @@ class _LikeCardState extends State<_LikeCard> {
                 : 'Passed',
             style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
           ),
-          backgroundColor: decision == 'like'
-              ? AppColors.surface2
-              : const Color(0xFF2a1522),
+          backgroundColor:
+              decision == 'like' ? AppColors.surface2 : const Color(0xFF2a1522),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -608,15 +613,17 @@ class _LikeCardState extends State<_LikeCard> {
     final initial = widget.notif['user_initial'] as String? ?? '?';
     final city = widget.notif['city'] as String? ?? '';
     final time = widget.notif['time'] as String? ?? '';
-    final avatarUrl = buildMediaUrl(
-        (widget.notif['avatar_url'] as String? ?? '').toString());
+    final avatarUrl =
+        buildMediaUrl((widget.notif['avatar_url'] as String? ?? '').toString());
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: widget.isRead ? AppColors.surface : AppColors.surface.withOpacity(0.95),
+          color: widget.isRead
+              ? AppColors.surface
+              : AppColors.surface.withOpacity(0.95),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
               color: widget.isRead
@@ -670,29 +677,31 @@ class _LikeCardState extends State<_LikeCard> {
               ]),
               const SizedBox(width: 14),
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  RichText(
-                    text: TextSpan(
-                      style: GoogleFonts.outfit(
-                          fontSize: 14, height: 1.5, color: AppColors.text),
-                      children: [
-                        TextSpan(
-                            text: name,
-                            style: GoogleFonts.outfit(
-                                color: AppColors.purpleLight,
-                                fontWeight: FontWeight.w700)),
-                        const TextSpan(
-                            text:
-                                ' liked your music taste. Like back to open chat.'),
-                        if (city.isNotEmpty) TextSpan(text: ' • $city'),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(time,
-                      style: GoogleFonts.outfit(
-                          fontSize: 12, color: AppColors.text3)),
-                ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      RichText(
+                        text: TextSpan(
+                          style: GoogleFonts.outfit(
+                              fontSize: 14, height: 1.5, color: AppColors.text),
+                          children: [
+                            TextSpan(
+                                text: name,
+                                style: GoogleFonts.outfit(
+                                    color: AppColors.purpleLight,
+                                    fontWeight: FontWeight.w700)),
+                            const TextSpan(
+                                text:
+                                    ' liked your music taste. Like back to open chat.'),
+                            if (city.isNotEmpty) TextSpan(text: ' • $city'),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(time,
+                          style: GoogleFonts.outfit(
+                              fontSize: 12, color: AppColors.text3)),
+                    ]),
               ),
             ]),
             const SizedBox(height: 12),
@@ -739,8 +748,7 @@ class _LikeCardState extends State<_LikeCard> {
                               width: 16,
                               height: 16,
                               child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppColors.purpleLight))
+                                  strokeWidth: 2, color: AppColors.purpleLight))
                           : Text('Pass',
                               style: GoogleFonts.outfit(
                                   fontSize: 13,
@@ -794,8 +802,7 @@ class _FriendRequestCardState extends State<_FriendRequestCard> {
       if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content:
-            Text('Could not accept request', style: GoogleFonts.outfit()),
+        content: Text('Could not accept request', style: GoogleFonts.outfit()),
         backgroundColor: const Color(0xFF3d0000),
         behavior: SnackBarBehavior.floating,
       ));
@@ -1088,8 +1095,7 @@ class _NewFollowerCardState extends State<_NewFollowerCard> {
                           width: 14,
                           height: 14,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppColors.purpleLight))
+                              strokeWidth: 2, color: AppColors.purpleLight))
                       : Text('Follow back',
                           style: GoogleFonts.outfit(
                               fontSize: 12,
@@ -1232,8 +1238,7 @@ class _NewAlbumCard extends StatelessWidget {
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => const Center(
                           child: Text('💿', style: TextStyle(fontSize: 20)))))
-              : const Center(
-                  child: Text('💿', style: TextStyle(fontSize: 20))),
+              : const Center(child: Text('💿', style: TextStyle(fontSize: 20))),
         ),
         const SizedBox(width: 14),
         Expanded(
@@ -1297,8 +1302,7 @@ class _RoomInviteCardState extends State<_RoomInviteCard> {
 
   Future<void> _join() async {
     final rawId = widget.notif['room_id'];
-    final roomId =
-        rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
+    final roomId = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
     setState(() => _joining = true);
     try {
       if (roomId != null) {
@@ -1321,8 +1325,7 @@ class _RoomInviteCardState extends State<_RoomInviteCard> {
             .toString();
     final time = (widget.notif['time'] ?? '').toString();
     final hasRoomId = widget.notif['room_id'] != null;
-    final isRoomStarted =
-        (widget.notif['type'] ?? '') == 'room_started';
+    final isRoomStarted = (widget.notif['type'] ?? '') == 'room_started';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),

@@ -373,8 +373,8 @@ class ApiService {
     Map<String, dynamic> data, {
     Uint8List? avatarBytes,
     Uint8List? bannerBytes,
-    String avatarFileName = 'avatar.jpg',
-    String bannerFileName = 'banner.jpg',
+    String avatarFileName = 'avatar.png',
+    String bannerFileName = 'banner.png',
   }) async {
     final hasUploads = avatarBytes != null || bannerBytes != null;
     late final Response resp;
@@ -1018,6 +1018,18 @@ class ApiService {
     final resp =
         await _dio.get('/weather/playlist', queryParameters: {'city': city});
     return resp.data;
+  }
+
+  Future<Map<String, dynamic>> markWeatherListening(
+    String city, {
+    String? playlistId,
+  }) async {
+    final resp = await _dio.post('/weather/listening', queryParameters: {
+      'city': city,
+      if (playlistId != null && playlistId.isNotEmpty)
+        'playlist_id': playlistId,
+    });
+    return Map<String, dynamic>.from(resp.data as Map);
   }
 
   Future<List<String>> searchCities(String q) async {
@@ -1738,11 +1750,19 @@ class ApiService {
   }
 
   Future<void> blockUser(int userId) async {
-    await _dio.post('/social/users/$userId/block');
+    await _dio.post('/users/$userId/block');
   }
 
   Future<void> unblockUser(int userId) async {
-    await _dio.delete('/social/users/$userId/block');
+    await _dio.delete('/users/$userId/block');
+  }
+
+  Future<List<Map<String, dynamic>>> getBlockedUsers() async {
+    final resp = await _dio.get('/users/me/blocked');
+    return (resp.data as List? ?? const [])
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
   }
 
   Future<List<Map<String, dynamic>>> getUserFollowers(
@@ -2204,6 +2224,57 @@ class ApiService {
     await _dio.post('/chats/groups/$groupChatId/send-image', data: {
       'image_data_url': imageDataUrl,
       if (caption != null && caption.isNotEmpty) 'caption': caption,
+    });
+  }
+
+  Future<void> sendProfileInChat(
+    int matchId, {
+    required int userId,
+    required String displayName,
+    String username = '',
+    String? avatarUrl,
+    String profileUrl = '',
+  }) async {
+    await _dio.post('/chats/$matchId/send-profile', data: {
+      'user_id': userId,
+      'display_name': displayName,
+      'username': username,
+      if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatar_url': avatarUrl,
+      'profile_url': profileUrl,
+    });
+  }
+
+  Future<void> sendProfileInDirectChat(
+    int chatId, {
+    required int userId,
+    required String displayName,
+    String username = '',
+    String? avatarUrl,
+    String profileUrl = '',
+  }) async {
+    await _dio.post('/chats/thread/$chatId/send-profile', data: {
+      'user_id': userId,
+      'display_name': displayName,
+      'username': username,
+      if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatar_url': avatarUrl,
+      'profile_url': profileUrl,
+    });
+  }
+
+  Future<void> sendProfileInGroupChat(
+    int groupChatId, {
+    required int userId,
+    required String displayName,
+    String username = '',
+    String? avatarUrl,
+    String profileUrl = '',
+  }) async {
+    await _dio.post('/chats/groups/$groupChatId/send-profile', data: {
+      'user_id': userId,
+      'display_name': displayName,
+      'username': username,
+      if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatar_url': avatarUrl,
+      'profile_url': profileUrl,
     });
   }
 

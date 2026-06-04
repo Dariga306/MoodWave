@@ -3,9 +3,14 @@ import 'dart:math';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
-import 'player_screen.dart';
+import '../widgets/bottom_nav_bar.dart';
+import 'package:moodwave/widgets/mini_player.dart';
+import '../utils/show_snackbar.dart';
+import 'modals.dart';
 
 // Top artists per genre for parallel search — 20 artists × 20 tracks = ~150+ real tracks
 const _genreArtists = <String, List<String>>{
@@ -452,47 +457,51 @@ const _genreArtists = <String, List<String>>{
 };
 
 const Map<String, String> _genreArtUrls = {
-  'pop':
-      'https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=1400&q=80',
-  'rock':
-      'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=1400&q=80',
-  'hip-hop':
-      'https://images.unsplash.com/photo-1521334884684-d80222895322?w=1400&q=80',
-  'electronic':
-      'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1400&q=80',
-  'jazz':
-      'https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=1400&q=80',
-  'k-pop':
-      'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=1400&q=80',
-  'classical':
-      'https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=1400&q=80',
-  'r&b':
-      'https://images.unsplash.com/photo-1501612780327-45045538702b?w=1400&q=80',
-  'latin':
-      'https://images.unsplash.com/photo-1504609813442-a8924e83f76e?w=1400&q=80',
-  'country':
-      'https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?w=1400&q=80',
-  'metal':
-      'https://images.unsplash.com/photo-1506157786151-b8491531f063?w=1400&q=80',
-  'blues':
-      'https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=1400&q=80',
-  'lo-fi':
-      'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=1400&q=80',
-  'reggaeton':
-      'https://images.unsplash.com/photo-1504609773096-104ff2c73ba4?w=1400&q=80',
+  'pop': 'assets/images/genres/01_pop.jpg',
+  'rock': 'assets/images/genres/02_rock.jpg',
+  'hip-hop': 'assets/images/genres/03_hiphop.jpg',
+  'electronic': 'assets/images/genres/04_electronic.jpg',
+  'jazz': 'assets/images/genres/05_jazz.jpg',
+  'k-pop': 'assets/images/genres/06_kpop.jpg',
+  'r&b': 'assets/images/genres/07_rnb.jpg',
+  'latin': 'assets/images/genres/08_latin.jpg',
+  'indie': 'assets/images/genres/09_indie.jpg',
+  'afrobeat': 'assets/images/genres/10_afrobeat.jpg',
+  'classical': 'assets/images/genres/11_classical.jpg',
+  'country': 'assets/images/genres/12_country.jpg',
+  'metal': 'assets/images/genres/13_metal.jpg',
+  'blues': 'assets/images/genres/14_blues.jpg',
+  'lo-fi': 'assets/images/genres/15_lofi.jpg',
+  'reggaeton': 'assets/images/genres/16_reggaeton.jpg',
   'folk':
       'https://images.unsplash.com/photo-1448375240586-882707db888b?w=1400&q=80',
   'funk':
       'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=1400&q=80',
   'soul':
       'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=1400&q=80',
-  'indie':
-      'https://images.unsplash.com/photo-1460723237483-7a6dc9d0b212?w=1400&q=80',
   'punk':
       'https://images.unsplash.com/photo-1503095396549-807759245b35?w=1400&q=80',
   'reggae':
       'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1400&q=80',
 };
+
+Alignment _genreImageAlignment(String genre) {
+  switch (genre.trim().toLowerCase()) {
+    case 'pop':
+    case 'rock':
+    case 'hip-hop':
+    case 'jazz':
+    case 'k-pop':
+    case 'r&b':
+    case 'metal':
+    case 'blues':
+    case 'afrobeat':
+    case 'country':
+      return Alignment.topCenter;
+    default:
+      return Alignment.center;
+  }
+}
 
 class GenreTracksScreen extends StatefulWidget {
   final String genre;
@@ -550,11 +559,13 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
             if (id.isEmpty || !seen.add(id)) continue;
             final artist = (t['artist'] ?? '').toString().trim().toLowerCase();
             if (artist.isNotEmpty) {
-              if ((artistCount[artist] ?? 0) >= 4) continue;
+              if ((artistCount[artist] ?? 0) >= 3) continue;
               artistCount[artist] = (artistCount[artist] ?? 0) + 1;
             }
             tracks.add(t);
+            if (tracks.length >= 160) break;
           }
+          if (tracks.length >= 160) break;
         }
         tracks.shuffle(Random());
       } else {
@@ -577,18 +588,15 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
     }
   }
 
-  void _playAll() {
+  Future<void> _playAll() async {
     if (_tracks.isEmpty) return;
 
     final first = Map<String, dynamic>.from(_tracks[0] as Map)
       ..['queue'] = _tracks;
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PlayerScreen(track: first),
-      ),
-    );
+    MiniPlayerOverlayController.forceVisible();
+    await context.read<PlayerProvider>().openTrack(first);
+    MiniPlayerOverlayController.forceVisible();
   }
 
   void _toggleShuffle() {
@@ -596,6 +604,90 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
       _shuffleMode = !_shuffleMode;
       if (_shuffleMode) _tracks.shuffle();
     });
+  }
+
+  String _trackId(Map<String, dynamic> track) {
+    return (track['spotify_track_id'] ??
+            track['spotify_id'] ??
+            track['deezer_id'] ??
+            track['track_id'] ??
+            track['id'] ??
+            '')
+        .toString();
+  }
+
+  void _showGenreOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(100),
+            ),
+          ),
+          const SizedBox(height: 12),
+          ListTile(
+            leading:
+                const Icon(Icons.play_arrow_rounded, color: Colors.white70),
+            title: Text('Play all',
+                style: GoogleFonts.outfit(color: Colors.white)),
+            onTap: () {
+              Navigator.pop(context);
+              _playAll();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.shuffle_rounded, color: Colors.white70),
+            title:
+                Text('Shuffle', style: GoogleFonts.outfit(color: Colors.white)),
+            onTap: () {
+              Navigator.pop(context);
+              _toggleShuffle();
+              _playAll();
+            },
+          ),
+          const SizedBox(height: 12),
+        ]),
+      ),
+    );
+  }
+
+  Color get _accentColor => widget.gradient.colors.first;
+
+  String get _genreSubtitle {
+    const subtitles = <String, String>{
+      'Pop': 'Catchy & bright',
+      'Rock': 'Raw & loud',
+      'Hip-Hop': 'Beats & bars',
+      'Electronic': 'Pulse & energy',
+      'Jazz': 'Smooth & soulful',
+      'K-Pop': 'Bright & bold',
+      'R&B': 'Smooth soul',
+      'Latin': 'Rhythm & fire',
+      'Indie': 'Raw & real',
+      'Afrobeat': 'Groove & rhythm',
+      'Classical': 'Timeless beauty',
+      'Country': 'Roots & soul',
+      'Metal': 'Heavy & loud',
+      'Blues': 'Deep & soulful',
+      'Lo-Fi': 'Chill & mellow',
+      'Reggaeton': 'Dance & fire',
+      'Folk': 'Acoustic & pure',
+      'Funk': 'Groove & bass',
+      'Soul': 'Deep feeling',
+      'Punk': 'Fast & loud',
+      'Reggae': 'Chill & roots',
+    };
+    return subtitles[widget.genre] ?? '';
   }
 
   String get _totalDuration {
@@ -635,20 +727,51 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
             leading: const Icon(Icons.favorite_border, color: Colors.white70),
             title: Text('Add to favorites',
                 style: GoogleFonts.outfit(color: Colors.white)),
-            onTap: () => Navigator.pop(context),
+            onTap: () async {
+              Navigator.pop(context);
+              final id = _trackId(Map<String, dynamic>.from(track));
+              if (id.isEmpty) return;
+              try {
+                await ApiService().likeTrack(
+                  id,
+                  title: track['title']?.toString(),
+                  artist: track['artist']?.toString(),
+                  genre: widget.genre,
+                );
+                if (context.mounted) {
+                  showSuccessSnackBar(context, 'Added to favorites');
+                }
+              } catch (_) {
+                if (context.mounted) {
+                  showErrorSnackBar(context, 'Could not add to favorites');
+                }
+              }
+            },
           ),
           ListTile(
             leading:
                 const Icon(Icons.playlist_add_rounded, color: Colors.white70),
             title: Text('Add to playlist',
                 style: GoogleFonts.outfit(color: Colors.white)),
-            onTap: () => Navigator.pop(context),
+            onTap: () {
+              Navigator.pop(context);
+              showAddToPlaylist(
+                context,
+                track: Map<String, dynamic>.from(track),
+              );
+            },
           ),
           ListTile(
             leading: const Icon(Icons.share_rounded, color: Colors.white70),
             title:
                 Text('Share', style: GoogleFonts.outfit(color: Colors.white)),
-            onTap: () => Navigator.pop(context),
+            onTap: () {
+              Navigator.pop(context);
+              showShareTrack(
+                context,
+                track: Map<String, dynamic>.from(track),
+              );
+            },
           ),
           const SizedBox(height: 12),
         ]),
@@ -669,6 +792,7 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
@@ -692,24 +816,35 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
               background: Stack(
                 fit: StackFit.expand,
                 children: [
-                  CachedNetworkImage(
-                    imageUrl: heroArt,
-                    fit: BoxFit.cover,
-                    errorWidget: (_, __, ___) => Container(
-                      decoration: BoxDecoration(gradient: widget.gradient),
-                    ),
-                  ),
+                  heroArt.startsWith('assets/')
+                      ? Image.asset(
+                          heroArt,
+                          fit: BoxFit.cover,
+                          alignment: _genreImageAlignment(widget.genre),
+                          errorBuilder: (_, __, ___) => Container(
+                            decoration:
+                                BoxDecoration(gradient: widget.gradient),
+                          ),
+                        )
+                      : CachedNetworkImage(
+                          imageUrl: heroArt,
+                          fit: BoxFit.cover,
+                          errorWidget: (_, __, ___) => Container(
+                            decoration:
+                                BoxDecoration(gradient: widget.gradient),
+                          ),
+                        ),
                   Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          Colors.black.withOpacity(0.15),
-                          widget.gradient.colors.first.withOpacity(0.45),
+                          Colors.black.withOpacity(0.20),
+                          Colors.black.withOpacity(0.55),
                           AppColors.bg.withOpacity(0.97),
                         ],
-                        stops: const [0.0, 0.6, 1.0],
+                        stops: const [0.0, 0.55, 1.0],
                       ),
                     ),
                   ),
@@ -722,10 +857,8 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
                           Text(
                             widget.genre,
                             textAlign: TextAlign.center,
-                            style: GoogleFonts.spaceGrotesk(
-                              fontSize: 34,
-                              height: 1,
-                              fontWeight: FontWeight.w800,
+                            style: GoogleFonts.dmSerifDisplay(
+                              fontSize: 38,
                               color: Colors.white,
                               shadows: [
                                 Shadow(
@@ -735,16 +868,44 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
                               ],
                             ),
                           ),
-                          if (!_loading && _totalDuration.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              _totalDuration,
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.sora(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                color: Colors.white.withOpacity(0.72),
-                              ),
+                          if (!_loading &&
+                              (_genreSubtitle.isNotEmpty ||
+                                  _totalDuration.isNotEmpty)) ...[
+                            const SizedBox(height: 3),
+                            Wrap(
+                              alignment: WrapAlignment.center,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 6,
+                              children: [
+                                if (_genreSubtitle.isNotEmpty)
+                                  Text(
+                                    _genreSubtitle,
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.dmSans(
+                                      fontSize: 13,
+                                      fontStyle: FontStyle.italic,
+                                      fontWeight: FontWeight.w400,
+                                      color: Colors.white.withOpacity(0.72),
+                                    ),
+                                  ),
+                                if (_genreSubtitle.isNotEmpty &&
+                                    _totalDuration.isNotEmpty)
+                                  Text('·',
+                                      style: TextStyle(
+                                          color:
+                                              Colors.white.withOpacity(0.4))),
+                                if (_totalDuration.isNotEmpty)
+                                  Text(
+                                    _totalDuration,
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.dmSans(
+                                      fontSize: 13,
+                                      fontStyle: FontStyle.italic,
+                                      fontWeight: FontWeight.w400,
+                                      color: Colors.white.withOpacity(0.72),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ],
                         ],
@@ -772,21 +933,19 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
                         height: 48,
                         decoration: BoxDecoration(
                           color: _shuffleMode
-                              ? AppColors.purple.withOpacity(0.18)
+                              ? _accentColor.withOpacity(0.18)
                               : AppColors.surface,
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(
                             color: _shuffleMode
-                                ? AppColors.purpleLight.withOpacity(0.7)
+                                ? _accentColor.withOpacity(0.7)
                                 : AppColors.border,
                           ),
                         ),
                         child: Icon(
                           Icons.shuffle_rounded,
                           size: 20,
-                          color: _shuffleMode
-                              ? AppColors.purpleLight
-                              : AppColors.text3,
+                          color: _shuffleMode ? _accentColor : AppColors.text3,
                         ),
                       ),
                     ),
@@ -798,11 +957,18 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
                         child: Container(
                           height: 48,
                           decoration: BoxDecoration(
-                            gradient: AppColors.primaryBtn,
+                            gradient: LinearGradient(
+                              colors: [
+                                widget.gradient.colors.first,
+                                widget.gradient.colors.last,
+                              ],
+                              begin: Alignment.centerLeft,
+                              end: Alignment.centerRight,
+                            ),
                             borderRadius: BorderRadius.circular(14),
                             boxShadow: [
                               BoxShadow(
-                                color: AppColors.purple.withOpacity(0.26),
+                                color: _accentColor.withOpacity(0.35),
                                 blurRadius: 22,
                                 offset: const Offset(0, 8),
                               ),
@@ -824,16 +990,16 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 14),
                     // More options button
                     GestureDetector(
-                      onTap: () {},
+                      onTap: () => _showGenreOptions(context),
                       child: Container(
                         width: 48,
                         height: 48,
                         decoration: BoxDecoration(
                           color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(14),
+                          shape: BoxShape.circle,
                           border: Border.all(color: AppColors.border),
                         ),
                         child: const Icon(
@@ -850,7 +1016,7 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
 
           // TRACK LIST
           SliverPadding(
-            padding: const EdgeInsets.only(bottom: 24),
+            padding: const EdgeInsets.only(bottom: 80),
             sliver: SliverList(
               delegate: SliverChildBuilderDelegate(
                 (ctx, i) {
@@ -864,12 +1030,11 @@ class _GenreTracksScreenState extends State<GenreTracksScreen> {
                   final duration = _fmt(trackMap['duration_ms']);
 
                   return GestureDetector(
-                    onTap: () => Navigator.push(
-                      ctx,
-                      MaterialPageRoute(
-                        builder: (_) => PlayerScreen(track: trackMap),
-                      ),
-                    ),
+                    onTap: () async {
+                      MiniPlayerOverlayController.forceVisible();
+                      await context.read<PlayerProvider>().openTrack(trackMap);
+                      MiniPlayerOverlayController.forceVisible();
+                    },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 9),

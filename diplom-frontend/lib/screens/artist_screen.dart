@@ -8,6 +8,7 @@ import '../providers/auth_provider.dart';
 import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bottom_nav_bar.dart';
 import '../widgets/common_widgets.dart';
 import 'album_screen.dart';
 import 'player_screen.dart';
@@ -140,6 +141,7 @@ class _ArtistScreenState extends State<ArtistScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: _loading
           ? const Center(
               child: CircularProgressIndicator(

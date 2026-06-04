@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import time
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -17,83 +18,83 @@ router = APIRouter()
 WEATHER_PLAYLIST_CACHE_TTL = 1800
 WEATHER_LISTENER_TTL = 1800
 # Bump version suffix whenever the cached payload schema changes, to bust stale Redis entries
-_PLAYLIST_CACHE_VER = "v8"
+_PLAYLIST_CACHE_VER = "v11"
 
 # ─── Playlist catalogue ────────────────────────────────────────────────────────
 # Tuple: (key, name, description, emoji, mood, track_count)
 
 WEATHER_PLAYLISTS = {
     "clear": [
-        ("sunrise-glow",    "Morning Energy",     "The perfect upbeat pop playlist to start your day right", "☀️", "sunny", 128),
-        ("golden-hour",     "Windows Down",       "Indie & pop bangers for driving with the windows open", "🌇", "sunny", 116),
-        ("summer-hits",     "Summer Anthems",      "The hottest pop & chart anthems for sunny days", "🌞", "energetic", 140),
-        ("blue-sky",        "Good Vibes Only",    "High-energy feel-good tracks for clear skies", "🛼", "sunny", 108),
-        ("daylight-vibes",  "Daytime Rotation",   "Easy radio-friendly pop from morning to golden hour", "✨", "chill", 124),
-        ("clear-morning",   "Morning Coffee",     "Soft acoustic indie for slow sunny mornings", "☕", "chill", 102),
-        ("city-sun",        "City Pop Groove",    "Japanese city-pop, funk & groovy urban vibes", "🏙️", "energetic", 115),
-        ("weekend-radiance","Weekend Vibes",       "Carefree pop & indie for a bright free weekend", "💛", "sunny", 131),
-        ("patio-dreams",    "Backyard Chill",     "Relaxed indie folk for a sunny afternoon outside", "🌼", "chill", 111),
-        ("afterglow-pop",   "Golden Hour Synths", "Shimmering dream-pop and electro as the day turns gold", "🎧", "sunny", 122),
+        ("sunrise-glow",    "Morning Energy",     "The perfect upbeat pop playlist to start your day right", "☀️", "sunny", 178),
+        ("golden-hour",     "Windows Down",       "Indie & pop bangers for driving with the windows open", "🌇", "sunny", 166),
+        ("summer-hits",     "Summer Anthems",      "The hottest pop & chart anthems for sunny days", "🌞", "energetic", 190),
+        ("blue-sky",        "Good Vibes Only",    "High-energy feel-good tracks for clear skies", "🛼", "sunny", 158),
+        ("daylight-vibes",  "Daytime Rotation",   "Easy radio-friendly pop from morning to golden hour", "✨", "chill", 174),
+        ("clear-morning",   "Morning Coffee",     "Soft acoustic indie for slow sunny mornings", "🌅", "chill", 152),
+        ("city-sun",        "City Pop Groove",    "Japanese city-pop, funk & groovy urban vibes", "🏙️", "energetic", 165),
+        ("weekend-radiance","Weekend Vibes",       "Carefree pop & indie for a bright free weekend", "💛", "sunny", 181),
+        ("patio-dreams",    "Backyard Chill",     "Relaxed indie folk for a sunny afternoon outside", "🌼", "chill", 161),
+        ("afterglow-pop",   "Golden Hour Synths", "Shimmering dream-pop and electro as the day turns gold", "🎧", "sunny", 172),
     ],
     "rain": [
-        ("rainy-window",    "Rainy Day Feels",    "Soft indie & acoustic for grey skies and slow thoughts", "🌧️", "rainy", 118),
-        ("midnight-rain",   "Midnight Drive",     "R&B and indie for late-night rainy city drives", "🚕", "melancholy", 124),
-        ("cozy-indoor",     "Stay Inside",        "Warm acoustic and folk for a cozy day indoors", "🕯️", "cozy", 109),
-        ("after-rain",      "After the Storm",    "Hopeful indie tracks — when the clouds start to clear", "☔", "melancholy", 121),
-        ("storm-journal",   "Deep Focus",         "Introspective indie & piano for writing and thinking", "📖", "rainy", 106),
-        ("grey-day-soul",   "Soul & Blues",       "Soulful R&B for heavy grey skies", "🖤", "melancholy", 113),
-        ("cafe-rain",       "Cafe Playlist",      "Soft indie & acoustic for a coffee shop rainy afternoon", "☕", "rainy", 132),
-        ("umbrella-walk",   "Slow Walk Home",     "Chill lo-fi beats for a slow rainy city walk", "🚶", "chill", 117),
-        ("rain-pop",        "Emotional Pop",      "Sad pop anthems and heartfelt ballads for the rain", "💧", "rainy", 101),
-        ("thunder-heart",   "Drama & Thunder",    "Cinematic and intense — when the sky breaks open", "⛈️", "stormy", 127),
+        ("rainy-window",    "Rainy Day Feels",    "Soft indie & acoustic for grey skies and slow thoughts", "🌧️", "rainy", 168),
+        ("midnight-rain",   "Midnight Drive",     "R&B and indie for late-night rainy city drives", "🚕", "melancholy", 174),
+        ("cozy-indoor",     "Stay Inside",        "Warm acoustic and folk for a cozy day indoors", "🕯️", "cozy", 159),
+        ("after-rain",      "After the Storm",    "Hopeful indie tracks — when the clouds start to clear", "☔", "melancholy", 171),
+        ("storm-journal",   "Deep Focus",         "Introspective indie & piano for writing and thinking", "📖", "rainy", 156),
+        ("grey-day-soul",   "Soul & Blues",       "Soulful R&B for heavy grey skies", "🖤", "melancholy", 163),
+        ("cafe-rain",       "Cafe Playlist",      "Soft indie & acoustic for a coffee shop rainy afternoon", "🎵", "rainy", 182),
+        ("umbrella-walk",   "Slow Walk Home",     "Chill lo-fi beats for a slow rainy city walk", "🚶", "chill", 167),
+        ("rain-pop",        "Emotional Pop",      "Sad pop anthems and heartfelt ballads for the rain", "💧", "rainy", 151),
+        ("thunder-heart",   "Drama & Thunder",    "Cinematic and intense — when the sky breaks open", "⛈️", "stormy", 177),
     ],
     "snow": [
-        ("snow-day",        "Snow Day",           "Soft melodies and indie for quiet white mornings", "❄️", "cozy", 124),
-        ("winter-night-drive","Night Drive",      "Dark indie and atmospheric tracks for snowy night drives", "🌙", "cozy", 118),
-        ("indoor-warmth",   "Cozy Inside",        "Jazz, indie and soul for staying warm indoors", "☕", "calm", 131),
-        ("frosted-pop",     "Winter Pop",         "Cold air indie-pop with icy synths and bright hooks", "🧊", "calm", 108),
-        ("snowfall-piano",  "Piano & Snow",       "Soft piano and classical pieces for watching it snow", "🎹", "calm", 104),
-        ("midnight-frost",  "Late Night Winter",  "Dreamy electronic and ambient for frosty after-midnight", "🌌", "dreamy", 119),
-        ("winter-letters",  "Bittersweet",        "Emotional indie ballads and singer-songwriter gems", "💌", "melancholy", 112),
-        ("home-blanket",    "Under a Blanket",    "Gentle acoustic folk for warmth, tea, and soft light", "🧣", "cozy", 137),
-        ("ice-lights",      "Frozen Lights",      "Shimmering electronic beats for cold clear winter nights", "💎", "calm", 103),
-        ("quiet-december",  "Still December",     "Minimal and ambient — the quiet of a cold winter day", "🕊️", "cozy", 114),
+        ("snow-day",        "Snow Day",           "Soft melodies and indie for quiet white mornings", "❄️", "cozy", 174),
+        ("winter-night-drive","Night Drive",      "Dark indie and atmospheric tracks for snowy night drives", "🌙", "cozy", 168),
+        ("indoor-warmth",   "Cozy Inside",        "Jazz, indie and soul for staying warm indoors", "🛋️", "calm", 181),
+        ("frosted-pop",     "Winter Pop",         "Cold air indie-pop with icy synths and bright hooks", "🧊", "calm", 158),
+        ("snowfall-piano",  "Piano & Snow",       "Soft piano and classical pieces for watching it snow", "🎹", "calm", 154),
+        ("midnight-frost",  "Late Night Winter",  "Dreamy electronic and ambient for frosty after-midnight", "🌌", "dreamy", 169),
+        ("winter-letters",  "Bittersweet",        "Emotional indie ballads and singer-songwriter gems", "💌", "melancholy", 162),
+        ("home-blanket",    "Under a Blanket",    "Gentle acoustic folk for warmth, tea, and soft light", "🧣", "cozy", 187),
+        ("ice-lights",      "Frozen Lights",      "Shimmering electronic beats for cold clear winter nights", "💎", "calm", 153),
+        ("quiet-december",  "Still December",     "Minimal and ambient — the quiet of a cold winter day", "🕊️", "cozy", 164),
     ],
     "clouds": [
-        ("cloud-nine",      "Head in the Clouds", "Dreamy indie pop for a light overcast day", "☁️", "cloudy", 123),
-        ("grey-sky-blues",  "Soul & Overcast",    "Soulful R&B and blues for heavy grey skies", "🌫️", "melancholy", 116),
-        ("mellow-mood",     "Slow & Mellow",      "Easy R&B, soft pop and neo-soul for a slow day", "🫧", "chill", 111),
-        ("soft-commute",    "Commute Chill",      "Calm indie and acoustic for your morning commute", "🚇", "chill", 102),
-        ("floating-afternoon","Dream Pop",        "Shoegaze and dream-pop for a cloudy afternoon in bed", "🪁", "dreamy", 119),
-        ("silver-light",    "Soft Focus",         "Bright indie pop for silver overcast afternoons", "🩶", "cloudy", 105),
-        ("lazy-sunday-clouds","Day Off Vibes",     "Lo-fi hip-hop and chill beats for a slow cloudy day off", "🛋️", "chill", 129),
-        ("window-seat",     "Study & Relax",      "Lo-fi and chill — perfect for studying or chilling out", "🪟", "cloudy", 113),
-        ("blue-grey",       "Deep Atmosphere",    "Electronic and ambient for heavy, moody overcast skies", "🌁", "dreamy", 120),
-        ("drift-state",     "Drift Away",         "Slow atmospheric and post-rock for a quiet grey day", "🌊", "cloudy", 118),
+        ("cloud-nine",      "Head in the Clouds", "Dreamy indie pop for a light overcast day", "☁️", "cloudy", 173),
+        ("grey-sky-blues",  "Soul & Overcast",    "Soulful R&B and blues for heavy grey skies", "🌫️", "melancholy", 166),
+        ("mellow-mood",     "Slow & Mellow",      "Easy R&B, soft pop and neo-soul for a slow day", "🫧", "chill", 161),
+        ("soft-commute",    "Commute Chill",      "Calm indie and acoustic for your morning commute", "🚇", "chill", 152),
+        ("floating-afternoon","Dream Pop",        "Shoegaze and dream-pop for a cloudy afternoon in bed", "🪁", "dreamy", 169),
+        ("silver-light",    "Soft Focus",         "Bright indie pop for silver overcast afternoons", "🩶", "cloudy", 155),
+        ("lazy-sunday-clouds","Day Off Vibes",     "Lo-fi hip-hop and chill beats for a slow cloudy day off", "🛋️", "chill", 179),
+        ("window-seat",     "Study & Relax",      "Lo-fi and chill — perfect for studying or chilling out", "🪟", "cloudy", 163),
+        ("blue-grey",       "Deep Atmosphere",    "Electronic and ambient for heavy, moody overcast skies", "🌁", "dreamy", 170),
+        ("drift-state",     "Drift Away",         "Slow atmospheric and post-rock for a quiet grey day", "🌊", "cloudy", 168),
     ],
     "storm": [
-        ("electric-sky",    "Storm Energy",       "High-voltage rock and electric pop for heavy weather", "⚡", "stormy", 132),
-        ("aftershock",      "Dark Drive",         "Alternative and synth punk for dark stormy roads", "🛣️", "intense", 121),
-        ("pressure-drop",   "Heavy Skies",        "Hard rock and alternative for serious storm energy", "🌩️", "stormy", 116),
-        ("night-static",    "Night Static",       "Industrial electronic and dark synth under thunder", "📡", "intense", 109),
-        ("loud-weather",    "Turn It Up",         "Loud rock, metal and alternative for heavy weather", "🥁", "stormy", 127),
-        ("black-cloud-run", "Fast & Dark",        "Punk rock and hard alternative — run through the storm", "🏃", "intense", 114),
-        ("neon-storm",      "Neon Nights",        "Dark synth-pop and electro for city storm nights", "🌃", "stormy", 123),
-        ("signal-break",    "Post-Rock Signal",   "Experimental and post-rock for fractured heavy moods", "📻", "intense", 105),
-        ("storm-window",    "Watch It Pass",      "Cinematic and dramatic — intense but beautiful", "🪟", "melancholy", 110),
-        ("thunderline",     "Bass & Thunder",     "Electronic bass and drops that hit like thunder", "🎚️", "stormy", 119),
+        ("electric-sky",    "Storm Energy",       "High-voltage rock and electric pop for heavy weather", "⚡", "stormy", 182),
+        ("aftershock",      "Dark Drive",         "Alternative and synth punk for dark stormy roads", "🛣️", "intense", 171),
+        ("pressure-drop",   "Heavy Skies",        "Hard rock and alternative for serious storm energy", "🌩️", "stormy", 166),
+        ("night-static",    "Night Static",       "Industrial electronic and dark synth under thunder", "📡", "intense", 159),
+        ("loud-weather",    "Turn It Up",         "Loud rock, metal and alternative for heavy weather", "🥁", "stormy", 177),
+        ("black-cloud-run", "Fast & Dark",        "Punk rock and hard alternative — run through the storm", "🏃", "intense", 164),
+        ("neon-storm",      "Neon Nights",        "Dark synth-pop and electro for city storm nights", "🌃", "stormy", 173),
+        ("signal-break",    "Post-Rock Signal",   "Experimental and post-rock for fractured heavy moods", "📻", "intense", 155),
+        ("storm-window",    "Watch It Pass",      "Cinematic and dramatic — intense but beautiful", "🪟", "melancholy", 160),
+        ("thunderline",     "Bass & Thunder",     "Electronic bass and drops that hit like thunder", "🎚️", "stormy", 169),
     ],
     "mist": [
-        ("fog-lights",      "Fog & Dream",        "Dream pop and ethereal indie for hazy morning light", "🌫️", "foggy", 117),
-        ("haze-walk",       "Misty Morning",      "Lo-fi and mellow beats for a soft hazy start", "🚶", "dreamy", 105),
-        ("ghost-trails",    "Ethereal & Dark",    "Atmospheric and ambient for deep foggy moods", "👣", "dreamy", 122),
-        ("quiet-signals",   "Minimal Ambient",    "Subtle electronic textures for a quiet misty day", "📶", "foggy", 113),
-        ("silver-mist",     "Soft & Gentle",      "Dreamy soft pop and gentle indie for misty calm", "🩶", "calm", 108),
-        ("soft-focus",      "Blur & Breathe",     "Shoegaze and fuzzy dream-pop for soft foggy mornings", "📷", "dreamy", 120),
-        ("early-fog",       "Early Morning",      "Folk and acoustic for a quiet muted morning start", "🌁", "foggy", 111),
-        ("moon-haze",       "Midnight Mist",      "Dreamy indie and night-time sounds through the fog", "🌙", "dreamy", 119),
-        ("dim-city",        "City After Dark",    "Urban hip-hop and lo-fi for night city in the haze", "🏙️", "chill", 115),
-        ("mist-room",       "Ambient Room",       "Warm ambient and instrumental for space to think", "🕯️", "calm", 124),
+        ("fog-lights",      "Fog & Dream",        "Dream pop and ethereal indie for hazy morning light", "🌫️", "foggy", 167),
+        ("haze-walk",       "Misty Morning",      "Lo-fi and mellow beats for a soft hazy start", "🚶", "dreamy", 155),
+        ("ghost-trails",    "Ethereal & Dark",    "Atmospheric and ambient for deep foggy moods", "👣", "dreamy", 172),
+        ("quiet-signals",   "Minimal Ambient",    "Subtle electronic textures for a quiet misty day", "📶", "foggy", 163),
+        ("silver-mist",     "Soft & Gentle",      "Dreamy soft pop and gentle indie for misty calm", "🩶", "calm", 158),
+        ("soft-focus",      "Blur & Breathe",     "Shoegaze and fuzzy dream-pop for soft foggy mornings", "📷", "dreamy", 170),
+        ("early-fog",       "Early Morning",      "Folk and acoustic for a quiet muted morning start", "🌁", "foggy", 161),
+        ("moon-haze",       "Midnight Mist",      "Dreamy indie and night-time sounds through the fog", "🌙", "dreamy", 169),
+        ("dim-city",        "City After Dark",    "Urban hip-hop and lo-fi for night city in the haze", "🏙️", "chill", 165),
+        ("mist-room",       "Ambient Room",       "Warm ambient and instrumental for space to think", "🕯️", "calm", 174),
     ],
 }
 
@@ -168,75 +169,77 @@ PLAYLIST_SEARCH_QUERIES: dict[str, str] = {
     "mist-room":           "Nils Frahm",
 }
 
-# ─── 5 artists per playlist → frontend does 5 parallel searches → ~100 tracks ──
+# ─── Seed artists per playlist ────────────────────────────────────────────────
+# Frontend expands these with local weather seed pools and caps each artist at 4
+# tracks, so every weather playlist can be filled with 200+ varied tracks.
 
 PLAYLIST_ARTIST_QUERIES: dict[str, list[str]] = {
     # clear — energetic, pop, feel-good
-    "sunrise-glow":        ["Dua Lipa", "Lizzo", "Katy Perry", "Nicki Minaj", "Bebe Rexha"],
-    "golden-hour":         ["Harry Styles", "Rex Orange County", "Conan Gray", "Omar Apollo", "Still Woozy"],
-    "summer-hits":         ["Olivia Rodrigo", "Doja Cat", "Ariana Grande", "Justin Bieber", "Selena Gomez"],
-    "blue-sky":            ["Pharrell Williams", "Bruno Mars", "Zara Larsson", "Sigrid", "Ava Max"],
-    "daylight-vibes":      ["Charlie Puth", "Jason Derulo", "Maroon 5", "Shawn Mendes", "Camila Cabello"],
-    "clear-morning":       ["Ed Sheeran", "James Arthur", "Sam Smith", "Lewis Capaldi", "Tom Odell"],
-    "city-sun":            ["Bruno Mars", "Anderson Paak", "Janelle Monae", "Childish Gambino", "Khalid"],
-    "weekend-radiance":    ["Taylor Swift", "Sabrina Carpenter", "Gracie Abrams", "Conan Gray", "girl in red"],
-    "patio-dreams":        ["Jack Johnson", "Ben Harper", "Jason Mraz", "John Mayer", "Mat Kearney"],
-    "afterglow-pop":       ["The 1975", "Glass Animals", "MGMT", "Phoenix", "Two Door Cinema Club"],
+    "sunrise-glow":        ["Dua Lipa", "Lizzo", "Katy Perry", "Nicki Minaj", "Bebe Rexha", "Meghan Trainor", "Cardi B", "Kesha", "Iggy Azalea", "Doja Cat"],
+    "golden-hour":         ["Harry Styles", "Rex Orange County", "Conan Gray", "Omar Apollo", "Still Woozy", "Dominic Fike", "Tai Verdes", "role model", "Wallows", "beabadoobee"],
+    "summer-hits":         ["Olivia Rodrigo", "Doja Cat", "Ariana Grande", "Justin Bieber", "Selena Gomez", "Sabrina Carpenter", "Camila Cabello", "Lizzo", "Normani", "Ava Max"],
+    "blue-sky":            ["Pharrell Williams", "Bruno Mars", "Zara Larsson", "Sigrid", "Ava Max", "Bebe Rexha", "Dua Lipa", "Meghan Trainor", "Jason Derulo", "Flo Rida"],
+    "daylight-vibes":      ["Charlie Puth", "Jason Derulo", "Maroon 5", "Shawn Mendes", "Camila Cabello", "Ne-Yo", "Robin Thicke", "Flo Rida", "Pitbull", "Carly Rae Jepsen"],
+    "clear-morning":       ["Ed Sheeran", "James Arthur", "Sam Smith", "Lewis Capaldi", "Tom Odell", "Calum Scott", "George Ezra", "JP Cooper", "Passenger", "Tom Gregory"],
+    "city-sun":            ["Bruno Mars", "Anderson Paak", "Janelle Monae", "Childish Gambino", "Khalid", "H.E.R.", "Lizzo", "Silk Sonic", "PinkPantheress", "Wet Leg"],
+    "weekend-radiance":    ["Taylor Swift", "Sabrina Carpenter", "Gracie Abrams", "Conan Gray", "girl in red", "Billie Eilish", "Olivia Rodrigo", "Phoebe Bridgers", "Clairo", "Soccer Mommy"],
+    "patio-dreams":        ["Jack Johnson", "Ben Harper", "Jason Mraz", "John Mayer", "Mat Kearney", "Dave Matthews Band", "Sheryl Crow", "James Taylor", "Bob Marley", "OAR"],
+    "afterglow-pop":       ["The 1975", "Glass Animals", "MGMT", "Phoenix", "Two Door Cinema Club", "Foster the People", "Passion Pit", "Young the Giant", "Grouplove", "Ra Ra Riot"],
     # rain — moody, emotional, r&b
-    "rainy-window":        ["Lana Del Rey", "Lorde", "Clairo", "Soccer Mommy", "beabadoobee"],
-    "midnight-rain":       ["The Weeknd", "Drake", "SZA", "PARTYNEXTDOOR", "6LACK"],
-    "cozy-indoor":         ["Bon Iver", "Fleet Foxes", "The National", "Sufjan Stevens", "Pinegrove"],
-    "after-rain":          ["Phoebe Bridgers", "Julien Baker", "Lucy Dacus", "Angel Olsen", "Mitski"],
-    "storm-journal":       ["Arvo Part", "Nick Cave", "Joanna Newsom", "Tim Hecker", "William Basinski"],
-    "grey-day-soul":       ["Amy Winehouse", "Adele", "Sam Smith", "Duffy", "Corinne Bailey Rae"],
-    "cafe-rain":           ["Norah Jones", "Diana Krall", "Feist", "Madeleine Peyroux", "Katie Melua"],
-    "umbrella-walk":       ["Nujabes", "J Dilla", "Madlib", "Knxwledge", "Mick Jenkins"],
-    "rain-pop":            ["Billie Eilish", "Olivia Rodrigo", "Gracie Abrams", "Remi Wolf", "Caroline Polachek"],
-    "thunder-heart":       ["Linkin Park", "Imagine Dragons", "Twenty One Pilots", "Paramore", "Fall Out Boy"],
+    "rainy-window":        ["Lana Del Rey", "Lorde", "Clairo", "Soccer Mommy", "beabadoobee", "Snail Mail", "Mitski", "Angel Olsen", "Japanese Breakfast", "Big Thief"],
+    "midnight-rain":       ["The Weeknd", "Drake", "SZA", "PARTYNEXTDOOR", "6LACK", "Daniel Caesar", "H.E.R.", "Summer Walker", "Jhene Aiko", "Kehlani"],
+    "cozy-indoor":         ["Bon Iver", "Fleet Foxes", "The National", "Sufjan Stevens", "Pinegrove", "Iron and Wine", "Gregory Alan Isakov", "Novo Amor", "Adrianne Lenker", "Cass McCombs"],
+    "after-rain":          ["Phoebe Bridgers", "Julien Baker", "Lucy Dacus", "Angel Olsen", "Mitski", "Soccer Mommy", "Snail Mail", "Japanese Breakfast", "Hand Habits", "Hazel English"],
+    "storm-journal":       ["Nick Cave", "Scott Walker", "Mark Lanegan", "Tim Hecker", "William Basinski", "Stars of the Lid", "Johann Johannsson", "Arvo Part", "Max Richter", "Nils Frahm"],
+    "grey-day-soul":       ["Amy Winehouse", "Adele", "Sam Smith", "Duffy", "Corinne Bailey Rae", "Joss Stone", "Leona Lewis", "Birdy", "Paloma Faith", "London Grammar"],
+    "cafe-rain":           ["Norah Jones", "Diana Krall", "Feist", "Madeleine Peyroux", "Katie Melua", "Corrine Bailey Rae", "Melody Gardot", "Stacey Kent", "Molly Johnson", "Eva Cassidy"],
+    "umbrella-walk":       ["Nujabes", "J Dilla", "Madlib", "Knxwledge", "Mick Jenkins", "Mac Miller", "Oddisee", "Blockhead", "Blu", "Apollo Brown"],
+    "rain-pop":            ["Billie Eilish", "Olivia Rodrigo", "Gracie Abrams", "Remi Wolf", "Caroline Polachek", "Carly Rae Jepsen", "girl in red", "Clairo", "beabadoobee", "Wet Leg"],
+    "thunder-heart":       ["Linkin Park", "Imagine Dragons", "Twenty One Pilots", "Paramore", "Fall Out Boy", "My Chemical Romance", "Panic at the Disco", "Bring Me the Horizon", "Halsey", "Tove Lo"],
     # snow — cozy, calm, introspective
-    "snow-day":            ["Fleet Foxes", "Sufjan Stevens", "Gregory Alan Isakov", "Wilco", "Iron and Wine"],
-    "winter-night-drive":  ["Radiohead", "Thom Yorke", "Portishead", "Massive Attack", "Burial"],
-    "indoor-warmth":       ["John Coltrane", "Miles Davis", "Bill Evans", "Thelonious Monk", "Herbie Hancock"],
-    "frosted-pop":         ["Arcade Fire", "Tame Impala", "Unknown Mortal Orchestra", "Mac DeMarco", "Kurt Vile"],
-    "snowfall-piano":      ["Ludovico Einaudi", "Max Richter", "Nils Frahm", "Olafur Arnalds", "Hauschka"],
-    "midnight-frost":      ["Tycho", "Bonobo", "Emancipator", "Com Truise", "Washed Out"],
-    "winter-letters":      ["Iron and Wine", "Jose Gonzalez", "Big Thief", "Adrianne Lenker", "Damien Rice"],
-    "home-blanket":        ["Jose Gonzalez", "Gregory Alan Isakov", "Angus and Julia Stone", "Novo Amor", "Ben Howard"],
-    "ice-lights":          ["Jon Hopkins", "Four Tet", "Rival Consoles", "Olafur Arnalds", "Kiasmos"],
-    "quiet-december":      ["Max Richter", "Brian Eno", "Arvo Part", "Johann Johannsson", "Stars of the Lid"],
+    "snow-day":            ["Fleet Foxes", "Sufjan Stevens", "Gregory Alan Isakov", "Wilco", "Iron and Wine", "Bon Iver", "The Tallest Man on Earth", "Novo Amor", "Pinegrove", "American Football"],
+    "winter-night-drive":  ["Radiohead", "Thom Yorke", "Portishead", "Massive Attack", "Burial", "The xx", "James Blake", "Mount Kimbie", "Four Tet", "Nicolas Jaar"],
+    "indoor-warmth":       ["John Coltrane", "Miles Davis", "Bill Evans", "Thelonious Monk", "Herbie Hancock", "Charles Mingus", "Dave Brubeck", "Chet Baker", "Clifford Brown", "Oscar Peterson"],
+    "frosted-pop":         ["Arcade Fire", "Tame Impala", "Unknown Mortal Orchestra", "Mac DeMarco", "Kurt Vile", "War on Drugs", "Real Estate", "Wild Nothing", "Beach Fossils", "Alvvays"],
+    "snowfall-piano":      ["Ludovico Einaudi", "Max Richter", "Nils Frahm", "Olafur Arnalds", "Hauschka", "Johann Johannsson", "Yann Tiersen", "Dustin O'Halloran", "Peter Broderick", "Ola Gjeilo"],
+    "midnight-frost":      ["Tycho", "Bonobo", "Emancipator", "Com Truise", "Washed Out", "Toro y Moi", "Wild Nothing", "Neon Indian", "Warpaint", "Still Woozy"],
+    "winter-letters":      ["Iron and Wine", "Jose Gonzalez", "Big Thief", "Adrianne Lenker", "Damien Rice", "Ben Howard", "Nick Drake", "Elliott Smith", "Bill Callahan", "Songs of the Plains"],
+    "home-blanket":        ["Jose Gonzalez", "Gregory Alan Isakov", "Angus and Julia Stone", "Novo Amor", "Ben Howard", "Daughter", "James Vincent McMorrow", "Sleeping at Last", "JP Cooper", "Tom Rosenthal"],
+    "ice-lights":          ["Jon Hopkins", "Four Tet", "Rival Consoles", "Olafur Arnalds", "Kiasmos", "Clark", "Moderat", "Nils Frahm", "Arca", "Max Cooper"],
+    "quiet-december":      ["Max Richter", "Brian Eno", "Arvo Part", "Johann Johannsson", "Stars of the Lid", "William Basinski", "Tim Hecker", "Harold Budd", "Fennesz", "Taylor Deupree"],
     # clouds — indie, dream pop, neo-soul
-    "cloud-nine":          ["Tame Impala", "Beach House", "MGMT", "Unknown Mortal Orchestra", "Mild High Club"],
-    "grey-sky-blues":      ["D'Angelo", "Maxwell", "Lauryn Hill", "Sade", "Angie Stone"],
-    "mellow-mood":         ["Frank Ocean", "SZA", "Daniel Caesar", "H.E.R.", "Summer Walker"],
-    "soft-commute":        ["Mac DeMarco", "Mild High Club", "Men I Trust", "Homeshake", "Alex G"],
-    "floating-afternoon":  ["Beach House", "Galaxie 500", "Cocteau Twins", "Pale Saints", "Julee Cruise"],
-    "silver-light":        ["Vampire Weekend", "Father John Misty", "Real Estate", "Beirut", "Rostam"],
-    "lazy-sunday-clouds":  ["Khalid", "Rex Orange County", "Still Woozy", "Omar Apollo", "Dominic Fike"],
-    "window-seat":         ["Erykah Badu", "Jill Scott", "India Arie", "Bilal", "Meshell Ndegeocello"],
-    "blue-grey":           ["James Blake", "Bon Iver", "William Fitzsimmons", "Daughter", "Mt. Wolf"],
-    "drift-state":         ["Explosions in the Sky", "Sigur Ros", "This Will Destroy You", "Mogwai", "65daysofstatic"],
+    "cloud-nine":          ["Tame Impala", "Beach House", "MGMT", "Unknown Mortal Orchestra", "Mild High Club", "Men I Trust", "Homeshake", "Connan Mockasin", "Still Woozy", "Alex G"],
+    "grey-sky-blues":      ["D'Angelo", "Maxwell", "Lauryn Hill", "Sade", "Angie Stone", "Erykah Badu", "Jill Scott", "India Arie", "Musiq Soulchild", "Anthony Hamilton"],
+    "mellow-mood":         ["Frank Ocean", "SZA", "Daniel Caesar", "H.E.R.", "Summer Walker", "Jhene Aiko", "Kehlani", "6LACK", "Lucky Daye", "Masego"],
+    "soft-commute":        ["Mac DeMarco", "Mild High Club", "Men I Trust", "Homeshake", "Alex G", "Connan Mockasin", "Real Estate", "Beach Fossils", "Wild Nothing", "Tops"],
+    "floating-afternoon":  ["Beach House", "Galaxie 500", "Cocteau Twins", "Pale Saints", "Julee Cruise", "Mazzy Star", "Slowdive", "Grouper", "Warpaint", "Broadcast"],
+    "silver-light":        ["Vampire Weekend", "Father John Misty", "Real Estate", "Beirut", "Rostam", "Cass McCombs", "Grizzly Bear", "Fleet Foxes", "Wild Nothing", "Whitney"],
+    "lazy-sunday-clouds":  ["Khalid", "Rex Orange County", "Still Woozy", "Omar Apollo", "Dominic Fike", "Conan Gray", "role model", "Tai Verdes", "Joshua Bassett", "d4vd"],
+    "window-seat":         ["Erykah Badu", "Jill Scott", "India Arie", "Bilal", "Meshell Ndegeocello", "D'Angelo", "Maxwell", "Sade", "Lauryn Hill", "Heather Headley"],
+    "blue-grey":           ["James Blake", "Bon Iver", "William Fitzsimmons", "Daughter", "Mt. Wolf", "Banks", "London Grammar", "Lykke Li", "Agnes Obel", "Aurora"],
+    "drift-state":         ["Explosions in the Sky", "Sigur Ros", "This Will Destroy You", "Mogwai", "65daysofstatic", "Mono", "Russian Circles", "Caspian", "And So I Watch You from Afar", "Toe"],
     # storm — rock, electronic, intense
-    "electric-sky":        ["Imagine Dragons", "Bastille", "X Ambassadors", "OneRepublic", "Halsey"],
-    "aftershock":          ["Twenty One Pilots", "Panic at the Disco", "My Chemical Romance", "Fall Out Boy", "Paramore"],
-    "pressure-drop":       ["Muse", "Queens of the Stone Age", "Foo Fighters", "Royal Blood", "Nothing But Thieves"],
-    "night-static":        ["Nine Inch Nails", "Marilyn Manson", "Filter", "HEALTH", "Crystal Castles"],
-    "loud-weather":        ["Metallica", "Slipknot", "System of a Down", "Foo Fighters", "Disturbed"],
-    "black-cloud-run":     ["Green Day", "Sum 41", "Blink-182", "The Offspring", "Good Charlotte"],
-    "neon-storm":          ["The Midnight", "FM-84", "Timecop1983", "Night Drive", "Dana Jean Phoenix"],
-    "signal-break":        ["Mogwai", "Explosions in the Sky", "This Will Destroy You", "Mono", "Russian Circles"],
-    "storm-window":        ["Hans Zimmer", "Ennio Morricone", "Howard Shore", "Junkie XL", "Ramin Djawadi"],
-    "thunderline":         ["Skrillex", "Deadmau5", "Knife Party", "Feed Me", "Kill the Noise"],
+    "electric-sky":        ["Imagine Dragons", "Bastille", "X Ambassadors", "OneRepublic", "Halsey", "Coldplay", "Maroon 5", "The Script", "Train", "Walk the Moon"],
+    "aftershock":          ["Twenty One Pilots", "Panic at the Disco", "My Chemical Romance", "Fall Out Boy", "Paramore", "All Time Low", "Sleeping with Sirens", "Pierce the Veil", "A Day to Remember", "Neck Deep"],
+    "pressure-drop":       ["Muse", "Queens of the Stone Age", "Foo Fighters", "Royal Blood", "Nothing But Thieves", "Biffy Clyro", "Wolf Alice", "Refused", "Thrice", "Deftones"],
+    "night-static":        ["Nine Inch Nails", "Marilyn Manson", "Filter", "HEALTH", "Crystal Castles", "Zola Jesus", "Cold Cave", "Boy Harsher", "Light Asylum", "TR/ST"],
+    "loud-weather":        ["Metallica", "Slipknot", "System of a Down", "Foo Fighters", "Disturbed", "Tool", "Korn", "Linkin Park", "Rage Against the Machine", "Audioslave"],
+    "black-cloud-run":     ["Green Day", "Sum 41", "Blink-182", "The Offspring", "Good Charlotte", "Simple Plan", "New Found Glory", "Yellowcard", "Less Than Jake", "Mest"],
+    "neon-storm":          ["The Midnight", "FM-84", "Timecop1983", "Night Drive", "Dana Jean Phoenix", "Carpenter Brut", "Perturbator", "Gunship", "College", "Electric Youth"],
+    "signal-break":        ["Mogwai", "Explosions in the Sky", "This Will Destroy You", "Mono", "Russian Circles", "GYBE", "65daysofstatic", "Caspian", "Tortoise", "Slint"],
+    "storm-window":        ["Hans Zimmer", "Ennio Morricone", "Howard Shore", "Junkie XL", "Ramin Djawadi", "John Williams", "Daft Punk", "Trent Reznor", "Atticus Ross", "Cliff Martinez"],
+    "thunderline":         ["Skrillex", "Deadmau5", "Knife Party", "Feed Me", "Kill the Noise", "Flux Pavilion", "Borgore", "Excision", "Doctor P", "Datsik"],
     # mist — ethereal, dreamy, atmospheric
-    "fog-lights":          ["Mazzy Star", "Grouper", "Julee Cruise", "Low", "Cranes"],
-    "haze-walk":           ["Chillhop Music", "Idealism", "Philanthrope", "Sagun", "Lofi Girl"],
-    "ghost-trails":        ["Portishead", "Massive Attack", "Tricky", "Lamb", "Morcheeba"],
-    "quiet-signals":       ["Brian Eno", "Harold Budd", "Tangerine Dream", "Stars of the Lid", "Tim Hecker"],
-    "silver-mist":         ["Cigarettes After Sex", "Mark Hollis", "Cocteau Twins", "Slowdive", "Mazzy Star"],
-    "soft-focus":          ["My Bloody Valentine", "Slowdive", "Ride", "Chapterhouse", "Lush"],
-    "early-fog":           ["Nick Drake", "Elliott Smith", "Damien Rice", "Bill Callahan", "Bert Jansch"],
-    "moon-haze":           ["Washed Out", "Toro y Moi", "Neon Indian", "Memory Tapes", "Small Black"],
-    "dim-city":            ["J Cole", "Kendrick Lamar", "Isaiah Rashad", "Vince Staples", "Earl Sweatshirt"],
-    "mist-room":           ["Nils Frahm", "William Basinski", "Johann Johannsson", "Harold Budd", "Hauschka"],
+    "fog-lights":          ["Mazzy Star", "Grouper", "Julee Cruise", "Low", "Cranes", "Beach House", "Cocteau Twins", "Slowdive", "Warpaint", "Portishead"],
+    "haze-walk":           ["Chillhop Music", "Idealism", "Philanthrope", "Sagun", "Lofi Girl", "Jinsang", "Kupla", "Jazzinuf", "Sleepy Fish", "Purrple Cat"],
+    "ghost-trails":        ["Portishead", "Massive Attack", "Tricky", "Lamb", "Morcheeba", "Sneaker Pimps", "Hooverphonic", "Archive", "Moloko", "Zero 7"],
+    "quiet-signals":       ["Brian Eno", "Harold Budd", "Tangerine Dream", "Stars of the Lid", "Tim Hecker", "Fennesz", "William Basinski", "The Caretaker", "Grouper", "Arvo Part"],
+    "silver-mist":         ["Cigarettes After Sex", "Mazzy Star", "Cocteau Twins", "Slowdive", "Ride", "Chapterhouse", "Lush", "Pale Saints", "Beach House", "Wild Nothing"],
+    "soft-focus":          ["My Bloody Valentine", "Slowdive", "Ride", "Chapterhouse", "Lush", "Pale Saints", "Fleeting Joys", "Nothing", "Whirr", "Ringo Deathstarr"],
+    "early-fog":           ["Nick Drake", "Elliott Smith", "Damien Rice", "Bill Callahan", "Bert Jansch", "John Martyn", "Tim Buckley", "Fred Neil", "Jackson C. Frank", "Michael Hurley"],
+    "moon-haze":           ["Washed Out", "Toro y Moi", "Neon Indian", "Memory Tapes", "Small Black", "Nite Jewel", "Ducktails", "Connan Mockasin", "Mild High Club", "Men I Trust"],
+    "dim-city":            ["J Cole", "Kendrick Lamar", "Isaiah Rashad", "Vince Staples", "Earl Sweatshirt", "Joey Bada$$", "ScHoolboy Q", "Ab-Soul", "Danny Brown", "Open Mike Eagle"],
+    "mist-room":           ["Nils Frahm", "William Basinski", "Johann Johannsson", "Harold Budd", "Hauschka", "Max Richter", "Olafur Arnalds", "Peter Broderick", "Dustin O'Halloran", "Ola Gjeilo"],
 }
 
 # ─── Cloud-specific colour palettes (10 entries, one per playlist slot) ────────
@@ -380,7 +383,7 @@ def _playlist_payloads(condition: str, total_listeners: int, weather: dict | Non
                 "emoji": emoji,
                 "mood": mood,
                 "weather_key": normalized,
-                "track_count": track_count,
+                "track_count": max(220, track_count),
                 "listeners_count": listener_count,
                 "accent_start": primary,
                 "accent_end": secondary,
@@ -393,14 +396,18 @@ def _playlist_payloads(condition: str, total_listeners: int, weather: dict | Non
     return payload
 
 
+_LISTENER_ACTIVE_SECS = 300  # 5 minutes considered "active"
+
 async def _listeners_count(redis, city: str) -> int:
-    return await redis.scard(f"weather:listeners:{city.lower()}")
+    cutoff = int(time.time()) - _LISTENER_ACTIVE_SECS
+    return await redis.zcount(f"weather:active:{city.lower()}", cutoff, "+inf")
 
 
 async def _get_top_listeners(redis, db: AsyncSession, city: str, limit: int = 5) -> list[dict]:
     """Return up to `limit` listener profiles for a city from Redis + DB."""
     try:
-        member_strs = await redis.smembers(f"weather:listeners:{city.lower()}")
+        cutoff = int(time.time()) - _LISTENER_ACTIVE_SECS
+        member_strs = await redis.zrangebyscore(f"weather:active:{city.lower()}", cutoff, "+inf")
         ids = [int(s) for s in member_strs if str(s).lstrip("-").isdigit()]
         if not ids:
             return []
@@ -558,8 +565,10 @@ async def weather_playlist(
         await redis.setex(cache_key, WEATHER_PLAYLIST_CACHE_TTL, json.dumps(payload))
 
     listener_key = f"weather:listeners:{payload['city'].lower()}"
-    await redis.sadd(listener_key, current_user.id)
-    await redis.expire(listener_key, WEATHER_LISTENER_TTL)
+    now_ts = int(time.time())
+    await redis.zadd(listener_key, {str(current_user.id): now_ts})
+    await redis.zremrangebyscore(listener_key, 0, now_ts - _LISTENER_ACTIVE_SECS)
+    await redis.expire(listener_key, _LISTENER_ACTIVE_SECS * 2)
     listeners_count = await _listeners_count(redis, payload["city"])
 
     # For cloud scoring we need the raw weather snapshot

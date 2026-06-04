@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bottom_nav_bar.dart';
 import '../utils/show_snackbar.dart';
 
 const List<String> _tasteGenres = [
@@ -39,31 +40,431 @@ const List<String> _tasteGenres = [
 ];
 
 const Map<String, List<String>> _genreArtistSeeds = {
-  'pop': ['Taylor Swift', 'Dua Lipa', 'Ariana Grande', 'Sabrina Carpenter'],
-  'rock': ['Arctic Monkeys', 'Nirvana', 'Queen', 'Linkin Park'],
-  'indie rock': ['The Neighbourhood', 'The 1975', 'Tame Impala', 'Wallows'],
-  'alt pop': ['Billie Eilish', 'Lorde', 'Halsey', 'Melanie Martinez'],
-  'electronic': ['Daft Punk', 'Fred again..', 'Flume', 'Calvin Harris'],
-  'hip-hop': ['Travis Scott', 'Kendrick Lamar', 'Drake', 'Future'],
-  'r&b': ['SZA', 'The Weeknd', 'Frank Ocean', 'Brent Faiyaz'],
-  'jazz': ['Miles Davis', 'Chet Baker', 'Bill Evans', 'Nina Simone'],
-  'classical': ['Ludovico Einaudi', 'Hans Zimmer', 'Chopin', 'Mozart'],
-  'ambient': ['Brian Eno', 'Moby', 'Nils Frahm', 'Tycho'],
-  'lo-fi': ['Jinsang', 'idealism', 'Nujabes', 'potsu'],
-  'k-pop': ['NewJeans', 'BLACKPINK', 'BTS', 'Stray Kids', 'aespa'],
-  'latin': ['Bad Bunny', 'Rosalia', 'Karol G', 'Rauw Alejandro'],
-  'reggae': ['Bob Marley', 'Sean Paul', 'Shaggy', 'Protoje'],
-  'metal': ['Slipknot', 'Metallica', 'Deftones', 'Bring Me The Horizon'],
-  'punk': ['blink-182', 'Green Day', 'Paramore', 'Sum 41'],
-  'post-punk': ['Molchat Doma', 'Joy Division', 'The Cure', 'Кино'],
-  'alternative': ['Radiohead', 'Deftones', 'Muse', 'Placebo'],
-  'folk': ['Phoebe Bridgers', 'Bon Iver', 'Fleet Foxes', 'Noah Kahan'],
-  'country': ['Taylor Swift', 'Morgan Wallen', 'Kacey Musgraves', 'Luke Combs'],
-  'soul': ['Amy Winehouse', 'Adele', 'Sam Cooke', 'Leon Bridges'],
-  'house': ['FISHER', 'Peggy Gou', 'Disclosure', 'MK'],
-  'techno': ['Charlotte de Witte', 'Anyma', 'Amelie Lens', 'Boris Brejcha'],
-  'drum & bass': ['Chase & Status', 'Sub Focus', 'Pendulum', 'Dimension'],
-  'synthwave': ['The Midnight', 'Kavinsky', 'FM-84', 'Perturbator'],
+  'pop': [
+    'Taylor Swift',
+    'Dua Lipa',
+    'Ariana Grande',
+    'Sabrina Carpenter',
+    'Olivia Rodrigo',
+    'Billie Eilish',
+    'Harry Styles',
+    'Doja Cat',
+    'Selena Gomez',
+    'Miley Cyrus',
+    'Lady Gaga',
+    'Katy Perry',
+    'The Weeknd',
+    'SZA',
+    'Raye'
+  ],
+  'rock': [
+    'Arctic Monkeys',
+    'Nirvana',
+    'Queen',
+    'Linkin Park',
+    'Foo Fighters',
+    'Muse',
+    'The Killers',
+    'Red Hot Chili Peppers',
+    'Radiohead',
+    'Pearl Jam',
+    'The Strokes',
+    'Oasis',
+    'Kings of Leon',
+    'Nothing But Thieves',
+    'Royal Blood'
+  ],
+  'indie rock': [
+    'The Neighbourhood',
+    'The 1975',
+    'Tame Impala',
+    'Wallows',
+    'Mac DeMarco',
+    'Cage The Elephant',
+    'Vampire Weekend',
+    'Franz Ferdinand',
+    'Two Door Cinema Club',
+    'Interpol',
+    'Yeah Yeah Yeahs',
+    'The Kooks',
+    'Bloc Party',
+    'Alvvays',
+    'The Wombats'
+  ],
+  'alt pop': [
+    'Billie Eilish',
+    'Lorde',
+    'Halsey',
+    'Melanie Martinez',
+    'Lana Del Rey',
+    'Clairo',
+    'Conan Gray',
+    'Troye Sivan',
+    'Gracie Abrams',
+    'girl in red',
+    'Rina Sawayama',
+    'Caroline Polachek',
+    'MARINA',
+    'Charli XCX',
+    'FKA twigs'
+  ],
+  'electronic': [
+    'Daft Punk',
+    'Fred again..',
+    'Flume',
+    'Calvin Harris',
+    'Disclosure',
+    'Bonobo',
+    'Four Tet',
+    'ODESZA',
+    'The Chemical Brothers',
+    'Justice',
+    'Aphex Twin',
+    'Rufus Du Sol',
+    'Madeon',
+    'Porter Robinson',
+    'Bicep'
+  ],
+  'hip-hop': [
+    'Travis Scott',
+    'Kendrick Lamar',
+    'Drake',
+    'Future',
+    'J Cole',
+    'Tyler The Creator',
+    '21 Savage',
+    'Metro Boomin',
+    'A\$AP Rocky',
+    'Kid Cudi',
+    'Kanye West',
+    'Playboi Carti',
+    'Lil Uzi Vert',
+    'Mac Miller',
+    'Nas'
+  ],
+  'r&b': [
+    'SZA',
+    'The Weeknd',
+    'Frank Ocean',
+    'Brent Faiyaz',
+    'Daniel Caesar',
+    'H.E.R.',
+    'Summer Walker',
+    'Giveon',
+    'PARTYNEXTDOOR',
+    'Jhene Aiko',
+    'Khalid',
+    'Steve Lacy',
+    'Miguel',
+    'Bryson Tiller',
+    'Teyana Taylor'
+  ],
+  'jazz': [
+    'Miles Davis',
+    'Chet Baker',
+    'Bill Evans',
+    'Nina Simone',
+    'John Coltrane',
+    'Thelonious Monk',
+    'Herbie Hancock',
+    'Ella Fitzgerald',
+    'Louis Armstrong',
+    'Duke Ellington',
+    'Charlie Parker',
+    'Diana Krall',
+    'Norah Jones',
+    'Kamasi Washington',
+    'Snarky Puppy'
+  ],
+  'classical': [
+    'Ludovico Einaudi',
+    'Hans Zimmer',
+    'Chopin',
+    'Mozart',
+    'Max Richter',
+    'Nils Frahm',
+    'Olafur Arnalds',
+    'Yo-Yo Ma',
+    'Philip Glass',
+    'Antonio Vivaldi',
+    'Johann Sebastian Bach',
+    'Beethoven',
+    'Tchaikovsky',
+    'Ramin Djawadi',
+    'Ennio Morricone'
+  ],
+  'ambient': [
+    'Brian Eno',
+    'Moby',
+    'Nils Frahm',
+    'Tycho',
+    'Max Richter',
+    'Stars of the Lid',
+    'William Basinski',
+    'Tim Hecker',
+    'Hammock',
+    'Jon Hopkins',
+    'Harold Budd',
+    'Kiasmos',
+    'Loscil',
+    'Boards of Canada',
+    'Biosphere'
+  ],
+  'lo-fi': [
+    'Jinsang',
+    'idealism',
+    'Nujabes',
+    'potsu',
+    'Lofi Girl',
+    'Chillhop Music',
+    'Kupla',
+    'Tomppabeats',
+    'Philanthrope',
+    'Sagun',
+    'Aso',
+    'eevee',
+    'j^p^n',
+    'SwuM',
+    'bsd.u'
+  ],
+  'k-pop': [
+    'NewJeans',
+    'BLACKPINK',
+    'BTS',
+    'Stray Kids',
+    'aespa',
+    'LE SSERAFIM',
+    'TWICE',
+    'IVE',
+    'SEVENTEEN',
+    'EXO',
+    'Red Velvet',
+    'ITZY',
+    'NCT 127',
+    'ENHYPEN',
+    'TXT'
+  ],
+  'latin': [
+    'Bad Bunny',
+    'Rosalia',
+    'Karol G',
+    'Rauw Alejandro',
+    'J Balvin',
+    'Feid',
+    'Maluma',
+    'Shakira',
+    'Peso Pluma',
+    'Anitta',
+    'Ozuna',
+    'Daddy Yankee',
+    'Nathy Peluso',
+    'Manuel Turizo',
+    'Camilo'
+  ],
+  'reggae': [
+    'Bob Marley',
+    'Sean Paul',
+    'Shaggy',
+    'Protoje',
+    'Damian Marley',
+    'Burning Spear',
+    'Peter Tosh',
+    'Toots and The Maytals',
+    'Chronixx',
+    'Steel Pulse',
+    'Jimmy Cliff',
+    'UB40',
+    'Alborosie',
+    'Koffee',
+    'The Wailers'
+  ],
+  'metal': [
+    'Slipknot',
+    'Metallica',
+    'Deftones',
+    'Bring Me The Horizon',
+    'System of a Down',
+    'Rammstein',
+    'Avenged Sevenfold',
+    'Megadeth',
+    'Iron Maiden',
+    'Black Sabbath',
+    'Korn',
+    'Tool',
+    'Pantera',
+    'Disturbed',
+    'Gojira'
+  ],
+  'punk': [
+    'blink-182',
+    'Green Day',
+    'Paramore',
+    'Sum 41',
+    'The Offspring',
+    'My Chemical Romance',
+    'Sex Pistols',
+    'Ramones',
+    'The Clash',
+    'Bad Religion',
+    'Rancid',
+    'NOFX',
+    'Panic at the Disco',
+    'Fall Out Boy',
+    'Good Charlotte'
+  ],
+  'post-punk': [
+    'Molchat Doma',
+    'Joy Division',
+    'The Cure',
+    'Кино',
+    'Bauhaus',
+    'Siouxsie and the Banshees',
+    'Interpol',
+    'Fontaines D.C.',
+    'IDLES',
+    'The Smiths',
+    'New Order',
+    'Editors',
+    'Soviet Soviet',
+    'Drab Majesty',
+    'Lebanon Hanover'
+  ],
+  'alternative': [
+    'Radiohead',
+    'Deftones',
+    'Muse',
+    'Placebo',
+    'The Smashing Pumpkins',
+    'Pixies',
+    'Gorillaz',
+    'Cage The Elephant',
+    'Twenty One Pilots',
+    'My Chemical Romance',
+    'Paramore',
+    'Nothing But Thieves',
+    'The Cranberries',
+    'Incubus',
+    'Blur'
+  ],
+  'folk': [
+    'Phoebe Bridgers',
+    'Bon Iver',
+    'Fleet Foxes',
+    'Noah Kahan',
+    'Sufjan Stevens',
+    'Gregory Alan Isakov',
+    'Iron and Wine',
+    'Jose Gonzalez',
+    'Big Thief',
+    'Adrianne Lenker',
+    'Mumford and Sons',
+    'The Lumineers',
+    'Hozier',
+    'Damien Rice',
+    'Ben Howard'
+  ],
+  'country': [
+    'Taylor Swift',
+    'Morgan Wallen',
+    'Kacey Musgraves',
+    'Luke Combs',
+    'Chris Stapleton',
+    'Zach Bryan',
+    'Maren Morris',
+    'Dolly Parton',
+    'Carrie Underwood',
+    'Kane Brown',
+    'Shania Twain',
+    'Miranda Lambert',
+    'Tyler Childers',
+    'Lainey Wilson',
+    'Keith Urban'
+  ],
+  'soul': [
+    'Amy Winehouse',
+    'Adele',
+    'Sam Cooke',
+    'Leon Bridges',
+    'Aretha Franklin',
+    'Marvin Gaye',
+    'Otis Redding',
+    'Stevie Wonder',
+    'Etta James',
+    'Al Green',
+    "D'Angelo",
+    'Jorja Smith',
+    'Michael Kiwanuka',
+    'Sade',
+    'Curtis Mayfield'
+  ],
+  'house': [
+    'FISHER',
+    'Peggy Gou',
+    'Disclosure',
+    'MK',
+    'Purple Disco Machine',
+    'Dom Dolla',
+    'CamelPhat',
+    'Gorgon City',
+    'Chris Lake',
+    'Solomun',
+    'Duke Dumont',
+    'Meduza',
+    'Hot Since 82',
+    'Black Coffee',
+    'Folamour'
+  ],
+  'techno': [
+    'Charlotte de Witte',
+    'Anyma',
+    'Amelie Lens',
+    'Boris Brejcha',
+    'Adam Beyer',
+    'Nina Kraviz',
+    'Tale Of Us',
+    'ARTBAT',
+    'Carl Cox',
+    'Ben Klock',
+    'Reinier Zonneveld',
+    'Maceo Plex',
+    'ANNA',
+    'Enrico Sangiuliano',
+    'Paul Kalkbrenner'
+  ],
+  'drum & bass': [
+    'Chase & Status',
+    'Sub Focus',
+    'Pendulum',
+    'Dimension',
+    'Wilkinson',
+    'Netsky',
+    'Hybrid Minds',
+    'Camo & Krooked',
+    'Andy C',
+    'Metrik',
+    'Kanine',
+    'Bou',
+    'Rudimental',
+    'High Contrast',
+    'Culture Shock'
+  ],
+  'synthwave': [
+    'The Midnight',
+    'Kavinsky',
+    'FM-84',
+    'Perturbator',
+    'Gunship',
+    'Timecop1983',
+    'Carpenter Brut',
+    'Com Truise',
+    'Miami Nights 1984',
+    'Dance With The Dead',
+    'W O L F C L U B',
+    'LeBrock',
+    'Scandroid',
+    'Electric Youth',
+    'College'
+  ],
 };
 
 const Map<String, int> _fallbackArtistIds = {
@@ -99,6 +500,7 @@ const Map<String, int> _fallbackArtistIds = {
   'FM-84': 7814812,
   'Fleet Foxes': 74444,
   'Flume': 1164295,
+  'Foo Fighters': 446,
   'Frank Ocean': 1350335,
   'Fred again..': 76053262,
   'Future': 165930,
@@ -142,6 +544,7 @@ const Map<String, int> _fallbackArtistIds = {
   'Placebo': 8,
   'Protoje': 263794251,
   'Queen': 412,
+  'Rammstein': 464,
   'Radiohead': 399,
   'Rauw Alejandro': 11289472,
   'Rosalia': 554792,
@@ -152,6 +555,7 @@ const Map<String, int> _fallbackArtistIds = {
   'Shaggy': 461,
   'Slipknot': 117,
   'Stray Kids': 13923487,
+  'System of a Down': 1171,
   'Sub Focus': 11214,
   'Sum 41': 459,
   'Tame Impala': 134790,
@@ -186,8 +590,9 @@ class TastePreferencesScreen extends StatefulWidget {
 }
 
 class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
-  static const int _collapsedRecommendationCount = 10;
-  static const int _expandedRecommendationCount = 20;
+  static const int _initialRecommendationCount = 5;
+  static const int _recommendationStep = 10;
+  static const int _expandedRecommendationCount = 45;
   final _searchCtrl = TextEditingController();
   late final Set<String> _selectedGenres;
   late final List<Map<String, dynamic>> _selectedArtists;
@@ -196,7 +601,7 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
   bool _loadingRecommended = true;
   bool _searching = false;
   bool _saving = false;
-  bool _showAllRecommended = false;
+  int _visibleRecommendationCount = _initialRecommendationCount;
 
   @override
   void initState() {
@@ -206,6 +611,7 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
         .where((genre) => genre.isNotEmpty)
         .take(3)
         .toSet();
+    _visibleRecommendationCount = _baseRecommendationCount();
     _selectedArtists = widget.initialArtists
         .map((artist) => Map<String, dynamic>.from(artist))
         .toList();
@@ -227,6 +633,11 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
 
   String _artistName(Map<String, dynamic> artist) {
     return (artist['name'] ?? artist['artist'] ?? 'Artist').toString();
+  }
+
+  int _baseRecommendationCount() {
+    final genreCount = _selectedGenres.isEmpty ? 1 : _selectedGenres.length;
+    return genreCount * _initialRecommendationCount;
   }
 
   String _artistImage(Map<String, dynamic> artist) {
@@ -332,6 +743,11 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
     return hash.toString();
   }
 
+  String _fallbackArtistImage(String name) {
+    final id = _fallbackArtistIds[name];
+    return id == null ? '' : 'https://api.deezer.com/artist/$id/image';
+  }
+
   void _warmArtistImages(List<Map<String, dynamic>> artists) {
     if (!mounted) return;
     final topArtists = artists.take(12);
@@ -343,75 +759,32 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
   }
 
   Future<void> _loadRecommendedArtistsFromApi() async {
-    final seeds = <String>[];
-    final groupedSeeds = _selectedGenres
-        .map((genre) =>
-            _genreArtistSeeds[genre.toLowerCase()] ?? const <String>[])
-        .where((items) => items.isNotEmpty)
-        .toList();
-    if (groupedSeeds.isNotEmpty) {
-      final longest = groupedSeeds.fold<int>(
-        0,
-        (best, items) => items.length > best ? items.length : best,
-      );
-      for (var i = 0; i < longest; i++) {
-        for (final items in groupedSeeds) {
-          if (i < items.length) {
-            seeds.add(items[i]);
-          }
-        }
-      }
-    }
-    if (seeds.isEmpty) {
-      seeds.addAll(
-          const ['The Weeknd', 'Lana Del Rey', 'Billie Eilish', 'Drake']);
-    }
-
-    final uniqueSeeds = <String>[];
-    for (final seed in seeds) {
-      if (!uniqueSeeds.contains(seed)) {
-        uniqueSeeds.add(seed);
-      }
-    }
+    final uniqueSeeds = _recommendedSeedNames();
 
     try {
-      final artists = <Map<String, dynamic>>[];
-      for (final seed in uniqueSeeds.take(8)) {
-        final response = await ApiService()
-            .searchArtistsList(seed, limit: 8)
-            .catchError((_) => <Map<String, dynamic>>[]);
-        final sorted = response
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .toList()
-          ..sort((a, b) => _artistScore(seed, b).compareTo(
-                _artistScore(seed, a),
-              ));
-        final primary = sorted.take(4).toList();
-        artists.addAll(primary);
-        final primaryId = primary.isNotEmpty ? _artistId(primary.first) : '';
-        if (primaryId.isNotEmpty) {
-          try {
-            final profile = await ApiService().getArtistProfile(primaryId);
-            final related = ((profile['related_artists'] as List?) ?? const [])
-                .whereType<Map>()
-                .map((item) => Map<String, dynamic>.from(item))
-                .toList();
-            artists.addAll(related.take(8));
-          } catch (_) {}
-        }
-        if (artists.length >= _expandedRecommendationCount * 2) {
-          break;
-        }
-      }
+      final api = ApiService();
+      final searchResults = await Future.wait(
+        uniqueSeeds.take(18).map(
+              (seed) => api.searchArtistsList(seed, limit: 6).then((response) {
+                final sorted = response
+                    .map((item) => Map<String, dynamic>.from(item))
+                    .toList()
+                  ..sort((a, b) => _artistScore(seed, b).compareTo(
+                        _artistScore(seed, a),
+                      ));
+                final exact = sorted.where((artist) {
+                  return _artistNameKey(_artistName(artist)) ==
+                      _artistNameKey(seed);
+                }).toList();
+                return (exact.isNotEmpty ? exact : sorted).take(1).toList();
+              }).catchError((_) => <Map<String, dynamic>>[]),
+            ),
+      );
+      final artists = <Map<String, dynamic>>[
+        ...searchResults.expand((items) => items),
+        ..._seedFallbackCards(),
+      ];
       var deduped = _dedupeArtists(artists);
-      if (deduped.length < _expandedRecommendationCount) {
-        final extras = _localSearchFallback('');
-        deduped = _dedupeArtists([
-          ...deduped,
-          ...extras,
-        ]);
-      }
       final missingImages = deduped.where(_needsArtistImage).take(12).toList();
       if (missingImages.isNotEmpty) {
         final hydrated = await ApiService().hydrateArtists(missingImages);
@@ -439,6 +812,34 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
     }
   }
 
+  List<String> _recommendedSeedNames() {
+    final groupedSeeds = _selectedGenres
+        .map((genre) =>
+            _genreArtistSeeds[genre.toLowerCase()] ?? const <String>[])
+        .where((items) => items.isNotEmpty)
+        .toList();
+    if (groupedSeeds.isEmpty) {
+      return const ['The Weeknd', 'Lana Del Rey', 'Billie Eilish', 'Drake'];
+    }
+
+    final seeds = <String>[];
+    final seen = <String>{};
+    final longest = groupedSeeds.fold<int>(
+      0,
+      (best, items) => items.length > best ? items.length : best,
+    );
+    for (var i = 0; i < longest; i++) {
+      for (final items in groupedSeeds) {
+        if (i >= items.length) continue;
+        final name = items[i];
+        if (seen.add(name.toLowerCase())) {
+          seeds.add(name);
+        }
+      }
+    }
+    return seeds;
+  }
+
   Future<void> _searchArtists(String q) async {
     if (q.trim().length < 2) {
       setState(() {
@@ -448,10 +849,10 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
       return;
     }
     // Show local results immediately while API loads
-      setState(() {
-        _searchResults = _localSearchFallback(q.trim());
-        _searching = true;
-      });
+    setState(() {
+      _searchResults = _localSearchFallback(q.trim());
+      _searching = true;
+    });
     try {
       final query = q.trim();
       final results = await ApiService().searchArtistsList(query, limit: 30);
@@ -509,41 +910,13 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
 
   List<Map<String, dynamic>> _seedFallbackCards() {
     final cards = <Map<String, dynamic>>[];
-    final seen = <String>{};
-    final groupedSeeds = _selectedGenres
-        .map((genre) =>
-            _genreArtistSeeds[genre.toLowerCase()] ?? const <String>[])
-        .where((items) => items.isNotEmpty)
-        .toList();
-    if (groupedSeeds.isNotEmpty) {
-      final longest = groupedSeeds.fold<int>(
-        0,
-        (best, items) => items.length > best ? items.length : best,
-      );
-      for (var i = 0; i < longest; i++) {
-        for (final names in groupedSeeds) {
-          if (i >= names.length) continue;
-          final name = names[i];
-          if (!seen.add(name.toLowerCase())) continue;
-          cards.add({
-            'id': _fallbackArtistId(name),
-            'name': name,
-          });
-        }
-      }
-    }
-    if (cards.isEmpty) {
-      for (final name in const [
-        'The Weeknd',
-        'Lana Del Rey',
-        'Drake',
-        'Billie Eilish'
-      ]) {
-        cards.add({
-          'id': _fallbackArtistId(name),
-          'name': name,
-        });
-      }
+    for (final name in _recommendedSeedNames()) {
+      cards.add({
+        'id': _fallbackArtistId(name),
+        'name': name,
+        if (_fallbackArtistImage(name).isNotEmpty)
+          'picture_medium': _fallbackArtistImage(name),
+      });
     }
     return _dedupeArtists(cards).take(_expandedRecommendationCount).toList();
   }
@@ -571,6 +944,8 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
           (name) => {
             'id': _fallbackArtistId(name),
             'name': name,
+            if (_fallbackArtistImage(name).isNotEmpty)
+              'picture_medium': _fallbackArtistImage(name),
           },
         )
         .toList();
@@ -584,7 +959,8 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
     try {
       final profile = await ApiService().getArtistProfile(id);
       if (!mounted) return;
-      final index = _selectedArtists.indexWhere((item) => _artistId(item) == id);
+      final index =
+          _selectedArtists.indexWhere((item) => _artistId(item) == id);
       if (index < 0) return;
       final hydrated = Map<String, dynamic>.from(profile);
       setState(() => _selectedArtists[index] = hydrated);
@@ -623,7 +999,7 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
       } else {
         _selectedGenres.add(genre);
       }
-      _showAllRecommended = false;
+      _visibleRecommendationCount = _baseRecommendationCount();
       _searchCtrl.clear();
       _searchResults = [];
       _recommendedArtists = _seedFallbackCards();
@@ -667,14 +1043,17 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
     final isSearchingArtists = _searchCtrl.text.trim().length >= 2;
     final artistList =
         isSearchingArtists ? _searchResults : _recommendedArtists;
-    final visibleArtistList = !isSearchingArtists &&
-            !_showAllRecommended &&
-            artistList.length > _collapsedRecommendationCount
-        ? artistList.take(_collapsedRecommendationCount).toList()
+    final visibleArtistList = !isSearchingArtists
+        ? artistList.take(_visibleRecommendationCount).toList()
         : artistList;
+    final canShowMore =
+        !isSearchingArtists && artistList.length > visibleArtistList.length;
+    final canShowLess = !isSearchingArtists &&
+        _visibleRecommendationCount > _baseRecommendationCount();
 
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       appBar: AppBar(
         backgroundColor: AppColors.bg,
         elevation: 0,
@@ -856,13 +1235,22 @@ class _TastePreferencesScreenState extends State<TastePreferencesScreen> {
                       ],
                     ),
                   ),
-                  if (!isSearchingArtists &&
-                      artistList.length > _collapsedRecommendationCount)
+                  if (canShowMore || canShowLess)
                     GestureDetector(
-                      onTap: () => setState(
-                          () => _showAllRecommended = !_showAllRecommended),
+                      onTap: () => setState(() {
+                        if (canShowMore) {
+                          _visibleRecommendationCount =
+                              (_visibleRecommendationCount +
+                                      _recommendationStep)
+                                  .clamp(0, _expandedRecommendationCount)
+                                  .toInt();
+                        } else {
+                          _visibleRecommendationCount =
+                              _baseRecommendationCount();
+                        }
+                      }),
                       child: Text(
-                        _showAllRecommended ? 'Show less' : 'Show all',
+                        canShowMore ? 'Show More' : 'Show less',
                         style: GoogleFonts.outfit(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,

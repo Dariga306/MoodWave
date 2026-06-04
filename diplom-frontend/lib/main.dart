@@ -8,6 +8,9 @@ import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'providers/player_provider.dart';
 import 'screens/splash_screen.dart';
+import 'utils/app_navigator.dart';
+import 'widgets/bottom_nav_bar.dart';
+import 'package:moodwave/widgets/mini_player.dart';
 
 final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
@@ -44,6 +47,7 @@ class MoodWaveApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: rootNavigatorKey,
       scaffoldMessengerKey: rootScaffoldMessengerKey,
       title: 'MoodWave',
       debugShowCheckedModeBanner: false,
@@ -81,6 +85,8 @@ class MoodWaveApp extends StatelessWidget {
         children: [
           if (child != null) child,
           const _PersistentPlaybackHost(),
+          const GlobalBottomNavOverlay(),
+          const GlobalMiniPlayerOverlay(),
         ],
       ),
     );

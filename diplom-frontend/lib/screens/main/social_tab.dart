@@ -2294,6 +2294,9 @@ class _ChatsViewState extends State<_ChatsView>
             sliver: SliverList(
               delegate: SliverChildBuilderDelegate(
                 (_, i) {
+                  if (i == visibleChats.length) {
+                    return const SizedBox(height: 80);
+                  }
                   final chat =
                       Map<String, dynamic>.from(visibleChats[i] as Map);
                   final partner =
@@ -2325,7 +2328,7 @@ class _ChatsViewState extends State<_ChatsView>
                     },
                   );
                 },
-                childCount: visibleChats.length,
+                childCount: visibleChats.length + 1,
               ),
             ),
           ),

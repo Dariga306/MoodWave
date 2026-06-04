@@ -18,6 +18,8 @@ import '../providers/auth_provider.dart';
 import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bottom_nav_bar.dart';
+import 'package:moodwave/widgets/mini_player.dart';
 import '../utils/lyrics_matcher.dart';
 import '../utils/media_url.dart';
 import '../widgets/common_widgets.dart';
@@ -421,6 +423,7 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
   @override
   void initState() {
     super.initState();
+    MiniPlayerOverlayController.suppress();
     _blinkCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1200))
       ..repeat(reverse: true);
@@ -442,6 +445,7 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
 
   @override
   void dispose() {
+    MiniPlayerOverlayController.unsuppress();
     _blinkCtrl.dispose();
     _tabCtrl.dispose();
     _msgCtrl.dispose();
@@ -696,8 +700,10 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
     final durationChanged = newDuration != _durationMs;
     final diff = (clampedPos - _positionMs).abs();
     final trackChanged = trackKey.isNotEmpty && trackKey != _stateTrackKey;
-    final needsReset =
-        trackChanged || durationChanged || diff > 2000 || _positionTimer == null;
+    final needsReset = trackChanged ||
+        durationChanged ||
+        diff > 2000 ||
+        _positionTimer == null;
 
     setState(() {
       _stateTrackKey = trackKey;
@@ -1567,8 +1573,10 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
       final isPublic = _room['is_public'] == true ||
           (_room['settings'] as Map?)?['is_public'] == true ||
           _settings['is_public'] == true;
-      final shouldRequest =
-          _isLocked && !isPublic && myStatus != 'approved' && myStatus != 'connected';
+      final shouldRequest = _isLocked &&
+          !isPublic &&
+          myStatus != 'approved' &&
+          myStatus != 'connected';
       if (shouldRequest) {
         final response = await ApiService().sendJoinRequest(roomId);
         final status = (response['status'] ?? '').toString();
@@ -2835,10 +2843,11 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                         fontWeight: FontWeight.w800,
                         color: AppColors.text)),
                 const SizedBox(height: 8),
-                Text('Messages and live events appear after you enter the room.',
+                Text(
+                    'Messages and live events appear after you enter the room.',
                     textAlign: TextAlign.center,
-                    style:
-                        GoogleFonts.outfit(fontSize: 13, color: AppColors.text2)),
+                    style: GoogleFonts.outfit(
+                        fontSize: 13, color: AppColors.text2)),
                 const SizedBox(height: 18),
                 _primaryRoomButton(
                   label: _joining
@@ -3484,7 +3493,8 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
       setSheetState(() => submitting = true);
       var closedSheet = false;
       try {
-        final poll = await ApiService().createRoomPoll(roomId, question, options);
+        final poll =
+            await ApiService().createRoomPoll(roomId, question, options);
         if (!mounted) return;
         setState(() => _activePoll = poll);
         _tabCtrl.animateTo(1);
@@ -3507,7 +3517,8 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
       ),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheetState) => Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          padding:
+              EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
           child: SingleChildScrollView(
             padding: EdgeInsets.fromLTRB(
               16,
@@ -4177,20 +4188,19 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
   }
 
   String _chatDestinationName(Map<String, dynamic> chat) {
-    final kind = (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct')
-        .toString();
+    final kind =
+        (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct').toString();
     if (kind == 'group') {
       final partner =
           (chat['partner'] as Map?)?.cast<String, dynamic>() ?? const {};
-      final title =
-          (chat['title'] ??
-                  chat['name'] ??
-                  chat['display_name'] ??
-                  partner['display_name'] ??
-                  partner['name'] ??
-                  '')
-              .toString()
-              .trim();
+      final title = (chat['title'] ??
+              chat['name'] ??
+              chat['display_name'] ??
+              partner['display_name'] ??
+              partner['name'] ??
+              '')
+          .toString()
+          .trim();
       return title.isNotEmpty ? title : 'Group chat';
     }
     if (kind == 'user') {
@@ -4210,8 +4220,8 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
   }
 
   String _chatDestinationSubtitle(Map<String, dynamic> chat) {
-    final kind = (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct')
-        .toString();
+    final kind =
+        (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct').toString();
     if (kind == 'group') {
       final memberCount = (chat['member_count'] as num?)?.toInt() ?? 0;
       return memberCount > 0 ? '$memberCount members' : 'Group chat';
@@ -4227,25 +4237,24 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
   }
 
   String _chatDestinationAvatar(Map<String, dynamic> chat) {
-    final kind = (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct')
-        .toString();
+    final kind =
+        (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct').toString();
     if (kind == 'user') {
       return buildMediaUrl((chat['avatar_url'] ?? '').toString());
     }
     final partner =
         (chat['partner'] as Map?)?.cast<String, dynamic>() ?? const {};
-    return buildMediaUrl((partner['avatar_url'] ?? chat['avatar_url'] ?? '')
-        .toString());
+    return buildMediaUrl(
+        (partner['avatar_url'] ?? chat['avatar_url'] ?? '').toString());
   }
 
   String _shareDestinationKey(Map<String, dynamic> chat) {
-    final kind = (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct')
-        .toString();
+    final kind =
+        (chat['destination_type'] ?? chat['chat_kind'] ?? 'direct').toString();
     if (kind == 'user' || kind == 'direct' || kind == 'match') {
-      final personId = (chat['user_id'] ??
-              chat['id'] ??
-              (chat['partner'] as Map?)?['id'])
-          ?.toString();
+      final personId =
+          (chat['user_id'] ?? chat['id'] ?? (chat['partner'] as Map?)?['id'])
+              ?.toString();
       if (personId != null && personId.isNotEmpty) {
         return 'person:$personId';
       }
@@ -4269,13 +4278,14 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
     final byKey = <String, Map<String, dynamic>>{};
     final directUserIds = <int>{};
     int priority(Map<String, dynamic> item) {
-      final kind =
-          (item['destination_type'] ?? item['chat_kind'] ?? 'direct').toString();
+      final kind = (item['destination_type'] ?? item['chat_kind'] ?? 'direct')
+          .toString();
       if (kind == 'match') return 0;
       if (kind == 'direct') return 1;
       if (kind == 'group') return 2;
       return 3;
     }
+
     void add(Map<String, dynamic> item) {
       final key = _shareDestinationKey(item);
       if (key.trim().replaceAll(':', '').isEmpty) return;
@@ -4503,11 +4513,9 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
                                                   ?.toInt();
                                           int? directChatId = chatId;
                                           if (kind == 'user') {
-                                            final userId =
-                                                ((chat['user_id'] ??
-                                                            chat['id'])
-                                                        as num?)
-                                                    ?.toInt();
+                                            final userId = ((chat['user_id'] ??
+                                                    chat['id']) as num?)
+                                                ?.toInt();
                                             if (userId == null) {
                                               throw StateError(
                                                   'Missing user id');
@@ -5061,61 +5069,61 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(14, 0, 14, 20),
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Text('Edit room',
-                    style: GoogleFonts.outfit(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.text)),
-                const SizedBox(height: 14),
-                _roomTextField(nameCtrl, 'Room name', Icons.title_rounded),
-                const SizedBox(height: 10),
-                _roomTextField(descCtrl, 'Description', Icons.notes_rounded,
-                    maxLines: 3),
-                const SizedBox(height: 14),
-                GestureDetector(
-                  onTap: () {
-                    final name = nameCtrl.text.trim();
-                    if (name.isEmpty) {
-                      _snack('Room name is required');
-                      return;
-                    }
-                    Navigator.of(ctx).pop({
-                      'name': name,
-                      'description': descCtrl.text.trim(),
-                    });
-                  },
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      gradient: AppColors.gradPurple,
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    child: Center(
-                      child: Text('Save changes',
-                          style: GoogleFonts.outfit(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w900,
-                              color: Colors.white)),
-                    ),
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(14, 0, 14, 20),
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('Edit room',
+                  style: GoogleFonts.outfit(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.text)),
+              const SizedBox(height: 14),
+              _roomTextField(nameCtrl, 'Room name', Icons.title_rounded),
+              const SizedBox(height: 10),
+              _roomTextField(descCtrl, 'Description', Icons.notes_rounded,
+                  maxLines: 3),
+              const SizedBox(height: 14),
+              GestureDetector(
+                onTap: () {
+                  final name = nameCtrl.text.trim();
+                  if (name.isEmpty) {
+                    _snack('Room name is required');
+                    return;
+                  }
+                  Navigator.of(ctx).pop({
+                    'name': name,
+                    'description': descCtrl.text.trim(),
+                  });
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    gradient: AppColors.gradPurple,
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: Center(
+                    child: Text('Save changes',
+                        style: GoogleFonts.outfit(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white)),
                   ),
                 ),
-              ]),
-            ),
+              ),
+            ]),
           ),
         ),
+      ),
     );
     nameCtrl.dispose();
     descCtrl.dispose();
@@ -6178,6 +6186,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
@@ -6672,6 +6681,7 @@ class _CityChartsScreenState extends State<CityChartsScreen>
 
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: RefreshIndicator(
         onRefresh: _load,
         color: AppColors.purpleLight,
@@ -7121,6 +7131,7 @@ class RadioScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
@@ -7401,6 +7412,7 @@ class _RecentHistoryScreenState extends State<RecentHistoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -7927,6 +7939,11 @@ class _BrowseRoomsScreenState extends State<BrowseRoomsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _showIntroIfNeeded());
   }
 
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
   Future<void> _createRoom() async {
     final room = await showListeningRoomCreateSheet(
       context,
@@ -8001,6 +8018,7 @@ class _BrowseRoomsScreenState extends State<BrowseRoomsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -8420,6 +8438,11 @@ class _RoomHistoryScreenState extends State<RoomHistoryScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     final rooms = await ApiService().getRoomHistory(limit: 40);
@@ -8477,6 +8500,7 @@ class _RoomHistoryScreenState extends State<RoomHistoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: SafeArea(
         child: Column(
           children: [

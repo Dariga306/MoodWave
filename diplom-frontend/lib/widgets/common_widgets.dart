@@ -76,7 +76,7 @@ class SectionHeader extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.outfit(
-                    fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.text)),
+                    fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.text)),
           ),
           if (action != null) ...[
             const SizedBox(width: 8),

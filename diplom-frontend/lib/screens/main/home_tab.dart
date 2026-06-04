@@ -9,6 +9,7 @@ import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/media_url.dart';
 import '../../widgets/common_widgets.dart';
+import 'package:moodwave/widgets/mini_player.dart';
 import '../album_screen.dart';
 import '../artist_screen.dart';
 import '../city_charts_screen.dart';
@@ -771,6 +772,9 @@ class _HomeTabState extends State<HomeTab> {
     if (d.contains('rain') || d.contains('drizzle')) {
       return Icons.grain_rounded;
     }
+    if (d.contains('partly') || d.contains('few') || d.contains('scattered')) {
+      return Icons.wb_cloudy_rounded;
+    }
     if (d.contains('cloud')) return Icons.cloud_rounded;
     if (d.contains('thunder') || d.contains('storm')) {
       return Icons.thunderstorm_rounded;
@@ -788,16 +792,23 @@ class _HomeTabState extends State<HomeTab> {
     final d = desc.toLowerCase();
     if (d.contains('clear') || d.contains('sunny')) {
       return const [
-        Color(0xFF15304F),
-        Color(0xFF215E91),
-        Color(0xFF5FA8D3),
+        Color(0xFF1B3655),
+        Color(0xFF315D7D),
+        Color(0xFF5A87A8),
+      ];
+    }
+    if (d.contains('partly') || d.contains('few') || d.contains('scattered')) {
+      return const [
+        Color(0xFF26384F),
+        Color(0xFF49627B),
+        Color(0xFF7890A8),
       ];
     }
     if (d.contains('cloud')) {
       return const [
-        Color(0xFF22314C),
-        Color(0xFF314B69),
-        Color(0xFF607D9B),
+        Color(0xFF273244),
+        Color(0xFF475569),
+        Color(0xFF75849A),
       ];
     }
     if (d.contains('rain') || d.contains('drizzle')) {
@@ -840,6 +851,9 @@ class _HomeTabState extends State<HomeTab> {
     if (d.contains('clear') || d.contains('sunny')) {
       return const Color(0xFFF8D66D);
     }
+    if (d.contains('partly') || d.contains('few') || d.contains('scattered')) {
+      return const Color(0xFFE9C46A);
+    }
     if (d.contains('cloud')) return const Color(0xFFB9D6FF);
     if (d.contains('rain') || d.contains('drizzle')) {
       return const Color(0xFF7CC6FF);
@@ -855,7 +869,7 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   String _weatherListenersLabel(int count, String city) {
-    if (count <= 0) return 'Be first in $city today';
+    if (count <= 0) return 'No one listening now';
     if (count == 1) return '1 person listening now';
     return '$count people listening now';
   }
@@ -896,10 +910,11 @@ class _HomeTabState extends State<HomeTab> {
       final first = Map<String, dynamic>.from(queue.first)
         ..['queue'] = queue
         ..['source'] = '$city weather vibes';
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => PlayerScreen(track: first)),
-      );
+      MiniPlayerOverlayController.forceVisible();
+      MiniPlayerOverlayController.setBottomOffset(74);
+      await context.read<PlayerProvider>().openTrack(first);
+      MiniPlayerOverlayController.forceVisible();
+      MiniPlayerOverlayController.setBottomOffset(74);
     } finally {
       if (mounted) setState(() => _playingWeather = false);
     }
@@ -922,6 +937,11 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   List<Widget> _buildMoodSection() {
+    final recommendedKey = getRecommendedMoodKey(_weather);
+    final orderedMoods = [
+      ...allMoods.where((m) => m.key == recommendedKey),
+      ...allMoods.where((m) => m.key != recommendedKey),
+    ];
     return [
       const SizedBox(height: 22),
       SectionHeader(
@@ -931,15 +951,16 @@ class _HomeTabState extends State<HomeTab> {
       ),
       const SizedBox(height: 12),
       SizedBox(
-        height: 150,
+        height: 176,
         child: ListView.builder(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.only(left: 20),
-          itemCount: allMoods.length,
+          clipBehavior: Clip.none,
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
+          itemCount: orderedMoods.length,
           itemBuilder: (context, index) {
-            final mood = allMoods[index];
+            final mood = orderedMoods[index];
             return Padding(
-              padding: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.only(right: 14),
               child: _MoodTile(
                 mood: mood,
                 onTap: () => _openMood(mood),
@@ -958,14 +979,15 @@ class _HomeTabState extends State<HomeTab> {
     final displayName = user?['display_name'] ?? user?['username'] ?? '';
     final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U';
 
-    final weatherDesc =
-        _weather?['description'] ?? _weather?['condition'] ?? 'Clear';
+    final weatherDisplayDesc =
+        (_weather?['description'] ?? _weather?['condition'] ?? 'Clear')
+            .toString();
+    final weatherDesc = '${_weather?['condition'] ?? ''} $weatherDisplayDesc';
     final weatherTemp = _weather?['temperature'] ?? _weather?['temp'];
     final weatherIcon = _weatherIconData(weatherDesc);
     final weatherGradient = _weatherCardGradient(weatherDesc);
     final weatherAccent = _weatherAccent(weatherDesc);
-    final listenersCount = _liveRooms.fold<int>(
-        0, (sum, r) => sum + ((r['participant_count'] as int?) ?? 0));
+    final listenersCount = (_weather?['listeners_count'] as num?)?.toInt() ?? 0;
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -1168,7 +1190,7 @@ class _HomeTabState extends State<HomeTab> {
                                           color: Colors.white,
                                           height: 1)),
                                   const SizedBox(height: 2),
-                                  Text('$weatherDesc · $city',
+                                  Text('$weatherDisplayDesc · $city',
                                       style: GoogleFonts.outfit(
                                           fontSize: 14,
                                           color:
@@ -1286,7 +1308,6 @@ class _HomeTabState extends State<HomeTab> {
                   ),
                 ),
               ],
-
 
               // ─── Because you listened to ───────────────────────
               if (_becauseYouListened.isNotEmpty) ...[
@@ -1633,7 +1654,7 @@ class _HomeTabState extends State<HomeTab> {
                 ),
               ],
 
-              const SizedBox(height: 32),
+              const SizedBox(height: 80),
             ],
           ),
         ),
@@ -2513,7 +2534,7 @@ class _TrackCard extends StatelessWidget {
 
 // ─── Mood tile ────────────────────────────────────────────────────────────────
 
-class _MoodTile extends StatelessWidget {
+class _MoodTile extends StatefulWidget {
   final MoodData mood;
   final VoidCallback onTap;
 
@@ -2523,95 +2544,190 @@ class _MoodTile extends StatelessWidget {
   });
 
   @override
+  State<_MoodTile> createState() => _MoodTileState();
+}
+
+class _MoodTileState extends State<_MoodTile> {
+  bool _hovered = false;
+  bool _pressed = false;
+
+  Future<void> _handleTap() async {
+    setState(() => _pressed = true);
+    await Future.delayed(const Duration(milliseconds: 110));
+    if (!mounted) return;
+    setState(() => _pressed = false);
+    widget.onTap();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 138,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            BoxShadow(
-              color: mood.glowColor.withValues(alpha: 0.40),
-              blurRadius: 28,
-              offset: const Offset(0, 10),
+    final mood = widget.mood;
+    final active = _hovered || _pressed;
+    final pressed = _pressed;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() {
+        _hovered = false;
+        _pressed = false;
+      }),
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => _handleTap(),
+        onTapCancel: () => setState(() => _pressed = false),
+        child: AnimatedScale(
+          scale: _pressed ? 0.965 : (active ? 1.04 : 1.0),
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          child: Container(
+            width: 158,
+            transform: Matrix4.translationValues(0, active ? -4 : 0, 0),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(22),
+              boxShadow: [
+                BoxShadow(
+                  color: pressed
+                      ? mood.glowColor.withValues(alpha: 0.48)
+                      : Colors.black.withValues(alpha: active ? 0.34 : 0.22),
+                  blurRadius: pressed ? 32 : (active ? 24 : 16),
+                  spreadRadius: pressed ? 1 : 0,
+                  offset: Offset(0, active ? 12 : 6),
+                ),
+              ],
+              border: Border.all(
+                color: mood.glowColor.withValues(alpha: active ? 0.62 : 0.0),
+                width: 1.2,
+              ),
             ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(22),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // Photo background
-              CachedNetworkImage(
-                imageUrl: mood.artUrl,
-                fit: BoxFit.cover,
-                placeholder: (_, __) => Container(
-                  decoration: BoxDecoration(gradient: mood.gradient),
-                ),
-                errorWidget: (_, __, ___) => Container(
-                  decoration: BoxDecoration(gradient: mood.gradient),
-                ),
-              ),
-              // Color overlay
-              Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Colors.transparent,
-                      mood.gradient.colors.first.withValues(alpha: 0.55),
-                      mood.gradient.colors.last.withValues(alpha: 0.92),
-                    ],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    stops: const [0.0, 0.55, 1.0],
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(22),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Photo background
+                  AnimatedScale(
+                    scale: active ? 1.06 : 1.0,
+                    duration: const Duration(milliseconds: 620),
+                    curve: Curves.easeOutCubic,
+                    child: Image.asset(
+                      mood.artUrl,
+                      fit: BoxFit.cover,
+                      alignment: mood.imageAlignment,
+                      errorBuilder: (_, __, ___) => Container(
+                        decoration: BoxDecoration(gradient: mood.gradient),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              // Text content
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        mood.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.outfit(
-                          color: Colors.white,
-                          fontSize: 17,
-                          height: 1.1,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.3,
-                          shadows: const [
-                            Shadow(color: Color(0x88000000), blurRadius: 10),
-                          ],
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          mood.glowColor.withValues(alpha: 0.12),
+                          mood.gradient.colors.last.withValues(alpha: 0.05),
+                          Colors.transparent,
+                        ],
+                        stops: const [0.0, 0.45, 1.0],
+                      ),
+                    ),
+                  ),
+                  // Dark gradient for readable text
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0x00000000), Color(0xBB000000)],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: [0.45, 1.0],
+                      ),
+                    ),
+                  ),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 260),
+                    curve: Curves.easeOutCubic,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          mood.glowColor
+                              .withValues(alpha: pressed ? 0.34 : 0.0),
+                          mood.gradient.colors.last
+                              .withValues(alpha: pressed ? 0.18 : 0.0),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Text content
+                  Positioned(
+                    bottom: 12,
+                    left: 12,
+                    right: 46,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          mood.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.dmSerifDisplay(
+                            color: Colors.white,
+                            fontSize: 17,
+                            shadows: const [
+                              Shadow(color: Color(0x88000000), blurRadius: 10),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          mood.subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.dmSans(
+                            color: Colors.white.withValues(alpha: 0.75),
+                            fontSize: 11,
+                            fontStyle: FontStyle.italic,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Play button — bottom-right
+                  Positioned(
+                    right: 9,
+                    bottom: 9,
+                    child: AnimatedOpacity(
+                      opacity: active ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 180),
+                      child: AnimatedScale(
+                        scale: active ? 1.0 : 0.5,
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOutBack,
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white.withValues(alpha: 0.92),
+                            boxShadow: const [
+                              BoxShadow(
+                                  color: Colors.black38,
+                                  blurRadius: 8,
+                                  offset: Offset(0, 2))
+                            ],
+                          ),
+                          child: const Icon(Icons.play_arrow_rounded,
+                              color: Colors.black87, size: 19),
                         ),
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        mood.subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.outfit(
-                          color: Colors.white.withValues(alpha: 0.75),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: 0.1,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -3764,13 +3880,8 @@ class _ThisIsCard extends StatelessWidget {
         width: 138,
         margin: const EdgeInsets.only(right: 12),
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF111827), Color(0xFF1f103d)],
-          ),
+          color: const Color(0xFF111827),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.border),
         ),
         clipBehavior: Clip.antiAlias,
         child: Stack(children: [

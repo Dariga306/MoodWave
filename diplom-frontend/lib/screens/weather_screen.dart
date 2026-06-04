@@ -10,22 +10,24 @@ import '../providers/auth_provider.dart';
 import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bottom_nav_bar.dart';
+import 'package:moodwave/widgets/mini_player.dart';
 import '../utils/media_url.dart';
 import 'modals.dart';
-import 'player_screen.dart';
 import 'user_profile_screen.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 String _conditionLabel(String? condition) {
   const labels = {
-    'clear': 'Clear Sky',
+    'clear': 'Sunny',
     'clouds': 'Cloudy',
+    'partly_cloudy': 'Partly Cloudy',
     'rain': 'Rainy',
-    'drizzle': 'Light Rain',
-    'snow': 'Snowy',
-    'thunderstorm': 'Thunderstorm',
-    'storm': 'Stormy',
+    'drizzle': 'Rainy',
+    'snow': 'Snow',
+    'thunderstorm': 'Storm',
+    'storm': 'Storm',
     'mist': 'Misty',
     'fog': 'Foggy',
     'haze': 'Hazy',
@@ -34,42 +36,6 @@ String _conditionLabel(String? condition) {
   if (condition == null || condition.isEmpty) return 'Clear Sky';
   return labels[condition.toLowerCase()] ??
       condition[0].toUpperCase() + condition.substring(1);
-}
-
-String _weatherEmoji(String? condition, String? description) {
-  final d = (description ?? condition ?? '').toLowerCase();
-  if (d.contains('snow') || d.contains('blizzard')) return '❄️';
-  if (d.contains('thunder') || d.contains('storm')) return '⛈️';
-  if (d.contains('drizzle') || d.contains('rain')) return '🌧️';
-  if (d.contains('overcast')) return '☁️';
-  if (d.contains('cloud')) return '🌥️';
-  if (d.contains('mist') || d.contains('fog') || d.contains('haze'))
-    return '🌫️';
-  if (d.contains('clear') || d.contains('sunny')) return '☀️';
-  return '🌤️';
-}
-
-IconData _weatherIconData(String? condition, String? description) {
-  final d = (description ?? condition ?? '').toLowerCase();
-  if (d.contains('snow') || d.contains('blizzard')) {
-    return Icons.ac_unit_rounded;
-  }
-  if (d.contains('thunder') || d.contains('storm')) {
-    return Icons.thunderstorm_rounded;
-  }
-  if (d.contains('drizzle') || d.contains('rain')) {
-    return Icons.grain_rounded;
-  }
-  if (d.contains('overcast') || d.contains('cloud')) {
-    return Icons.cloud_rounded;
-  }
-  if (d.contains('mist') || d.contains('fog') || d.contains('haze')) {
-    return Icons.blur_on_rounded;
-  }
-  if (d.contains('clear') || d.contains('sunny')) {
-    return Icons.wb_sunny_rounded;
-  }
-  return Icons.wb_cloudy_rounded;
 }
 
 // Returns the Twemoji CDN URL for an emoji string.
@@ -84,13 +50,13 @@ String _twemojiUrl(String emoji) {
 }
 
 String _listenersLabel(int count, String city) {
-  if (count <= 0) return 'Be first in $city today';
+  if (count <= 0) return 'No one listening now';
   if (count == 1) return '1 person listening now';
   return '$count people listening now';
 }
 
 String _playlistListenersLabel(int count, String city) {
-  if (count <= 0) return 'Be first in this playlist';
+  if (count <= 0) return 'No listeners yet';
   if (count == 1) return '1 person in $city';
   return '$count people in $city';
 }
@@ -107,17 +73,859 @@ String _compactCount(int count) {
   return '$count';
 }
 
+String _trackKey(Map<String, dynamic> track) {
+  return (track['track_id'] ??
+          track['spotify_id'] ??
+          track['deezer_id'] ??
+          track['id'] ??
+          '')
+      .toString();
+}
+
+String _trackArtistKey(Map<String, dynamic> track) {
+  final raw = (track['artist'] ??
+          track['artist_name'] ??
+          track['artistName'] ??
+          track['creator'] ??
+          '')
+      .toString()
+      .toLowerCase();
+  final primary = raw.split(RegExp(r'\s+(feat|ft|featuring)\s+')).first;
+  return primary
+      .replaceAll(RegExp(r'[^a-z0-9а-яё]+'), ' ')
+      .trim();
+}
+
+List<Map<String, dynamic>> _balancedWeatherTracks(
+  List<List<Map<String, dynamic>>> batches,
+  int targetCount, {
+  int maxPerArtist = 4,
+}) {
+  final seenTracks = <String>{};
+  final perArtist = <String, int>{};
+  final queues =
+      batches.map((batch) => List<Map<String, dynamic>>.from(batch)).toList();
+  final merged = <Map<String, dynamic>>[];
+  var hasMore = true;
+
+  while (hasMore && merged.length < targetCount) {
+    hasMore = false;
+    for (final queue in queues) {
+      while (queue.isNotEmpty) {
+        hasMore = true;
+        final track = queue.removeAt(0);
+        final id = _trackKey(track);
+        if (id.isEmpty || !seenTracks.add(id)) continue;
+        final artist = _trackArtistKey(track);
+        final artistCount = perArtist[artist] ?? 0;
+        if (artist.isNotEmpty && artistCount >= maxPerArtist) continue;
+        if (artist.isNotEmpty) perArtist[artist] = artistCount + 1;
+        merged.add(track);
+        break;
+      }
+      if (merged.length >= targetCount) break;
+    }
+  }
+
+  return merged;
+}
+
+List<Map<String, dynamic>> _extractInlineWeatherTracks(
+  Map<String, dynamic> playlist,
+) {
+  final rawTracks = playlist['tracks'] ?? playlist['items'] ?? playlist['songs'];
+  if (rawTracks is! List) return [];
+  return rawTracks
+      .whereType<Map>()
+      .map((item) => Map<String, dynamic>.from(item))
+      .toList();
+}
+
+List<String> _weatherPlaylistQueries(Map<String, dynamic> playlist) {
+  final queries = <String>[];
+  final artistQueries = playlist['artist_queries'] ??
+      playlist['artistQueries'] ??
+      playlist['artists'] ??
+      playlist['seed_artists'];
+  if (artistQueries is List) {
+    queries.addAll(artistQueries.map((item) => item.toString().trim()));
+  }
+  queries.addAll(_weatherSeedQueries(playlist));
+
+  for (final key in ['search_query', 'searchQuery', 'seed_query', 'query']) {
+    final value = playlist[key]?.toString().trim();
+    if (value != null && value.isNotEmpty) queries.add(value);
+  }
+
+  if (queries.isEmpty) {
+    for (final key in ['title', 'name', 'mood', 'description']) {
+      final value = playlist[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) queries.add(value);
+    }
+  }
+
+  final seen = <String>{};
+  return queries
+      .where((query) => query.isNotEmpty && seen.add(query.toLowerCase()))
+      .toList();
+}
+
+List<String> _weatherSeedQueries(Map<String, dynamic> playlist) {
+  final id = (playlist['id'] ?? '').toString().toLowerCase();
+  final title = (playlist['title'] ?? playlist['name'] ?? '')
+      .toString()
+      .toLowerCase();
+  final weatherKey = (playlist['weather_key'] ?? '').toString().toLowerCase();
+  final mood = (playlist['mood'] ?? '').toString().toLowerCase();
+
+  const byId = <String, List<String>>{
+    'golden-hour': [
+      'Harry Styles',
+      'Rex Orange County',
+      'Conan Gray',
+      'Omar Apollo',
+      'Still Woozy',
+      'Dominic Fike',
+      'Tai Verdes',
+      'Wallows',
+      'beabadoobee',
+      'The 1975',
+      'Glass Animals',
+      'Phoenix',
+    ],
+  };
+
+  const byTitle = <String, List<String>>{
+    'morning energy': [
+      'Dua Lipa',
+      'Lizzo',
+      'Katy Perry',
+      'Nicki Minaj',
+      'Bebe Rexha',
+      'Meghan Trainor',
+      'Cardi B',
+      'Kesha',
+      'Iggy Azalea',
+      'Doja Cat',
+      'Sabrina Carpenter',
+      'Ariana Grande',
+    ],
+    'windows down': [
+      'Harry Styles',
+      'Rex Orange County',
+      'Conan Gray',
+      'Omar Apollo',
+      'Still Woozy',
+      'Dominic Fike',
+      'Tai Verdes',
+      'Wallows',
+      'beabadoobee',
+      'The 1975',
+      'Glass Animals',
+      'Phoenix',
+    ],
+  };
+
+  const byWeather = <String, List<String>>{
+    'clear': [
+      'Dua Lipa',
+      'Harry Styles',
+      'Taylor Swift',
+      'Sabrina Carpenter',
+      'Olivia Rodrigo',
+      'Bruno Mars',
+      'Pharrell Williams',
+      'The 1975',
+      'Glass Animals',
+      'Jack Johnson',
+      'Rex Orange County',
+      'Dominic Fike',
+    ],
+    'rain': [
+      'Lana Del Rey',
+      'The Weeknd',
+      'SZA',
+      'Bon Iver',
+      'Phoebe Bridgers',
+      'Billie Eilish',
+      'Frank Ocean',
+      'Norah Jones',
+      'Nujabes',
+      'Clairo',
+      'Mitski',
+      'Daniel Caesar',
+    ],
+    'clouds': [
+      'Tame Impala',
+      'Beach House',
+      'Frank Ocean',
+      'Mac DeMarco',
+      'SZA',
+      'James Blake',
+      'Vampire Weekend',
+      'Men I Trust',
+      'Erykah Badu',
+      'Still Woozy',
+      'Bon Iver',
+      'Explosions in the Sky',
+    ],
+    'snow': [
+      'Fleet Foxes',
+      'Sufjan Stevens',
+      'Radiohead',
+      'Max Richter',
+      'Ludovico Einaudi',
+      'Nils Frahm',
+      'Bon Iver',
+      'Tycho',
+      'Jose Gonzalez',
+      'Iron and Wine',
+      'John Coltrane',
+      'Olafur Arnalds',
+    ],
+    'storm': [
+      'Imagine Dragons',
+      'Muse',
+      'Linkin Park',
+      'Metallica',
+      'Nine Inch Nails',
+      'Twenty One Pilots',
+      'Paramore',
+      'Green Day',
+      'Skrillex',
+      'The Midnight',
+      'Foo Fighters',
+      'Hans Zimmer',
+    ],
+    'mist': [
+      'Mazzy Star',
+      'Portishead',
+      'Brian Eno',
+      'Cigarettes After Sex',
+      'Slowdive',
+      'Nick Drake',
+      'Washed Out',
+      'Nils Frahm',
+      'Cocteau Twins',
+      'Massive Attack',
+      'Chillhop Music',
+      'Harold Budd',
+    ],
+  };
+
+  const byMood = <String, List<String>>{
+    'sunny': [
+      'Harry Styles',
+      'Dua Lipa',
+      'Taylor Swift',
+      'The 1975',
+      'Sabrina Carpenter',
+      'Olivia Rodrigo',
+      'Bruno Mars',
+      'Rex Orange County',
+      'Dominic Fike',
+      'Doja Cat',
+      'Ariana Grande',
+      'Lizzo',
+    ],
+    'energetic': [
+      'Bruno Mars',
+      'Doja Cat',
+      'Pharrell Williams',
+      'Lizzo',
+      'Dua Lipa',
+      'Cardi B',
+      'Nicki Minaj',
+      'Katy Perry',
+      'Pitbull',
+      'Flo Rida',
+      'Ava Max',
+      'Bebe Rexha',
+    ],
+    'chill': [
+      'Frank Ocean',
+      'Mac DeMarco',
+      'Still Woozy',
+      'SZA',
+      'Khalid',
+      'Daniel Caesar',
+      'H.E.R.',
+      'Tom Misch',
+      'Men I Trust',
+      'Clairo',
+      'Rex Orange County',
+      'Omar Apollo',
+    ],
+    'rainy': [
+      'Lana Del Rey',
+      'Bon Iver',
+      'Phoebe Bridgers',
+      'Clairo',
+      'Mitski',
+      'Billie Eilish',
+      'The National',
+      'Sufjan Stevens',
+      'Lord Huron',
+      'Mazzy Star',
+      'Radiohead',
+      'Norah Jones',
+    ],
+    'melancholy': [
+      'Billie Eilish',
+      'The Weeknd',
+      'Mitski',
+      'Adele',
+      'Lana Del Rey',
+      'Frank Ocean',
+      'Sam Smith',
+      'Bon Iver',
+      'SZA',
+      'Lord Huron',
+      'Phoebe Bridgers',
+      'Daniel Caesar',
+    ],
+    'dreamy': [
+      'Beach House',
+      'Mazzy Star',
+      'Slowdive',
+      'Washed Out',
+      'Cocteau Twins',
+      'Tame Impala',
+      'Men I Trust',
+      'Cigarettes After Sex',
+      'Portishead',
+      'Wild Nothing',
+      'Grouper',
+      'Still Woozy',
+    ],
+    'stormy': [
+      'Muse',
+      'Linkin Park',
+      'Imagine Dragons',
+      'Skrillex',
+      'Metallica',
+      'Twenty One Pilots',
+      'Paramore',
+      'Foo Fighters',
+      'Nine Inch Nails',
+      'Green Day',
+      'The Midnight',
+      'Hans Zimmer',
+    ],
+    'cozy': [
+      'Fleet Foxes',
+      'Sufjan Stevens',
+      'Norah Jones',
+      'Max Richter',
+      'Bon Iver',
+      'Jose Gonzalez',
+      'Iron and Wine',
+      'Gregory Alan Isakov',
+      'John Coltrane',
+      'Nils Frahm',
+      'Ludovico Einaudi',
+      'Phoebe Bridgers',
+    ],
+    'calm': [
+      'Nils Frahm',
+      'Ludovico Einaudi',
+      'Brian Eno',
+      'Tycho',
+      'Max Richter',
+      'Olafur Arnalds',
+      'Bonobo',
+      'Jon Hopkins',
+      'Fleet Foxes',
+      'Sufjan Stevens',
+      'Norah Jones',
+      'Washed Out',
+    ],
+  };
+
+  return [
+    ...?byId[id],
+    ...?byTitle[title],
+    ...?byWeather[weatherKey],
+    ...?byMood[mood],
+  ];
+}
+
+List<String> _weatherRescueQueries(Map<String, dynamic> playlist) {
+  final weatherKey = (playlist['weather_key'] ?? '').toString().toLowerCase();
+  final mood = (playlist['mood'] ?? '').toString().toLowerCase();
+
+  const bright = [
+    'Dua Lipa',
+    'Lizzo',
+    'Katy Perry',
+    'Nicki Minaj',
+    'Bebe Rexha',
+    'Meghan Trainor',
+    'Cardi B',
+    'Kesha',
+    'Iggy Azalea',
+    'Doja Cat',
+    'Sabrina Carpenter',
+    'Ariana Grande',
+    'Harry Styles',
+    'Taylor Swift',
+    'Olivia Rodrigo',
+    'Bruno Mars',
+    'Pharrell Williams',
+    'The 1975',
+    'Glass Animals',
+    'Jack Johnson',
+    'Rex Orange County',
+    'Dominic Fike',
+    'Omar Apollo',
+    'Conan Gray',
+    'Still Woozy',
+    'Tai Verdes',
+    'Wallows',
+    'beabadoobee',
+    'Phoenix',
+    'Charlie Puth',
+    'Jason Derulo',
+    'Maroon 5',
+    'Shawn Mendes',
+    'Camila Cabello',
+    'Ava Max',
+    'Carly Rae Jepsen',
+    'Zara Larsson',
+    'Sigrid',
+    'Flo Rida',
+    'Pitbull',
+    'Ne-Yo',
+    'Robin Thicke',
+    'Selena Gomez',
+    'Justin Bieber',
+    'Normani',
+    'Gracie Abrams',
+    'girl in red',
+    'Clairo',
+    'Soccer Mommy',
+    'Foster the People',
+    'MGMT',
+    'Two Door Cinema Club',
+    'Passion Pit',
+    'Young the Giant',
+    'Grouplove',
+    'Ra Ra Riot',
+    'Wet Leg',
+    'PinkPantheress',
+    'Khalid',
+    'H.E.R.',
+    'Janelle Monae',
+    'Childish Gambino',
+    'Anderson Paak',
+    'Silk Sonic',
+  ];
+
+  const rainy = [
+    'Lana Del Rey',
+    'The Weeknd',
+    'SZA',
+    'Bon Iver',
+    'Phoebe Bridgers',
+    'Billie Eilish',
+    'Frank Ocean',
+    'Norah Jones',
+    'Nujabes',
+    'Clairo',
+    'Mitski',
+    'Daniel Caesar',
+    'Lorde',
+    'beabadoobee',
+    'Snail Mail',
+    'Angel Olsen',
+    'Japanese Breakfast',
+    'Big Thief',
+    'Drake',
+    'PARTYNEXTDOOR',
+    '6LACK',
+    'Summer Walker',
+    'Jhene Aiko',
+    'Kehlani',
+    'Fleet Foxes',
+    'The National',
+    'Sufjan Stevens',
+    'Pinegrove',
+    'Iron and Wine',
+    'Gregory Alan Isakov',
+    'Novo Amor',
+    'Adrianne Lenker',
+    'Julien Baker',
+    'Lucy Dacus',
+    'Adele',
+    'Sam Smith',
+    'Amy Winehouse',
+    'Duffy',
+    'Corinne Bailey Rae',
+    'Joss Stone',
+    'London Grammar',
+    'Diana Krall',
+    'Feist',
+    'Madeleine Peyroux',
+    'Katie Melua',
+    'J Dilla',
+    'Madlib',
+    'Knxwledge',
+    'Mac Miller',
+    'Oddisee',
+    'Linkin Park',
+    'Imagine Dragons',
+    'Paramore',
+    'Fall Out Boy',
+    'My Chemical Romance',
+  ];
+
+  const cloudy = [
+    'Tame Impala',
+    'Beach House',
+    'Frank Ocean',
+    'Mac DeMarco',
+    'SZA',
+    'James Blake',
+    'Vampire Weekend',
+    'Men I Trust',
+    'Erykah Badu',
+    'Still Woozy',
+    'Bon Iver',
+    'Explosions in the Sky',
+    'MGMT',
+    'Unknown Mortal Orchestra',
+    'Mild High Club',
+    'Homeshake',
+    'Connan Mockasin',
+    'Alex G',
+    'D Angelo',
+    'Maxwell',
+    'Lauryn Hill',
+    'Sade',
+    'Angie Stone',
+    'Jill Scott',
+    'India Arie',
+    'Musiq Soulchild',
+    'Daniel Caesar',
+    'H.E.R.',
+    'Summer Walker',
+    'Kehlani',
+    'Lucky Daye',
+    'Masego',
+    'Real Estate',
+    'Beach Fossils',
+    'Wild Nothing',
+    'Tops',
+    'Cocteau Twins',
+    'Mazzy Star',
+    'Slowdive',
+    'Warpaint',
+    'Broadcast',
+    'Father John Misty',
+    'Beirut',
+    'Rostam',
+    'Grizzly Bear',
+    'Whitney',
+    'Rex Orange County',
+    'Omar Apollo',
+    'Dominic Fike',
+    'Conan Gray',
+    'Tai Verdes',
+    'd4vd',
+    'Bilal',
+    'Sigur Ros',
+    'Mogwai',
+    'Caspian',
+    'Toe',
+  ];
+
+  const cold = [
+    'Fleet Foxes',
+    'Sufjan Stevens',
+    'Radiohead',
+    'Max Richter',
+    'Ludovico Einaudi',
+    'Nils Frahm',
+    'Bon Iver',
+    'Tycho',
+    'Jose Gonzalez',
+    'Iron and Wine',
+    'John Coltrane',
+    'Olafur Arnalds',
+    'Gregory Alan Isakov',
+    'Wilco',
+    'The Tallest Man on Earth',
+    'Novo Amor',
+    'American Football',
+    'Thom Yorke',
+    'Portishead',
+    'Massive Attack',
+    'Burial',
+    'The xx',
+    'Mount Kimbie',
+    'Four Tet',
+    'Nicolas Jaar',
+    'Miles Davis',
+    'Bill Evans',
+    'Thelonious Monk',
+    'Herbie Hancock',
+    'Charles Mingus',
+    'Dave Brubeck',
+    'Chet Baker',
+    'Arcade Fire',
+    'Tame Impala',
+    'Mac DeMarco',
+    'Kurt Vile',
+    'War on Drugs',
+    'Alvvays',
+    'Hauschka',
+    'Yann Tiersen',
+    'Dustin O Halloran',
+    'Bonobo',
+    'Jon Hopkins',
+    'Washed Out',
+    'Toro y Moi',
+    'Damien Rice',
+    'Ben Howard',
+    'Nick Drake',
+    'Elliott Smith',
+    'Angus and Julia Stone',
+    'Daughter',
+  ];
+
+  const storm = [
+    'Imagine Dragons',
+    'Muse',
+    'Linkin Park',
+    'Metallica',
+    'Nine Inch Nails',
+    'Twenty One Pilots',
+    'Paramore',
+    'Green Day',
+    'Skrillex',
+    'The Midnight',
+    'Foo Fighters',
+    'Hans Zimmer',
+    'Bastille',
+    'X Ambassadors',
+    'OneRepublic',
+    'Halsey',
+    'Coldplay',
+    'The Script',
+    'Walk the Moon',
+    'Panic at the Disco',
+    'My Chemical Romance',
+    'Fall Out Boy',
+    'All Time Low',
+    'Sleeping with Sirens',
+    'Pierce the Veil',
+    'A Day to Remember',
+    'Queens of the Stone Age',
+    'Royal Blood',
+    'Nothing But Thieves',
+    'Biffy Clyro',
+    'Wolf Alice',
+    'Deftones',
+    'Marilyn Manson',
+    'HEALTH',
+    'Crystal Castles',
+    'Zola Jesus',
+    'Boy Harsher',
+    'Slipknot',
+    'System of a Down',
+    'Disturbed',
+    'Tool',
+    'Korn',
+    'Rage Against the Machine',
+    'Audioslave',
+    'Sum 41',
+    'Blink-182',
+    'The Offspring',
+    'Good Charlotte',
+    'Simple Plan',
+    'FM-84',
+    'Timecop1983',
+    'Carpenter Brut',
+    'Gunship',
+    'Deadmau5',
+    'Knife Party',
+    'Excision',
+  ];
+
+  const mist = [
+    'Mazzy Star',
+    'Portishead',
+    'Brian Eno',
+    'Cigarettes After Sex',
+    'Slowdive',
+    'Nick Drake',
+    'Washed Out',
+    'Nils Frahm',
+    'Cocteau Twins',
+    'Massive Attack',
+    'Chillhop Music',
+    'Harold Budd',
+    'Grouper',
+    'Julee Cruise',
+    'Low',
+    'Cranes',
+    'Beach House',
+    'Warpaint',
+    'Idealism',
+    'Philanthrope',
+    'Sagun',
+    'Lofi Girl',
+    'Jinsang',
+    'Kupla',
+    'Jazzinuf',
+    'Sleepy Fish',
+    'Purrple Cat',
+    'Tricky',
+    'Lamb',
+    'Morcheeba',
+    'Sneaker Pimps',
+    'Hooverphonic',
+    'Archive',
+    'Moloko',
+    'Zero 7',
+    'Tangerine Dream',
+    'Stars of the Lid',
+    'Tim Hecker',
+    'William Basinski',
+    'The Caretaker',
+    'Ride',
+    'Chapterhouse',
+    'Lush',
+    'Wild Nothing',
+    'Toro y Moi',
+    'Memory Tapes',
+    'Small Black',
+    'J Cole',
+    'Kendrick Lamar',
+    'Isaiah Rashad',
+    'Vince Staples',
+    'Earl Sweatshirt',
+    'Max Richter',
+    'Olafur Arnalds',
+  ];
+
+  if (weatherKey == 'rain' || mood == 'rainy' || mood == 'melancholy') {
+    return rainy;
+  }
+  if (weatherKey == 'clouds' || mood == 'cloudy' || mood == 'dreamy') {
+    return cloudy;
+  }
+  if (weatherKey == 'snow' || mood == 'cozy' || mood == 'calm') {
+    return cold;
+  }
+  if (weatherKey == 'storm' || mood == 'stormy' || mood == 'intense') {
+    return storm;
+  }
+  if (weatherKey == 'mist' || mood == 'foggy') {
+    return mist;
+  }
+  return bright;
+}
+
+Future<List<Map<String, dynamic>>> _loadWeatherPlaylistTracks(
+  Map<String, dynamic> playlist,
+) async {
+  final inlineTracks = _extractInlineWeatherTracks(playlist);
+  final targetCount =
+      max(220, (playlist['track_count'] as num?)?.toInt() ?? 220)
+          .clamp(220, 260)
+          .toInt();
+  final queries = [
+    ..._weatherPlaylistQueries(playlist),
+    ..._weatherRescueQueries(playlist),
+  ];
+  final merged = <Map<String, dynamic>>[];
+  final seen = <String>{};
+  final perArtist = <String, int>{};
+  const maxPerArtist = 4;
+
+  void addTrack(Map<String, dynamic> track) {
+    final id = _trackKey(track).isNotEmpty
+        ? _trackKey(track)
+        : '${track['title'] ?? track['trackName'] ?? ''}|${track['artist'] ?? track['artistName'] ?? ''}'
+            .toLowerCase();
+    if (id.trim().isEmpty || !seen.add(id)) return;
+    final artist = _trackArtistKey(track);
+    final artistCount = perArtist[artist] ?? 0;
+    if (artist.isNotEmpty && artistCount >= maxPerArtist) return;
+    if (artist.isNotEmpty) perArtist[artist] = artistCount + 1;
+    merged.add(Map<String, dynamic>.from(track));
+  }
+
+  Future<void> loadQueries(List<String> sourceQueries) async {
+    final seenQueries = <String>{};
+    final normalized = sourceQueries
+        .where((query) => query.trim().isNotEmpty)
+        .where((query) => seenQueries.add(query.trim().toLowerCase()))
+        .toList();
+    for (var i = 0; i < normalized.length; i += 8) {
+      final chunk = normalized.skip(i).take(8).toList();
+      final results = await Future.wait(
+        chunk.map(
+          (query) => ApiService()
+              .searchTracksWithFallback(query, limit: 50)
+              .catchError((_) => <Map<String, dynamic>>[]),
+        ),
+      );
+      // Round-robin interleaving: take one valid track per query per pass
+      final queues =
+          results.map((r) => List<Map<String, dynamic>>.from(r)).toList();
+      var madeProgress = true;
+      while (madeProgress && merged.length < targetCount) {
+        madeProgress = false;
+        for (final queue in queues) {
+          final lenBefore = merged.length;
+          while (queue.isNotEmpty) {
+            addTrack(queue.removeAt(0));
+            if (merged.length > lenBefore) {
+              madeProgress = true;
+              break;
+            }
+            if (merged.length >= targetCount) return;
+          }
+          if (merged.length >= targetCount) return;
+        }
+      }
+      if (merged.length >= targetCount) return;
+    }
+  }
+
+  for (final track in inlineTracks) {
+    addTrack(track);
+    if (merged.length >= targetCount) return merged;
+  }
+
+  await loadQueries(queries);
+
+  if (merged.length >= targetCount) return merged;
+
+  final charts = await ApiService().getCharts(limit: 50);
+  for (final raw in charts.whereType<Map>()) {
+    addTrack(Map<String, dynamic>.from(raw));
+    if (merged.length >= targetCount) return merged;
+  }
+
+  return merged;
+}
+
 // ─── Per-condition gradient colours ───────────────────────────────────────────
 
 List<Color> _headerGradient(String condition) {
   switch (condition) {
     case 'clear':
-      return const [Color(0xFF0f1b2d), Color(0xFF1a2d4a), Color(0xFF0d1825)];
+      return const [Color(0xFF0D2238), Color(0xFF12314B), Color(0xFF070D18)];
+    case 'partly_cloudy':
+      return const [Color(0xFF101D2E), Color(0xFF26364A), Color(0xFF080D18)];
     case 'clouds':
-      return const [Color(0xFF111d2e), Color(0xFF1e2f44), Color(0xFF0e1822)];
+      return const [Color(0xFF111827), Color(0xFF273244), Color(0xFF080D16)];
     case 'rain':
     case 'drizzle':
-      return const [Color(0xFF080f1a), Color(0xFF0f1d30), Color(0xFF070c14)];
+      return const [Color(0xFF07111F), Color(0xFF12243A), Color(0xFF060A12)];
     case 'snow':
       return const [Color(0xFF131c2e), Color(0xFF1b2840), Color(0xFF0f1625)];
     case 'storm':
@@ -135,9 +943,11 @@ List<Color> _headerGradient(String condition) {
 Color _accentColor(String condition) {
   switch (condition) {
     case 'clear':
-      return const Color(0xFFfbbf24);
+      return const Color(0xFFF5C451);
+    case 'partly_cloudy':
+      return const Color(0xFFf8c85a);
     case 'clouds':
-      return const Color(0xFF93c5fd);
+      return const Color(0xFFAEC8E8);
     case 'rain':
     case 'drizzle':
       return const Color(0xFF60a5fa);
@@ -152,6 +962,145 @@ Color _accentColor(String condition) {
       return const Color(0xFF94a3b8);
     default:
       return const Color(0xFF93c5fd);
+  }
+}
+
+class _WeatherConditionIcon extends StatelessWidget {
+  final String condition;
+  final String description;
+  final double size;
+  final Color accent;
+
+  const _WeatherConditionIcon({
+    required this.condition,
+    required this.description,
+    required this.size,
+    required this.accent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final key = '${condition.toLowerCase()} ${description.toLowerCase()}';
+    final isSnow = key.contains('snow') || key.contains('blizzard');
+    final isStorm = key.contains('storm') || key.contains('thunder');
+    final isRain = key.contains('rain') || key.contains('drizzle');
+    final isPartly = key.contains('partly');
+    final isCloud = key.contains('cloud') || key.contains('overcast');
+    final iconSize = size * 0.62;
+
+    if (isSnow) {
+      return _WeatherIconShell(
+        size: size,
+        accent: accent,
+        child: Icon(Icons.ac_unit_rounded, size: iconSize, color: Colors.white),
+      );
+    }
+    if (isStorm) {
+      return _WeatherIconShell(
+        size: size,
+        accent: accent,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(Icons.cloud_rounded,
+                size: iconSize * 1.05, color: const Color(0xFFc4b5fd)),
+            Transform.translate(
+              offset: Offset(iconSize * 0.10, iconSize * 0.22),
+              child: Icon(Icons.bolt_rounded,
+                  size: iconSize * 0.66, color: const Color(0xFFfacc15)),
+            ),
+          ],
+        ),
+      );
+    }
+    if (isRain) {
+      return _WeatherIconShell(
+        size: size,
+        accent: accent,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Transform.translate(
+              offset: Offset(0, -iconSize * 0.10),
+              child: Icon(Icons.cloud_rounded,
+                  size: iconSize * 0.94, color: const Color(0xFFbfdbfe)),
+            ),
+            Transform.translate(
+              offset: Offset(0, iconSize * 0.28),
+              child: Icon(Icons.water_drop_rounded,
+                  size: iconSize * 0.48, color: const Color(0xFF60a5fa)),
+            ),
+          ],
+        ),
+      );
+    }
+    if (isPartly) {
+      return _WeatherIconShell(
+        size: size,
+        accent: accent,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Transform.translate(
+              offset: Offset(-iconSize * 0.16, -iconSize * 0.10),
+              child: Icon(Icons.wb_sunny_rounded,
+                  size: iconSize * 0.74, color: const Color(0xFFfbbf24)),
+            ),
+            Transform.translate(
+              offset: Offset(iconSize * 0.12, iconSize * 0.08),
+              child: Icon(Icons.cloud_rounded,
+                  size: iconSize * 0.82, color: const Color(0xFFcbd5e1)),
+            ),
+          ],
+        ),
+      );
+    }
+    if (isCloud) {
+      return _WeatherIconShell(
+        size: size,
+        accent: accent,
+        child: Icon(Icons.cloud_rounded,
+            size: iconSize, color: const Color(0xFFcbd5e1)),
+      );
+    }
+    return _WeatherIconShell(
+      size: size,
+      accent: accent,
+      child: Icon(Icons.wb_sunny_rounded,
+          size: iconSize, color: const Color(0xFFfbbf24)),
+    );
+  }
+}
+
+class _WeatherIconShell extends StatelessWidget {
+  final double size;
+  final Color accent;
+  final Widget child;
+
+  const _WeatherIconShell({
+    required this.size,
+    required this.accent,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: RadialGradient(
+          colors: [
+            accent.withOpacity(0.26),
+            accent.withOpacity(0.10),
+            Colors.white.withOpacity(0.02),
+          ],
+        ),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Center(child: child),
+    );
   }
 }
 
@@ -210,46 +1159,25 @@ class _WeatherScreenState extends State<WeatherScreen>
     if (playlistId.isEmpty || _playingPlaylistId != null) return;
     setState(() => _playingPlaylistId = playlistId);
     try {
-      // Use first 2 artists for a quick 40-track queue
-      final artistQueries =
-          (playlist['artist_queries'] as List?)?.whereType<String>().toList() ??
-              [];
-      final fallback = (playlist['search_query'] ?? '').toString();
-      final queries = artistQueries.isNotEmpty
-          ? artistQueries.take(2).toList()
-          : fallback.isNotEmpty
-              ? [fallback]
-              : <String>[];
-
-      List<Map<String, dynamic>> queue = [];
-      if (queries.isNotEmpty) {
-        final results = await Future.wait(
-          queries.map(
-            (q) => ApiService()
-                .searchTracksWithFallback(q, limit: 25)
-                .catchError((_) => <Map<String, dynamic>>[]),
-          ),
-        );
-        final seen = <String>{};
-        for (final batch in results) {
-          for (final t in batch) {
-            final id =
-                (t['track_id'] ?? t['spotify_id'] ?? t['id'] ?? '').toString();
-            if (id.isNotEmpty && seen.add(id)) queue.add(t);
-          }
-        }
-        queue.shuffle(Random());
-      }
+      final queue = await _loadWeatherPlaylistTracks(playlist);
+      queue.shuffle(Random());
       if (!mounted) return;
       if (queue.isEmpty) return;
+      final city = (_payload?['city'] ?? 'City').toString();
+      try {
+        final listening = await ApiService().markWeatherListening(
+          city,
+          playlistId: playlistId,
+        );
+        _applyListeningCounts(listening);
+      } catch (_) {}
+      if (!mounted) return;
       final first = Map<String, dynamic>.from(queue.first)
         ..['queue'] = queue
-        ..['source'] =
-            '${(_payload?['city'] ?? 'City')} weather · ${playlist['title'] ?? 'Vibes'}';
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => PlayerScreen(track: first)),
-      );
+        ..['source'] = '$city weather · ${playlist['title'] ?? 'Vibes'}';
+      MiniPlayerOverlayController.forceVisible();
+      await context.read<PlayerProvider>().openTrack(first);
+      MiniPlayerOverlayController.forceVisible();
     } finally {
       if (mounted) setState(() => _playingPlaylistId = null);
     }
@@ -258,7 +1186,9 @@ class _WeatherScreenState extends State<WeatherScreen>
   void _openPlaylistDetail(Map<String, dynamic> playlist) {
     final condition = (_payload?['condition'] ?? '').toString().toLowerCase();
     final city = (_payload?['city'] ?? 'City').toString();
-    final topListeners = ((_payload?['top_listeners'] as List?) ?? const [])
+    final topListeners = ((playlist['top_listeners'] as List?) ??
+            (_payload?['top_listeners'] as List?) ??
+            const [])
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
@@ -276,6 +1206,30 @@ class _WeatherScreenState extends State<WeatherScreen>
     );
   }
 
+  void _applyListeningCounts(Map<String, dynamic> payload) {
+    final cityCount = (payload['listeners_count'] as num?)?.toInt();
+    final playlistId = (payload['playlist_id'] ?? '').toString();
+    final playlistCount =
+        (payload['playlist_listeners_count'] as num?)?.toInt();
+    if (cityCount == null && playlistCount == null) return;
+    setState(() {
+      final current = Map<String, dynamic>.from(_payload ?? const {});
+      if (cityCount != null) current['listeners_count'] = cityCount;
+      final playlists = ((current['playlists'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((item) {
+        final map = Map<String, dynamic>.from(item);
+        if (playlistCount != null &&
+            (map['id'] ?? '').toString() == playlistId) {
+          map['listeners_count'] = playlistCount;
+        }
+        return map;
+      }).toList();
+      current['playlists'] = playlists;
+      _payload = current;
+    });
+  }
+
   Color _hexToColor(String value) {
     final hex = value.replaceAll('#', '');
     if (hex.length != 6) return const Color(0xFF4a6fa5);
@@ -291,10 +1245,6 @@ class _WeatherScreenState extends State<WeatherScreen>
                 : _conditionLabel(condition))
             .toString();
     final description = (_payload?['description'] ?? '').toString();
-    final emoji = _weatherEmoji(condition, description);
-    final weatherIcon = _weatherIconData(condition, description);
-    final icon = (_payload?['icon'] ?? '').toString();
-
     final rawTemp = _payload?['temp'];
     final temp = rawTemp is num ? rawTemp.toDouble() : null;
 
@@ -316,6 +1266,7 @@ class _WeatherScreenState extends State<WeatherScreen>
 
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -369,45 +1320,11 @@ class _WeatherScreenState extends State<WeatherScreen>
                             ),
                           )
                         else ...[
-                          // ── Weather icon (OWM image or emoji fallback) ──
-                          Container(
-                            width: 108,
-                            height: 108,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: RadialGradient(
-                                colors: [
-                                  accent.withOpacity(0.26),
-                                  accent.withOpacity(0.08),
-                                  Colors.transparent,
-                                ],
-                              ),
-                            ),
-                            child: Center(
-                              child: icon.isNotEmpty
-                                  ? CachedNetworkImage(
-                                      imageUrl:
-                                          'https://openweathermap.org/img/wn/${icon}@4x.png',
-                                      width: 96,
-                                      height: 96,
-                                      fit: BoxFit.contain,
-                                      placeholder: (_, __) => Icon(
-                                        weatherIcon,
-                                        size: 56,
-                                        color: accent,
-                                      ),
-                                      errorWidget: (_, __, ___) => Icon(
-                                        weatherIcon,
-                                        size: 56,
-                                        color: accent,
-                                      ),
-                                    )
-                                  : Icon(
-                                      weatherIcon,
-                                      size: 56,
-                                      color: accent,
-                                    ),
-                            ),
+                          _WeatherConditionIcon(
+                            condition: condition,
+                            description: description,
+                            size: 108,
+                            accent: accent,
                           ),
                           const SizedBox(height: 8),
                           // Temperature
@@ -459,28 +1376,32 @@ class _WeatherScreenState extends State<WeatherScreen>
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  AnimatedBuilder(
-                                    animation: _blinkController,
-                                    builder: (_, __) => Opacity(
-                                      opacity:
-                                          0.35 + 0.65 * _blinkController.value,
-                                      child: Container(
-                                        width: 7,
-                                        height: 7,
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFF22c55e),
-                                          shape: BoxShape.circle,
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: const Color(0xFF22c55e)
-                                                  .withOpacity(0.55),
-                                              blurRadius: 6,
-                                            ),
-                                          ],
+                                  if (listeners > 0)
+                                    AnimatedBuilder(
+                                      animation: _blinkController,
+                                      builder: (_, __) => Opacity(
+                                        opacity: 0.35 +
+                                            0.65 * _blinkController.value,
+                                        child: Container(
+                                          width: 7,
+                                          height: 7,
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF22c55e),
+                                            shape: BoxShape.circle,
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: const Color(0xFF22c55e)
+                                                    .withOpacity(0.55),
+                                                blurRadius: 6,
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ),
+                                    )
+                                  else
+                                    const Icon(Icons.graphic_eq_rounded,
+                                        size: 13, color: Colors.white38),
                                   const SizedBox(width: 7),
                                   Text(
                                     _listenersLabel(listeners, city),
@@ -549,28 +1470,11 @@ class _WeatherScreenState extends State<WeatherScreen>
                     padding: const EdgeInsets.fromLTRB(20, 40, 20, 40),
                     child: Column(
                       children: [
-                        SizedBox(
-                          width: 80,
-                          height: 80,
-                          child: icon.isNotEmpty
-                              ? CachedNetworkImage(
-                                  imageUrl:
-                                      'https://openweathermap.org/img/wn/${icon}@4x.png',
-                                  width: 80,
-                                  height: 80,
-                                  fit: BoxFit.contain,
-                                  placeholder: (_, __) => Center(
-                                      child: Text(emoji,
-                                          style:
-                                              const TextStyle(fontSize: 52))),
-                                  errorWidget: (_, __, ___) => Center(
-                                      child: Text(emoji,
-                                          style:
-                                              const TextStyle(fontSize: 52))),
-                                )
-                              : Center(
-                                  child: Text(emoji,
-                                      style: const TextStyle(fontSize: 52))),
+                        _WeatherConditionIcon(
+                          condition: condition,
+                          description: description,
+                          size: 80,
+                          accent: accent,
                         ),
                         const SizedBox(height: 14),
                         Text(
@@ -593,7 +1497,7 @@ class _WeatherScreenState extends State<WeatherScreen>
                   ),
                 ),
 
-              const SliverToBoxAdapter(child: SizedBox(height: 48)),
+              const SliverToBoxAdapter(child: SizedBox(height: 80)),
             ],
           ),
         ),
@@ -951,54 +1855,7 @@ class _WeatherPlaylistDetailScreenState
 
   Future<void> _loadTracks() async {
     try {
-      // Prefer artist_queries (5 artists) for ~100 tracks; fall back to single search_query
-      final artistQueries = (widget.playlist['artist_queries'] as List?)
-              ?.whereType<String>()
-              .toList() ??
-          [];
-      final fallback = (widget.playlist['search_query'] ?? '').toString();
-      final queries = artistQueries.isNotEmpty
-          ? artistQueries
-          : fallback.isNotEmpty
-              ? [fallback]
-              : <String>[];
-
-      if (queries.isEmpty) {
-        if (mounted) setState(() => _loading = false);
-        return;
-      }
-
-      // Run all artist searches in parallel (5 × 25 = ~100 tracks)
-      final results = await Future.wait(
-        queries.map(
-          (q) => ApiService()
-              .searchTracksWithFallback(q, limit: 25)
-              .catchError((_) => <Map<String, dynamic>>[]),
-        ),
-      );
-
-      // Merge + deduplicate by track id, max 4 tracks per artist
-      final merged = <Map<String, dynamic>>[];
-      final seen = <String>{};
-      final artistCount = <String, int>{};
-      for (final batch in results) {
-        for (final t in batch) {
-          final id = (t['track_id'] ??
-                  t['spotify_id'] ??
-                  t['deezer_id'] ??
-                  t['id'] ??
-                  '')
-              .toString();
-          if (id.isEmpty || !seen.add(id)) continue;
-          final artist = (t['artist'] ?? '').toString().trim().toLowerCase();
-          if (artist.isNotEmpty) {
-            if ((artistCount[artist] ?? 0) >= 4) continue;
-            artistCount[artist] = (artistCount[artist] ?? 0) + 1;
-          }
-          merged.add(t);
-        }
-      }
-      merged.shuffle(Random());
+      final merged = await _loadWeatherPlaylistTracks(widget.playlist);
 
       if (!mounted) return;
       setState(() {
@@ -1011,7 +1868,7 @@ class _WeatherPlaylistDetailScreenState
     }
   }
 
-  void _playAll({bool shuffle = false}) {
+  Future<void> _playAll({bool shuffle = false}) async {
     if (_tracks.isEmpty) return;
     var queue = List<Map<String, dynamic>>.from(_tracks);
     if (shuffle) {
@@ -1027,10 +1884,16 @@ class _WeatherPlaylistDetailScreenState
       ..['queue'] = queue
       ..['source'] =
           '${widget.city} weather · ${widget.playlist['title'] ?? 'Vibes'}';
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => PlayerScreen(track: first)),
-    );
+    try {
+      await ApiService().markWeatherListening(
+        widget.city,
+        playlistId: (widget.playlist['id'] ?? '').toString(),
+      );
+    } catch (_) {}
+    if (!mounted) return;
+    MiniPlayerOverlayController.forceVisible();
+    await context.read<PlayerProvider>().openTrack(first);
+    MiniPlayerOverlayController.forceVisible();
   }
 
   String _fmt(dynamic ms) {
@@ -1064,6 +1927,7 @@ class _WeatherPlaylistDetailScreenState
 
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -1432,11 +2296,11 @@ class _WeatherPlaylistDetailScreenState
                     final duration = _fmt(track['duration_ms']);
 
                     return GestureDetector(
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => PlayerScreen(track: track)),
-                      ),
+                      onTap: () async {
+                        MiniPlayerOverlayController.forceVisible();
+                        await context.read<PlayerProvider>().openTrack(track);
+                        MiniPlayerOverlayController.forceVisible();
+                      },
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 20, vertical: 10),
@@ -1523,7 +2387,7 @@ class _WeatherPlaylistDetailScreenState
                 ),
               ),
 
-            const SliverToBoxAdapter(child: SizedBox(height: 60)),
+            const SliverToBoxAdapter(child: SizedBox(height: 80)),
           ],
         ),
       ),

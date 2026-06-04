@@ -3,27 +3,324 @@ import 'dart:math';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 
+import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bottom_nav_bar.dart';
+import 'package:moodwave/widgets/mini_player.dart';
 import 'mood_screen.dart' show MoodData;
-import 'player_screen.dart';
 
 const _moodArtists = <String, List<String>>{
-  'study': ['Ludovico Einaudi', 'Max Richter', 'Nils Frahm', 'Brian Eno', 'Bonobo', 'Tycho', 'Ólafur Arnalds', 'Moby', 'Hans Zimmer', 'Johann Sebastian Bach', 'Frédéric Chopin', 'Claude Debussy', 'Chilly Gonzales', 'Hauschka', 'Peter Broderick', 'Floating Points', 'Jon Hopkins', 'Four Tet', 'Aphex Twin', 'Thievery Corporation'],
-  'workout': ['Eminem', 'Kanye West', 'The Weeknd', 'Travis Scott', 'Drake', 'Kendrick Lamar', 'Post Malone', 'Jay-Z', 'Meek Mill', 'Rick Ross', 'DMX', '50 Cent', 'Flo Rida', 'Pitbull', 'David Guetta', 'Calvin Harris', 'Marshmello', 'DJ Snake', 'Martin Garrix', 'Hardwell'],
-  'chill': ['Frank Ocean', 'Daniel Caesar', 'SZA', 'Jhené Aiko', 'Tom Misch', 'Kali Uchis', 'Mac Miller', 'H.E.R.', 'Khalid', 'Lucky Daye', 'Jordan Rakei', 'Masego', 'Kaytranada', 'Sango', 'Ta-ku', 'Flume', 'Nicolas Jaar', 'Shlohmo', 'Com Truise', 'Toro y Moi'],
-  'party': ['Dua Lipa', 'The Weeknd', 'Harry Styles', 'Lizzo', 'Cardi B', 'David Guetta', 'Calvin Harris', 'Ava Max', 'Lady Gaga', 'Katy Perry', 'Beyoncé', 'Rihanna', 'Bruno Mars', 'Justin Timberlake', 'Ariana Grande', 'DJ Snake', 'Pitbull', 'Flo Rida', 'Kesha', 'LMFAO'],
-  'drive': ['Tom Petty', 'Eagles', 'Fleetwood Mac', 'Queen', 'The Killers', 'Bruce Springsteen', 'R.E.M.', 'Vampire Weekend', 'Foo Fighters', 'Beck', 'MGMT', 'Foster the People', 'Two Door Cinema Club', 'Phoenix', 'The 1975', 'Weezer', 'Third Eye Blind', 'Matchbox Twenty', 'Sheryl Crow', 'Bryan Adams'],
-  'sleep': ['Brian Eno', 'Max Richter', 'Nils Frahm', 'Sigur Rós', 'Ólafur Arnalds', 'Moby', 'Stars of the Lid', 'Hammock', 'William Basinski', 'Harold Budd', 'Grouper', 'Mark Hollis', 'Talk Talk', 'Mutual Benefit', 'Loscil', 'Boards of Canada', 'Eluvium', 'Deaf Center', 'Johann Johannsson', 'Hauschka'],
-  'morning': ['Jack Johnson', 'Jason Mraz', 'John Mayer', 'Norah Jones', 'Sara Bareilles', 'Colbie Caillat', 'Ben Harper', 'Michael Bublé', 'James Morrison', 'Ben Rector', 'Gregory Alan Isakov', 'Josh Ritter', 'Ray LaMontagne', 'Brandi Carlile', 'Mat Kearney', 'Brett Eldredge', 'Gavin DeGraw', 'James Blunt', 'David Gray', 'Corinne Bailey Rae'],
-  'late_night': ['Frank Ocean', 'The Weeknd', 'partynextdoor', '6LACK', 'Summer Walker', 'SZA', 'Bryson Tiller', 'dvsn', 'Tory Lanez', 'Drake', 'Giveon', 'Lucky Daye', 'Brent Faiyaz', 'Daniel Caesar', 'Miguel', 'Maxwell', 'James Blake', 'Sade', 'Tamia', 'Toni Braxton'],
-  'sad': ['Bon Iver', 'Sufjan Stevens', 'The National', 'Fleet Foxes', 'Phoebe Bridgers', 'Elliott Smith', 'Iron & Wine', 'Nick Drake', 'Death Cab for Cutie', 'Bright Eyes', 'Mazzy Star', 'Gregory Alan Isakov', 'José González', 'Big Thief', 'Julien Baker', 'Lucy Dacus', 'Soccer Mommy', 'Sharon Van Etten', 'Angel Olsen', 'Damien Rice'],
-  'romance': ['John Legend', 'Bruno Mars', 'Marvin Gaye', 'Al Green', 'Sade', 'Alicia Keys', 'Sam Smith', 'Amy Winehouse', 'Luther Vandross', 'Etta James', 'Frank Sinatra', 'Diana Krall', 'Norah Jones', 'Michael Bublé', 'George Michael', 'Barry White', 'Teddy Pendergrass', 'Lionel Richie', 'Whitney Houston', 'Gladys Knight'],
-  'hype': ['Travis Scott', 'Lil Uzi Vert', 'Playboi Carti', '21 Savage', 'Future', 'Young Thug', 'Gunna', 'Roddy Ricch', 'Lil Baby', 'Polo G', 'DaBaby', 'Moneybagg Yo', 'Cardi B', 'Megan Thee Stallion', 'Saweetie', 'Pop Smoke', 'Fivio Foreign', 'Lil Durk', 'NBA YoungBoy', 'Jack Harlow'],
-  'meditate': ['Brian Eno', 'Liquid Mind', 'Deuter', 'Anugama', 'Prem Joshua', 'Moby', 'Nils Frahm', 'Deva Premal', 'Marconi Union', 'Snatam Kaur', 'Krishna Das', 'Al Gromer Khan', 'R. Carlos Nakai', 'Steven Halpern', 'Steve Roach', 'Terry Riley', 'Harold Budd', 'Max Richter', 'Ólafur Arnalds', 'Stars of the Lid'],
-  'rainy': ['Nick Drake', 'Bon Iver', 'Death Cab for Cutie', 'Mazzy Star', 'Radiohead', 'José González', 'Iron & Wine', 'Sufjan Stevens', 'The National', 'Fleet Foxes', 'Damien Rice', 'Elliott Smith', 'Aimee Mann', 'Shearwater', 'Sun Kil Moon', 'Denison Witmer', 'Low', 'Sparklehorse', 'Mark Kozelek', 'Proclaimers'],
-  'beach': ['Jack Johnson', 'Bob Marley', 'Ziggy Marley', 'Jason Mraz', 'Jimmy Buffett', 'Sublime', 'Kenny Chesney', 'Slightly Stoopid', 'Ben Harper', 'G. Love', 'Matisyahu', 'Zac Brown Band', 'Dave Matthews Band', 'Donavon Frankenreiter', 'Xavier Rudd', 'Trevor Hall', 'Common Kings', 'SOJA', 'Rebelution', 'Michael Franti'],
+  'study': [
+    'Ludovico Einaudi',
+    'Max Richter',
+    'Nils Frahm',
+    'Brian Eno',
+    'Bonobo',
+    'Tycho',
+    'Ólafur Arnalds',
+    'Moby',
+    'Hans Zimmer',
+    'Johann Sebastian Bach',
+    'Frédéric Chopin',
+    'Claude Debussy',
+    'Chilly Gonzales',
+    'Hauschka',
+    'Peter Broderick',
+    'Floating Points',
+    'Jon Hopkins',
+    'Four Tet',
+    'Aphex Twin',
+    'Thievery Corporation'
+  ],
+  'workout': [
+    'Eminem',
+    'Kanye West',
+    'The Weeknd',
+    'Travis Scott',
+    'Drake',
+    'Kendrick Lamar',
+    'Post Malone',
+    'Jay-Z',
+    'Meek Mill',
+    'Rick Ross',
+    'DMX',
+    '50 Cent',
+    'Flo Rida',
+    'Pitbull',
+    'David Guetta',
+    'Calvin Harris',
+    'Marshmello',
+    'DJ Snake',
+    'Martin Garrix',
+    'Hardwell'
+  ],
+  'chill': [
+    'Frank Ocean',
+    'Daniel Caesar',
+    'SZA',
+    'Jhené Aiko',
+    'Tom Misch',
+    'Kali Uchis',
+    'Mac Miller',
+    'H.E.R.',
+    'Khalid',
+    'Lucky Daye',
+    'Jordan Rakei',
+    'Masego',
+    'Kaytranada',
+    'Sango',
+    'Ta-ku',
+    'Flume',
+    'Nicolas Jaar',
+    'Shlohmo',
+    'Com Truise',
+    'Toro y Moi'
+  ],
+  'party': [
+    'Dua Lipa',
+    'The Weeknd',
+    'Harry Styles',
+    'Lizzo',
+    'Cardi B',
+    'David Guetta',
+    'Calvin Harris',
+    'Ava Max',
+    'Lady Gaga',
+    'Katy Perry',
+    'Beyoncé',
+    'Rihanna',
+    'Bruno Mars',
+    'Justin Timberlake',
+    'Ariana Grande',
+    'DJ Snake',
+    'Pitbull',
+    'Flo Rida',
+    'Kesha',
+    'LMFAO'
+  ],
+  'drive': [
+    'Tom Petty',
+    'Eagles',
+    'Fleetwood Mac',
+    'Queen',
+    'The Killers',
+    'Bruce Springsteen',
+    'R.E.M.',
+    'Vampire Weekend',
+    'Foo Fighters',
+    'Beck',
+    'MGMT',
+    'Foster the People',
+    'Two Door Cinema Club',
+    'Phoenix',
+    'The 1975',
+    'Weezer',
+    'Third Eye Blind',
+    'Matchbox Twenty',
+    'Sheryl Crow',
+    'Bryan Adams'
+  ],
+  'sleep': [
+    'Brian Eno',
+    'Max Richter',
+    'Nils Frahm',
+    'Sigur Rós',
+    'Ólafur Arnalds',
+    'Moby',
+    'Stars of the Lid',
+    'Hammock',
+    'William Basinski',
+    'Harold Budd',
+    'Grouper',
+    'Mark Hollis',
+    'Talk Talk',
+    'Mutual Benefit',
+    'Loscil',
+    'Boards of Canada',
+    'Eluvium',
+    'Deaf Center',
+    'Johann Johannsson',
+    'Hauschka'
+  ],
+  'morning': [
+    'Jack Johnson',
+    'Jason Mraz',
+    'John Mayer',
+    'Norah Jones',
+    'Sara Bareilles',
+    'Colbie Caillat',
+    'Ben Harper',
+    'Michael Bublé',
+    'James Morrison',
+    'Ben Rector',
+    'Gregory Alan Isakov',
+    'Josh Ritter',
+    'Ray LaMontagne',
+    'Brandi Carlile',
+    'Mat Kearney',
+    'Brett Eldredge',
+    'Gavin DeGraw',
+    'James Blunt',
+    'David Gray',
+    'Corinne Bailey Rae'
+  ],
+  'late_night': [
+    'Frank Ocean',
+    'The Weeknd',
+    'partynextdoor',
+    '6LACK',
+    'Summer Walker',
+    'SZA',
+    'Bryson Tiller',
+    'dvsn',
+    'Tory Lanez',
+    'Drake',
+    'Giveon',
+    'Lucky Daye',
+    'Brent Faiyaz',
+    'Daniel Caesar',
+    'Miguel',
+    'Maxwell',
+    'James Blake',
+    'Sade',
+    'Tamia',
+    'Toni Braxton'
+  ],
+  'sad': [
+    'Bon Iver',
+    'Sufjan Stevens',
+    'The National',
+    'Fleet Foxes',
+    'Phoebe Bridgers',
+    'Elliott Smith',
+    'Iron & Wine',
+    'Nick Drake',
+    'Death Cab for Cutie',
+    'Bright Eyes',
+    'Mazzy Star',
+    'Gregory Alan Isakov',
+    'José González',
+    'Big Thief',
+    'Julien Baker',
+    'Lucy Dacus',
+    'Soccer Mommy',
+    'Sharon Van Etten',
+    'Angel Olsen',
+    'Damien Rice'
+  ],
+  'romance': [
+    'John Legend',
+    'Bruno Mars',
+    'Marvin Gaye',
+    'Al Green',
+    'Sade',
+    'Alicia Keys',
+    'Sam Smith',
+    'Amy Winehouse',
+    'Luther Vandross',
+    'Etta James',
+    'Frank Sinatra',
+    'Diana Krall',
+    'Norah Jones',
+    'Michael Bublé',
+    'George Michael',
+    'Barry White',
+    'Teddy Pendergrass',
+    'Lionel Richie',
+    'Whitney Houston',
+    'Gladys Knight'
+  ],
+  'hype': [
+    'Travis Scott',
+    'Lil Uzi Vert',
+    'Playboi Carti',
+    '21 Savage',
+    'Future',
+    'Young Thug',
+    'Gunna',
+    'Roddy Ricch',
+    'Lil Baby',
+    'Polo G',
+    'DaBaby',
+    'Moneybagg Yo',
+    'Cardi B',
+    'Megan Thee Stallion',
+    'Saweetie',
+    'Pop Smoke',
+    'Fivio Foreign',
+    'Lil Durk',
+    'NBA YoungBoy',
+    'Jack Harlow'
+  ],
+  'meditate': [
+    'Brian Eno',
+    'Liquid Mind',
+    'Deuter',
+    'Anugama',
+    'Prem Joshua',
+    'Moby',
+    'Nils Frahm',
+    'Deva Premal',
+    'Marconi Union',
+    'Snatam Kaur',
+    'Krishna Das',
+    'Al Gromer Khan',
+    'R. Carlos Nakai',
+    'Steven Halpern',
+    'Steve Roach',
+    'Terry Riley',
+    'Harold Budd',
+    'Max Richter',
+    'Ólafur Arnalds',
+    'Stars of the Lid'
+  ],
+  'rainy': [
+    'Nick Drake',
+    'Bon Iver',
+    'Death Cab for Cutie',
+    'Mazzy Star',
+    'Radiohead',
+    'José González',
+    'Iron & Wine',
+    'Sufjan Stevens',
+    'The National',
+    'Fleet Foxes',
+    'Damien Rice',
+    'Elliott Smith',
+    'Aimee Mann',
+    'Shearwater',
+    'Sun Kil Moon',
+    'Denison Witmer',
+    'Low',
+    'Sparklehorse',
+    'Mark Kozelek',
+    'Proclaimers'
+  ],
+  'beach': [
+    'Jack Johnson',
+    'Bob Marley',
+    'Ziggy Marley',
+    'Jason Mraz',
+    'Jimmy Buffett',
+    'Sublime',
+    'Kenny Chesney',
+    'Slightly Stoopid',
+    'Ben Harper',
+    'G. Love',
+    'Matisyahu',
+    'Zac Brown Band',
+    'Dave Matthews Band',
+    'Donavon Frankenreiter',
+    'Xavier Rudd',
+    'Trevor Hall',
+    'Common Kings',
+    'SOJA',
+    'Rebelution',
+    'Michael Franti'
+  ],
 };
 
 class MoodTracksScreen extends StatefulWidget {
@@ -54,20 +351,22 @@ class _MoodTracksScreenState extends State<MoodTracksScreen> {
       if (artists.isNotEmpty) {
         final api = ApiService();
         final results = await Future.wait(
-          artists.map((a) =>
-              api.searchTracksWithFallback(a, limit: 20)
-                  .catchError((_) => <Map<String, dynamic>>[])),
+          artists.map((a) => api
+              .searchTracksWithFallback(a, limit: 20)
+              .catchError((_) => <Map<String, dynamic>>[])),
         );
 
         final seen = <String>{};
         final artistCount = <String, int>{};
         for (final batch in results) {
           for (final t in batch) {
-            final id = (t['spotify_id'] ?? t['deezer_id'] ?? t['track_id'] ?? '').toString();
+            final id =
+                (t['spotify_id'] ?? t['deezer_id'] ?? t['track_id'] ?? '')
+                    .toString();
             if (id.isEmpty || !seen.add(id)) continue;
             final artist = (t['artist'] ?? '').toString().trim().toLowerCase();
             if (artist.isNotEmpty) {
-              if ((artistCount[artist] ?? 0) >= 4) continue;
+              if ((artistCount[artist] ?? 0) >= 3) continue;
               artistCount[artist] = (artistCount[artist] ?? 0) + 1;
             }
             merged.add(Map<String, dynamic>.from(t));
@@ -78,7 +377,8 @@ class _MoodTracksScreenState extends State<MoodTracksScreen> {
 
       if (merged.isEmpty) {
         final fallback = await ApiService().getMoodTracks(widget.mood.key);
-        merged = fallback.map((t) => Map<String, dynamic>.from(t as Map)).toList();
+        merged =
+            fallback.map((t) => Map<String, dynamic>.from(t as Map)).toList();
       }
 
       if (!mounted) return;
@@ -98,13 +398,14 @@ class _MoodTracksScreenState extends State<MoodTracksScreen> {
     return '${value ~/ 60000}:${((value % 60000) ~/ 1000).toString().padLeft(2, '0')}';
   }
 
-  void _playAll({int startIndex = 0}) {
+  Future<void> _playAll({int startIndex = 0}) async {
     if (_tracks.isEmpty) return;
     final list = _shuffleOn ? (List.from(_tracks)..shuffle()) : _tracks;
     final track = Map<String, dynamic>.from(list[startIndex] as Map)
       ..['queue'] = list;
-    Navigator.push(
-        context, MaterialPageRoute(builder: (_) => PlayerScreen(track: track)));
+    MiniPlayerOverlayController.forceVisible();
+    await context.read<PlayerProvider>().openTrack(track);
+    MiniPlayerOverlayController.forceVisible();
   }
 
   void _toggleShuffle() {
@@ -131,8 +432,9 @@ class _MoodTracksScreenState extends State<MoodTracksScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: CustomScrollView(
-        physics: const BouncingScrollPhysics(),
+        physics: const ClampingScrollPhysics(),
         slivers: [
           // ─── Красивый заголовок с обложкой ──────────────────────────
           SliverAppBar(
@@ -241,8 +543,7 @@ class _MoodTracksScreenState extends State<MoodTracksScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
-
+                    const SizedBox(width: 14),
                     // 3-dots
                     GestureDetector(
                       onTap: () => _showOptions(context),
@@ -251,7 +552,7 @@ class _MoodTracksScreenState extends State<MoodTracksScreen> {
                         height: 48,
                         decoration: BoxDecoration(
                           color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(14),
+                          shape: BoxShape.circle,
                           border: Border.all(color: AppColors.border),
                         ),
                         child: const Icon(Icons.more_horiz_rounded,
@@ -456,10 +757,11 @@ class _MoodHeader extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        CachedNetworkImage(
-          imageUrl: mood.artUrl,
+        Image.asset(
+          mood.artUrl,
           fit: BoxFit.cover,
-          errorWidget: (_, __, ___) => Container(
+          alignment: mood.imageAlignment,
+          errorBuilder: (_, __, ___) => Container(
             decoration: BoxDecoration(gradient: mood.gradient),
           ),
         ),
@@ -469,25 +771,11 @@ class _MoodHeader extends StatelessWidget {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                mood.gradient.colors.first.withOpacity(0.24),
-                mood.gradient.colors.last.withOpacity(0.52),
-                AppColors.bg.withOpacity(0.94),
+                const Color(0x22000000),
+                const Color(0x88000000),
+                AppColors.bg.withOpacity(0.96),
               ],
-            ),
-          ),
-        ),
-        Positioned(
-          bottom: -42,
-          left: -20,
-          child: Container(
-            width: 170,
-            height: 170,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(colors: [
-                mood.glowColor.withOpacity(0.3),
-                Colors.transparent,
-              ]),
+              stops: const [0.0, 0.5, 1.0],
             ),
           ),
         ),
@@ -501,10 +789,8 @@ class _MoodHeader extends StatelessWidget {
                 Text(
                   mood.name,
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 38,
-                    height: 0.98,
-                    fontWeight: FontWeight.w900,
+                  style: GoogleFonts.dmSerifDisplay(
+                    fontSize: 40,
                     color: Colors.white,
                     shadows: [
                       Shadow(
@@ -514,7 +800,7 @@ class _MoodHeader extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
                 Wrap(
                   alignment: WrapAlignment.center,
                   crossAxisAlignment: WrapCrossAlignment.center,
@@ -523,10 +809,11 @@ class _MoodHeader extends StatelessWidget {
                     Text(
                       mood.subtitle,
                       textAlign: TextAlign.center,
-                      style: GoogleFonts.sora(
+                      style: GoogleFonts.dmSans(
                         fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.white.withOpacity(0.7),
+                        fontStyle: FontStyle.italic,
+                        fontWeight: FontWeight.w400,
+                        color: Colors.white.withOpacity(0.75),
                       ),
                     ),
                     if (!loading && totalDuration.isNotEmpty) ...[
@@ -723,7 +1010,8 @@ class _MoodFab extends StatelessWidget {
   final VoidCallback onTap;
   final bool active;
 
-  const _MoodFab({required this.icon, required this.onTap, this.active = false});
+  const _MoodFab(
+      {required this.icon, required this.onTap, this.active = false});
 
   @override
   Widget build(BuildContext context) {
@@ -733,14 +1021,21 @@ class _MoodFab extends StatelessWidget {
         width: 48,
         height: 48,
         decoration: BoxDecoration(
-          color: active ? AppColors.purple.withOpacity(0.30) : AppColors.surface,
+          color:
+              active ? AppColors.purple.withOpacity(0.30) : AppColors.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: active ? AppColors.purpleLight.withOpacity(0.55) : AppColors.border,
+            color: active
+                ? AppColors.purpleLight.withOpacity(0.55)
+                : AppColors.border,
           ),
-          boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 14, offset: Offset(0, 4))],
+          boxShadow: const [
+            BoxShadow(
+                color: Colors.black38, blurRadius: 14, offset: Offset(0, 4))
+          ],
         ),
-        child: Icon(icon, color: active ? AppColors.purpleLight : AppColors.text2, size: 22),
+        child: Icon(icon,
+            color: active ? AppColors.purpleLight : AppColors.text2, size: 22),
       ),
     );
   }

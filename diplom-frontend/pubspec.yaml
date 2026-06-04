@@ -25,6 +25,7 @@ dependencies:
   fl_chart: ^0.68.0
   share_plus: ^9.0.0
   web_socket_channel: ^3.0.3
+  flutter_svg: ^2.0.9
 
 dev_dependencies:
   flutter_test:
@@ -45,3 +46,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/logo.png
+    - assets/images/genres/
+    - assets/images/moods/

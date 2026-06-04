@@ -2,6 +2,103 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_colors.dart';
+import '../utils/app_navigator.dart';
+
+// ─── Global Bottom Nav Controller ─────────────────────────────────────────────
+
+class GlobalBottomNavController {
+  static final ValueNotifier<bool> visible = ValueNotifier<bool>(false);
+  static final ValueNotifier<int> currentIndex = ValueNotifier<int>(0);
+  static final ValueNotifier<int> socialBadge = ValueNotifier<int>(0);
+  static int _hideCount = 0;
+  static void Function(int)? _onTap;
+
+  static void show() {
+    if (_hideCount > 0) _hideCount--;
+    visible.value = _hideCount == 0;
+  }
+
+  static void hide() {
+    _hideCount++;
+    visible.value = false;
+  }
+
+  static void forceVisible() {
+    _hideCount = 0;
+    visible.value = true;
+  }
+
+  static void setIndex(int i) => currentIndex.value = i;
+  static void setSocialBadge(int n) => socialBadge.value = n;
+  static void registerTapHandler(void Function(int) onTap) => _onTap = onTap;
+  static void unregisterTapHandler() => _onTap = null;
+  static void handleTap(int index) {
+    final nav = rootNavigatorKey.currentState;
+    if (nav != null && nav.canPop()) {
+      nav.popUntil((route) => route.isFirst);
+    }
+    _onTap?.call(index);
+  }
+}
+
+// ─── Global Bottom Nav Overlay ─────────────────────────────────────────────────
+
+class GlobalBottomNavOverlay extends StatelessWidget {
+  const GlobalBottomNavOverlay({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: GlobalBottomNavController.visible,
+      builder: (_, vis, __) {
+        if (!vis) return const SizedBox.shrink();
+        return Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: ValueListenableBuilder<int>(
+            valueListenable: GlobalBottomNavController.currentIndex,
+            builder: (_, idx, __) => ValueListenableBuilder<int>(
+              valueListenable: GlobalBottomNavController.socialBadge,
+              builder: (_, badge, __) => SafeArea(
+                top: false,
+                child: BottomNavBar(
+                  currentIndex: idx,
+                  onTap: GlobalBottomNavController.handleTap,
+                  socialBadge: badge,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class PersistentBottomNavBar extends StatelessWidget {
+  final int? currentIndex;
+
+  const PersistentBottomNavBar({super.key, this.currentIndex});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: GlobalBottomNavController.currentIndex,
+      builder: (_, idx, __) => ValueListenableBuilder<int>(
+        valueListenable: GlobalBottomNavController.socialBadge,
+        builder: (_, badge, __) => SafeArea(
+          top: false,
+          child: BottomNavBar(
+            currentIndex: currentIndex ?? idx,
+            onTap: GlobalBottomNavController.handleTap,
+            socialBadge: badge,
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class BottomNavBar extends StatelessWidget {
   final int currentIndex;

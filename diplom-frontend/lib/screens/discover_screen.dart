@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bottom_nav_bar.dart';
 import 'modals.dart';
 import 'player_screen.dart';
 
@@ -125,6 +126,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: RefreshIndicator(
         onRefresh: _load,
         color: AppColors.purpleLight,

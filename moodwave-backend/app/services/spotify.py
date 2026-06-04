@@ -281,40 +281,11 @@ async def search_and_cache(
     limit: int,
     db: AsyncSession,
 ) -> list[dict]:
-    """Поиск треков через Deezer + сохранение в TrackCache."""
-    tracks = await deezer_service.search_tracks(query, limit)
-
-    for track_data in tracks:
-        track_id = (
-            track_data.get("spotify_id")
-            or track_data.get("deezer_id")
-        )
-        if not track_id:
-            continue
-
-        existing = await db.get(TrackCache, track_id)
-        if existing:
-            continue
-
-        genre = track_data.get("genre")
-        cache = TrackCache(
-            spotify_id=track_id,
-            title=track_data.get("title", ""),
-            artist=track_data.get("artist", ""),
-            album=track_data.get("album"),
-            cover_url=track_data.get("cover_url"),
-            preview_url=track_data.get("preview_url"),
-            duration_ms=track_data.get("duration_ms"),
-            genres=[genre] if genre else [],
-        )
-        db.add(cache)
-
+    """Поиск треков через Deezer."""
     try:
-        await db.commit()
+        return await deezer_service.search_tracks(query, limit)
     except Exception:
-        await db.rollback()
-
-    return tracks
+        return []
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -6,16 +7,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../providers/auth_provider.dart';
 import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bottom_nav_bar.dart';
 import '../utils/show_snackbar.dart';
 import '../widgets/common_widgets.dart';
 import 'create_playlist_screen.dart';
+import 'modals.dart' as modals;
 import 'player_screen.dart';
 import 'user_profile_screen.dart';
 
@@ -328,6 +330,15 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     }
   }
 
+  void _showSharePlaylist() {
+    final playlist = _playlist;
+    if (playlist == null) return;
+    modals.showSharePlaylist(
+      context,
+      playlist: Map<String, dynamic>.from(playlist),
+    );
+  }
+
   void _showPlaylistMenu() {
     final title = _playlist?['title']?.toString() ?? 'Playlist';
     final currentUserId = context.read<AuthProvider>().user?['id'] as int?;
@@ -432,10 +443,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               }),
             item(Icons.share_outlined, 'Share', () {
               Navigator.pop(ctx);
-              Share.share(
-                'Check out my playlist "$title" on MoodWave',
-                subject: title,
-              );
+              _showSharePlaylist();
             }),
             item(Icons.send_rounded, 'Send to someone', () {
               Navigator.pop(ctx);
@@ -603,6 +611,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: _loading
           ? const Center(
               child: CircularProgressIndicator(
@@ -883,10 +892,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                 GestureDetector(
                                   onTap: () {
                                     HapticFeedback.lightImpact();
-                                    Share.share(
-                                      'Check out my playlist "$title" on MoodWave',
-                                      subject: title,
-                                    );
+                                    _showSharePlaylist();
                                   },
                                   child: Container(
                                     width: 52,
@@ -1248,7 +1254,8 @@ class _SendToSheetState extends State<_SendToSheet> {
 
   Future<void> _send(Map<String, dynamic> user) async {
     final userId = (user['id'] as num?)?.toInt();
-    if (userId == null || _sending.contains(userId) || _sent.contains(userId)) return;
+    if (userId == null || _sending.contains(userId) || _sent.contains(userId))
+      return;
 
     setState(() => _sending.add(userId));
     try {
@@ -1305,8 +1312,8 @@ class _SendToSheetState extends State<_SendToSheet> {
           Expanded(
             child: Center(
               child: Text('No friends yet',
-                  style: GoogleFonts.outfit(
-                      fontSize: 14, color: AppColors.text3)),
+                  style:
+                      GoogleFonts.outfit(fontSize: 14, color: AppColors.text3)),
             ),
           )
         else
@@ -1349,11 +1356,9 @@ class _SendToSheetState extends State<_SendToSheet> {
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        gradient: isSent || isSending
-                            ? null
-                            : AppColors.gradPurple,
-                        color:
-                            isSent || isSending ? AppColors.surface3 : null,
+                        gradient:
+                            isSent || isSending ? null : AppColors.gradPurple,
+                        color: isSent || isSending ? AppColors.surface3 : null,
                         shape: BoxShape.circle,
                       ),
                       child: isSending
@@ -1362,9 +1367,7 @@ class _SendToSheetState extends State<_SendToSheet> {
                               child: CircularProgressIndicator(
                                   strokeWidth: 2, color: Colors.white))
                           : Icon(
-                              isSent
-                                  ? Icons.check_rounded
-                                  : Icons.send_rounded,
+                              isSent ? Icons.check_rounded : Icons.send_rounded,
                               color: Colors.white,
                               size: 18,
                             ),
@@ -1393,29 +1396,57 @@ class _AddTracksSheet extends StatefulWidget {
 
 class _AddTracksSheetState extends State<_AddTracksSheet> {
   final _ctrl = TextEditingController();
+  Timer? _debounce;
   List<Map<String, dynamic>> _results = [];
   bool _searching = false;
+  String? _error;
   final Set<String> _addedIds = {};
   final Set<String> _loadingIds = {};
 
-  Future<void> _search(String q) async {
-    if (q.trim().isEmpty) {
-      setState(() => _results = []);
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _onQueryChanged(String value) {
+    _debounce?.cancel();
+    final q = value.trim();
+    if (q.isEmpty) {
+      setState(() {
+        _results = [];
+        _searching = false;
+        _error = null;
+      });
       return;
     }
-    setState(() => _searching = true);
+    setState(() {
+      _searching = true;
+      _error = null;
+    });
+    _debounce = Timer(const Duration(milliseconds: 320), () {
+      _search(q);
+    });
+  }
+
+  Future<void> _search(String q) async {
     try {
-      final raw = await ApiService().searchTracks(q.trim());
-      if (!mounted) return;
+      final raw = await ApiService().searchTracksWithFallback(q, limit: 30);
+      if (!mounted || q != _ctrl.text.trim()) return;
       setState(() {
-        _results = raw
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
+        _results = raw.map((e) => Map<String, dynamic>.from(e)).toList();
         _searching = false;
+        _error = null;
       });
-    } catch (_) {
-      if (mounted) setState(() => _searching = false);
+    } catch (e) {
+      if (mounted && q == _ctrl.text.trim()) {
+        setState(() {
+          _results = [];
+          _searching = false;
+          _error = 'Could not search tracks. Try again.';
+        });
+      }
     }
   }
 
@@ -1481,7 +1512,7 @@ class _AddTracksSheetState extends State<_AddTracksSheet> {
               controller: _ctrl,
               autofocus: true,
               style: GoogleFonts.outfit(color: AppColors.text),
-              onChanged: (v) => _search(v),
+              onChanged: _onQueryChanged,
               decoration: InputDecoration(
                 hintText: 'Search for a track...',
                 hintStyle: GoogleFonts.outfit(color: AppColors.text3),
@@ -1503,6 +1534,24 @@ class _AddTracksSheetState extends State<_AddTracksSheet> {
               padding: EdgeInsets.all(16),
               child: CircularProgressIndicator(
                   strokeWidth: 2, color: AppColors.purpleLight),
+            )
+          else if (_error != null)
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.outfit(color: AppColors.text3),
+              ),
+            )
+          else if (_ctrl.text.trim().isNotEmpty && _results.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'No tracks found',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.outfit(color: AppColors.text3),
+              ),
             )
           else
             Expanded(

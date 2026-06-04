@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'package:cached_network_image/cached_network_image.dart';
-
 import '../theme/app_colors.dart';
+import '../widgets/bottom_nav_bar.dart';
 import 'mood_tracks_screen.dart';
 
 // ─── Данные настроений ────────────────────────────────────────────────────────
@@ -16,6 +15,7 @@ class MoodData {
   final String artUrl;
   final LinearGradient gradient;
   final Color glowColor;
+  final Alignment imageAlignment;
 
   const MoodData({
     required this.key,
@@ -25,6 +25,7 @@ class MoodData {
     required this.artUrl,
     required this.gradient,
     required this.glowColor,
+    this.imageAlignment = Alignment.center,
   });
 }
 
@@ -34,196 +35,196 @@ const List<MoodData> allMoods = [
     name: 'Study',
     emoji: '📚',
     subtitle: 'Focus & flow',
-    artUrl:
-        'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=1400&q=80',
+    artUrl: 'assets/images/moods/01_study.jpg',
     glowColor: Color(0xFF3b82f6),
     gradient: LinearGradient(
       colors: [Color(0xFF1e3a8a), Color(0xFF2563eb), Color(0xFF60a5fa)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.center,
   ),
   MoodData(
     key: 'workout',
     name: 'Workout',
     emoji: '💪',
     subtitle: 'Power up',
-    artUrl:
-        'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=1400&q=80',
+    artUrl: 'assets/images/moods/02_workout.jpg',
     glowColor: Color(0xFFf97316),
     gradient: LinearGradient(
       colors: [Color(0xFF7c2d12), Color(0xFFc2410c), Color(0xFFf97316)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.center,
   ),
   MoodData(
     key: 'chill',
     name: 'Chill',
     emoji: '😌',
     subtitle: 'Easy vibes',
-    artUrl:
-        'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1400&q=80',
+    artUrl: 'assets/images/moods/03_chill.jpg',
     glowColor: Color(0xFF10b981),
     gradient: LinearGradient(
       colors: [Color(0xFF064e3b), Color(0xFF059669), Color(0xFF34d399)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.center,
   ),
   MoodData(
     key: 'party',
     name: 'Party',
     emoji: '🎉',
     subtitle: 'Let\'s go',
-    artUrl:
-        'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=1400&q=80',
+    artUrl: 'assets/images/moods/04_party.jpg',
     glowColor: Color(0xFFec4899),
     gradient: LinearGradient(
       colors: [Color(0xFF831843), Color(0xFFdb2777), Color(0xFFf472b6)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment(0.0, 0.72),
   ),
   MoodData(
     key: 'drive',
     name: 'Drive',
     emoji: '🚗',
     subtitle: 'Open road',
-    artUrl:
-        'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1400&q=80',
+    artUrl: 'assets/images/moods/05_drive.jpg',
     glowColor: Color(0xFFa855f7),
     gradient: LinearGradient(
       colors: [Color(0xFF3b0764), Color(0xFF7c3aed), Color(0xFFa78bfa)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.topCenter,
   ),
   MoodData(
     key: 'sleep',
     name: 'Sleep',
     emoji: '😴',
     subtitle: 'Deep calm',
-    artUrl:
-        'https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=1400&q=80',
+    artUrl: 'assets/images/moods/06_sleep.jpg',
     glowColor: Color(0xFF6366f1),
     gradient: LinearGradient(
       colors: [Color(0xFF0f172a), Color(0xFF1e1b4b), Color(0xFF312e81)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.topCenter,
   ),
   MoodData(
     key: 'morning',
     name: 'Morning',
     emoji: '☀️',
     subtitle: 'Fresh start',
-    artUrl:
-        'https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?auto=format&fit=crop&w=1400&q=80',
+    artUrl: 'assets/images/moods/07_morning.jpg',
     glowColor: Color(0xFFfbbf24),
     gradient: LinearGradient(
       colors: [Color(0xFF78350f), Color(0xFFd97706), Color(0xFFfbbf24)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.topCenter,
   ),
   MoodData(
     key: 'late_night',
     name: 'Late Night',
     emoji: '🌙',
     subtitle: 'Midnight soul',
-    artUrl:
-        'https://images.unsplash.com/photo-1519501025264-65ba15a82390?w=1400&q=80',
+    artUrl: 'assets/images/moods/08_latenight.jpg',
     glowColor: Color(0xFF818cf8),
     gradient: LinearGradient(
       colors: [Color(0xFF030712), Color(0xFF1e1b4b), Color(0xFF4338ca)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.topCenter,
   ),
   MoodData(
     key: 'sad',
     name: 'Sad',
     emoji: '🌧️',
     subtitle: 'Feel it all',
-    artUrl:
-        'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1400&q=80',
+    artUrl: 'assets/images/moods/09_sad.jpg',
     glowColor: Color(0xFF38bdf8),
     gradient: LinearGradient(
       colors: [Color(0xFF0c4a6e), Color(0xFF0369a1), Color(0xFF38bdf8)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.center,
   ),
   MoodData(
     key: 'romance',
     name: 'Romance',
     emoji: '❤️',
     subtitle: 'Love songs',
-    artUrl:
-        'https://images.unsplash.com/photo-1518568814500-bf0f8d125f46?w=1400&q=80',
+    artUrl: 'assets/images/moods/10_romance.jpg',
     glowColor: Color(0xFFfb7185),
     gradient: LinearGradient(
       colors: [Color(0xFF881337), Color(0xFFe11d48), Color(0xFFfb7185)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.center,
   ),
   MoodData(
     key: 'hype',
     name: 'Hype',
     emoji: '🔥',
     subtitle: 'Maximum energy',
-    artUrl:
-        'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=1400&q=80',
+    artUrl: 'assets/images/moods/11_hype.jpg',
     glowColor: Color(0xFFfacc15),
     gradient: LinearGradient(
       colors: [Color(0xFF451a03), Color(0xFFb45309), Color(0xFFfacc15)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.center,
   ),
   MoodData(
     key: 'meditate',
     name: 'Meditate',
     emoji: '🧘',
     subtitle: 'Inner peace',
-    artUrl:
-        'https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1400&q=80',
+    artUrl: 'assets/images/moods/12_meditate.jpg',
     glowColor: Color(0xFF2dd4bf),
     gradient: LinearGradient(
       colors: [Color(0xFF042f2e), Color(0xFF0f766e), Color(0xFF2dd4bf)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.topCenter,
   ),
   MoodData(
     key: 'rainy',
     name: 'Rainy Day',
     emoji: '🌊',
     subtitle: 'Cozy indoors',
-    artUrl:
-        'https://images.unsplash.com/photo-1519692933481-e162a57d6721?auto=format&fit=crop&w=1400&q=80',
+    artUrl: 'assets/images/moods/13_rainyday.jpg',
     glowColor: Color(0xFF7dd3fc),
     gradient: LinearGradient(
       colors: [Color(0xFF0c4a6e), Color(0xFF075985), Color(0xFF7dd3fc)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.center,
   ),
   MoodData(
     key: 'beach',
     name: 'Beach',
     emoji: '🏖️',
     subtitle: 'Summer waves',
-    artUrl:
-        'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1400&q=80',
+    artUrl: 'assets/images/moods/14_beach.jpg',
     glowColor: Color(0xFF34d399),
     gradient: LinearGradient(
       colors: [Color(0xFF022c22), Color(0xFF065f46), Color(0xFF34d399)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),
+    imageAlignment: Alignment.center,
   ),
 ];
 
@@ -235,19 +236,67 @@ String getRecommendedMoodKey(Map<String, dynamic>? weather) {
       .toString()
       .toLowerCase();
 
-  if (desc.contains('rain') || desc.contains('drizzle')) return 'rainy';
-  if (desc.contains('snow')) return 'sleep';
-  if (desc.contains('clear') || desc.contains('sunny')) {
-    if (hour >= 6 && hour < 11) return 'morning';
-    if (hour >= 11 && hour < 18) return 'beach';
-    return 'party';
+  // Weather-priority rules
+  if (desc.contains('storm') || desc.contains('thunder')) return 'sad';
+  if (desc.contains('snow') || desc.contains('blizzard')) {
+    return (hour >= 20 || hour < 7) ? 'sleep' : 'chill';
   }
-  if (hour >= 23 || hour < 5) return 'late_night';
+  if (desc.contains('rain') ||
+      desc.contains('drizzle') ||
+      desc.contains('shower')) {
+    return (hour >= 22 || hour < 6) ? 'late_night' : 'rainy';
+  }
+
+  // Clear / sunny — follow time
+  if (desc.contains('clear') || desc.contains('sunny')) {
+    if (hour >= 5 && hour < 9) return 'morning';
+    if (hour >= 9 && hour < 16) return 'beach';
+    if (hour >= 16 && hour < 20) return 'drive';
+    if (hour >= 20 && hour < 23) return 'romance';
+    return 'late_night';
+  }
+
+  // Any other weather — pure time-based
+  if (hour >= 0 && hour < 5) return 'late_night';
   if (hour >= 5 && hour < 9) return 'morning';
-  if (hour >= 9 && hour < 14) return 'study';
-  if (hour >= 14 && hour < 18) return 'chill';
-  if (hour >= 18 && hour < 21) return 'drive';
-  return 'party';
+  if (hour >= 9 && hour < 12) return 'study';
+  if (hour >= 12 && hour < 15) return 'chill';
+  if (hour >= 15 && hour < 18) return 'drive';
+  if (hour >= 18 && hour < 21) return 'party';
+  if (hour >= 21 && hour < 24) return 'romance';
+  return 'chill';
+}
+
+String getRecommendedMoodReason(Map<String, dynamic>? weather) {
+  final hour = DateTime.now().hour;
+  final desc = (weather?['description'] ?? weather?['condition'] ?? '')
+      .toString()
+      .toLowerCase();
+
+  if (desc.contains('storm') || desc.contains('thunder')) {
+    return 'Stormy weather pick';
+  }
+  if (desc.contains('snow') || desc.contains('blizzard')) {
+    return 'Snowy weather pick';
+  }
+  if (desc.contains('rain') ||
+      desc.contains('drizzle') ||
+      desc.contains('shower')) {
+    return 'Rainy weather pick';
+  }
+  if (desc.contains('clear') || desc.contains('sunny')) {
+    if (hour >= 5 && hour < 9) return 'Sunny morning pick';
+    if (hour >= 9 && hour < 16) return 'Daylight mood pick';
+    if (hour >= 16 && hour < 20) return 'Golden hour pick';
+    return 'Evening mood pick';
+  }
+  if (hour >= 0 && hour < 5) return 'Late night pick';
+  if (hour >= 5 && hour < 9) return 'Morning pick';
+  if (hour >= 9 && hour < 12) return 'Focus time pick';
+  if (hour >= 12 && hour < 15) return 'Midday reset pick';
+  if (hour >= 15 && hour < 18) return 'Afternoon energy pick';
+  if (hour >= 18 && hour < 21) return 'Evening energy pick';
+  return 'Night mood pick';
 }
 
 // ─── Главный экран муда ───────────────────────────────────────────────────────
@@ -308,12 +357,14 @@ class _MoodScreenState extends State<MoodScreen>
   @override
   Widget build(BuildContext context) {
     final recommendedKey = getRecommendedMoodKey(widget.weather);
+    final recommendedReason = getRecommendedMoodReason(widget.weather);
     final recommended = allMoods.firstWhere((m) => m.key == recommendedKey,
         orElse: () => allMoods[2]);
     final others = allMoods.where((m) => m.key != recommendedKey).toList();
 
     return Scaffold(
       backgroundColor: AppColors.bg,
+      bottomNavigationBar: const PersistentBottomNavBar(),
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
@@ -359,18 +410,16 @@ class _MoodScreenState extends State<MoodScreen>
                               AppColors.primaryBtn.createShader(bounds),
                           child: Text(
                             'Choose Your Mood',
-                            style: GoogleFonts.spaceGrotesk(
-                              fontSize: 28,
-                              fontWeight: FontWeight.w700,
+                            style: GoogleFonts.dmSerifDisplay(
+                              fontSize: 30,
                               color: Colors.white,
-                              letterSpacing: -0.8,
                             ),
                           ),
                         ),
                         const SizedBox(height: 3),
                         Text(
                           '${allMoods.length} moods curated for the moment',
-                          style: GoogleFonts.sora(
+                          style: GoogleFonts.dmSans(
                               fontSize: 13, color: AppColors.text3),
                         ),
                       ],
@@ -412,12 +461,12 @@ class _MoodScreenState extends State<MoodScreen>
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        'Perfect for right now',
-                        style: GoogleFonts.sora(
+                        recommendedReason,
+                        style: GoogleFonts.dmSans(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                           color: AppColors.text3,
-                          letterSpacing: 0.5,
+                          letterSpacing: 0.3,
                         ),
                       ),
                     ],
@@ -431,11 +480,11 @@ class _MoodScreenState extends State<MoodScreen>
                   const SizedBox(height: 24),
                   Text(
                     'All moods',
-                    style: GoogleFonts.sora(
+                    style: GoogleFonts.dmSans(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                       color: AppColors.text3,
-                      letterSpacing: 0.5,
+                      letterSpacing: 0.3,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -488,125 +537,187 @@ class _RecommendedCard extends StatefulWidget {
 }
 
 class _RecommendedCardState extends State<_RecommendedCard> {
+  bool _hovered = false;
   bool _pressed = false;
+
+  Future<void> _handleTap() async {
+    setState(() => _pressed = true);
+    await Future.delayed(const Duration(milliseconds: 120));
+    if (!mounted) return;
+    setState(() => _pressed = false);
+    widget.onTap();
+  }
 
   @override
   Widget build(BuildContext context) {
     final mood = widget.mood;
-    return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) {
-        setState(() => _pressed = false);
-        widget.onTap();
-      },
-      onTapCancel: () => setState(() => _pressed = false),
-      child: AnimatedScale(
-        scale: _pressed ? 0.97 : 1.0,
-        duration: const Duration(milliseconds: 120),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          height: 190,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-            boxShadow: [
-              BoxShadow(
-                color: mood.glowColor.withOpacity(_pressed ? 0.2 : 0.35),
-                blurRadius: 28,
-                spreadRadius: _pressed ? 0 : 2,
-                offset: const Offset(0, 8),
+    final active = _hovered || _pressed;
+    final pressed = _pressed;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() {
+        _hovered = false;
+        _pressed = false;
+      }),
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => _handleTap(),
+        onTapCancel: () => setState(() => _pressed = false),
+        child: AnimatedScale(
+          scale: _pressed ? 0.975 : (active ? 1.025 : 1.0),
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            transform: Matrix4.translationValues(0, active ? -4 : 0, 0),
+            height: 190,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: mood.glowColor.withOpacity(active ? 0.62 : 0.0),
+                width: 1.2,
               ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(22),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                CachedNetworkImage(
-                  imageUrl: mood.artUrl,
-                  fit: BoxFit.cover,
-                  errorWidget: (_, __, ___) => Container(
-                    decoration: BoxDecoration(gradient: mood.gradient),
-                  ),
-                ),
-
-                Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.black.withOpacity(0.08),
-                        mood.gradient.colors[0].withOpacity(0.52),
-                        mood.gradient.colors.last.withOpacity(0.88),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                  ),
-                ),
-
-                // Декоративный круг
-                Positioned(
-                  right: -30,
-                  top: -30,
-                  child: Container(
-                    width: 140,
-                    height: 140,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.06),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: -20,
-                  bottom: -20,
-                  child: Container(
-                    width: 90,
-                    height: 90,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.04),
-                    ),
-                  ),
-                ),
-
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 26),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          mood.name,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.spaceGrotesk(
-                            fontSize: 31,
-                            height: 0.98,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black.withOpacity(0.55),
-                                blurRadius: 18,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          mood.subtitle,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.sora(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white.withOpacity(0.78),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+              boxShadow: [
+                BoxShadow(
+                  color: pressed
+                      ? mood.glowColor.withOpacity(0.58)
+                      : Colors.black.withOpacity(active ? 0.36 : 0.26),
+                  blurRadius: pressed ? 38 : (active ? 28 : 18),
+                  spreadRadius: pressed ? 3 : 0,
+                  offset: Offset(0, active ? 12 : 8),
                 ),
               ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(22),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  AnimatedScale(
+                    scale: active ? 1.08 : 1.0,
+                    duration: const Duration(milliseconds: 620),
+                    curve: Curves.easeOutCubic,
+                    child: Image.asset(
+                      mood.artUrl,
+                      fit: BoxFit.cover,
+                      alignment: mood.imageAlignment,
+                      errorBuilder: (_, __, ___) => Container(
+                        decoration: BoxDecoration(gradient: mood.gradient),
+                      ),
+                    ),
+                  ),
+
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          mood.glowColor.withOpacity(0.12),
+                          mood.gradient.colors.last.withOpacity(0.05),
+                          Colors.transparent,
+                        ],
+                        stops: const [0.0, 0.45, 1.0],
+                      ),
+                    ),
+                  ),
+
+                  Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0x00000000),
+                          Color(0x0A000000),
+                          Color(0x22000000),
+                        ],
+                        stops: [0.0, 0.5, 1.0],
+                      ),
+                    ),
+                  ),
+
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 260),
+                    curve: Curves.easeOutCubic,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          mood.glowColor.withOpacity(pressed ? 0.28 : 0.0),
+                          mood.gradient.colors.last
+                              .withOpacity(pressed ? 0.14 : 0.0),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Декоративный круг
+                  Positioned(
+                    right: -30,
+                    top: -30,
+                    child: Container(
+                      width: 140,
+                      height: 140,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withOpacity(0.06),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: -20,
+                    bottom: -20,
+                    child: Container(
+                      width: 90,
+                      height: 90,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withOpacity(0.04),
+                      ),
+                    ),
+                  ),
+
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 26),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            mood.name,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.dmSerifDisplay(
+                              fontSize: 34,
+                              color: Colors.white,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black.withOpacity(0.55),
+                                  blurRadius: 18,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            mood.subtitle,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.dmSans(
+                              fontSize: 13,
+                              fontStyle: FontStyle.italic,
+                              fontWeight: FontWeight.w400,
+                              color: Colors.white.withOpacity(0.80),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -634,10 +745,19 @@ class _MoodCard extends StatefulWidget {
 
 class _MoodCardState extends State<_MoodCard>
     with SingleTickerProviderStateMixin {
+  bool _hovered = false;
   bool _pressed = false;
   late AnimationController _entryController;
   late Animation<double> _fadeIn;
   late Animation<Offset> _slideIn;
+
+  Future<void> _handleTap() async {
+    setState(() => _pressed = true);
+    await Future.delayed(const Duration(milliseconds: 110));
+    if (!mounted) return;
+    setState(() => _pressed = false);
+    widget.onTap();
+  }
 
   @override
   void initState() {
@@ -666,111 +786,182 @@ class _MoodCardState extends State<_MoodCard>
   @override
   Widget build(BuildContext context) {
     final mood = widget.mood;
+    final active = _hovered || _pressed;
+    final pressed = _pressed;
 
     return FadeTransition(
       opacity: _fadeIn,
       child: SlideTransition(
         position: _slideIn,
-        child: GestureDetector(
-          onTapDown: (_) => setState(() => _pressed = true),
-          onTapUp: (_) {
-            setState(() => _pressed = false);
-            widget.onTap();
-          },
-          onTapCancel: () => setState(() => _pressed = false),
-          child: AnimatedScale(
-            scale: _pressed ? 0.95 : 1.0,
-            duration: const Duration(milliseconds: 100),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                boxShadow: [
-                  BoxShadow(
-                    color: mood.glowColor.withOpacity(_pressed ? 0.1 : 0.22),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() {
+            _hovered = false;
+            _pressed = false;
+          }),
+          child: GestureDetector(
+            onTapDown: (_) => setState(() => _pressed = true),
+            onTapUp: (_) => _handleTap(),
+            onTapCancel: () => setState(() => _pressed = false),
+            child: AnimatedScale(
+              scale: _pressed ? 0.965 : (active ? 1.035 : 1.0),
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                transform: Matrix4.translationValues(0, active ? -4 : 0, 0),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: mood.glowColor.withOpacity(active ? 0.58 : 0.0),
+                    width: 1.2,
                   ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    CachedNetworkImage(
-                      imageUrl: mood.artUrl,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => Container(
-                        decoration: BoxDecoration(gradient: mood.gradient),
-                      ),
-                      errorWidget: (_, __, ___) => Container(
-                        decoration: BoxDecoration(gradient: mood.gradient),
-                      ),
-                    ),
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.transparent,
-                            Colors.black.withOpacity(0.22),
-                            Colors.black.withOpacity(0.76),
-                          ],
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          stops: const [0.0, 0.45, 1.0],
-                        ),
-                      ),
-                    ),
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            mood.gradient.colors.first.withOpacity(0.30),
-                            Colors.transparent,
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.center,
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 11,
-                      left: 13,
-                      right: 10,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            mood.name,
-                            style: GoogleFonts.spaceGrotesk(
-                              fontSize: 17,
-                              height: 1.05,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
-                              letterSpacing: -0.2,
-                              shadows: [Shadow(color: Colors.black54, blurRadius: 12)],
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            mood.subtitle,
-                            style: GoogleFonts.outfit(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white70,
-                              letterSpacing: 0.1,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: pressed
+                          ? mood.glowColor.withOpacity(0.36)
+                          : Colors.black.withOpacity(active ? 0.34 : 0.22),
+                      blurRadius: pressed ? 28 : (active ? 20 : 14),
+                      spreadRadius: pressed ? 1 : 0,
+                      offset: Offset(0, active ? 10 : 4),
                     ),
                   ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      AnimatedScale(
+                        scale: active ? 1.06 : 1.0,
+                        duration: const Duration(milliseconds: 620),
+                        curve: Curves.easeOutCubic,
+                        child: Image.asset(
+                          mood.artUrl,
+                          fit: BoxFit.cover,
+                          alignment: mood.imageAlignment,
+                          errorBuilder: (_, __, ___) => Container(
+                            decoration: BoxDecoration(gradient: mood.gradient),
+                          ),
+                        ),
+                      ),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 260),
+                        curve: Curves.easeOutCubic,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              mood.glowColor.withOpacity(0.12),
+                              mood.gradient.colors.last.withOpacity(0.05),
+                              Colors.transparent,
+                            ],
+                            stops: const [0.0, 0.45, 1.0],
+                          ),
+                        ),
+                      ),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 260),
+                        curve: Curves.easeOutCubic,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              mood.glowColor.withOpacity(pressed ? 0.32 : 0.0),
+                              mood.gradient.colors.last
+                                  .withOpacity(pressed ? 0.16 : 0.0),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.black.withOpacity(0.18),
+                              Colors.transparent,
+                              Colors.black.withOpacity(0.20),
+                              Colors.black.withOpacity(0.72),
+                            ],
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            stops: const [0.0, 0.25, 0.50, 1.0],
+                          ),
+                        ),
+                      ),
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 260),
+                        curve: Curves.easeOutCubic,
+                        bottom: 11,
+                        left: 13,
+                        right: 10,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              mood.name,
+                              style: GoogleFonts.dmSerifDisplay(
+                                fontSize: 19,
+                                color: Colors.white,
+                                shadows: [
+                                  Shadow(color: Colors.black54, blurRadius: 14)
+                                ],
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              mood.subtitle,
+                              style: GoogleFonts.dmSans(
+                                fontSize: 11,
+                                fontStyle: FontStyle.italic,
+                                fontWeight: FontWeight.w400,
+                                color: Colors.white70,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Play button — bottom-right
+                      Positioned(
+                        right: 10,
+                        bottom: 10,
+                        child: AnimatedOpacity(
+                          opacity: active ? 1.0 : 0.0,
+                          duration: const Duration(milliseconds: 180),
+                          child: AnimatedScale(
+                            scale: active ? 1.0 : 0.5,
+                            duration: const Duration(milliseconds: 200),
+                            curve: Curves.easeOutBack,
+                            child: Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.white.withOpacity(0.92),
+                                boxShadow: const [
+                                  BoxShadow(
+                                      color: Colors.black38,
+                                      blurRadius: 8,
+                                      offset: Offset(0, 2))
+                                ],
+                              ),
+                              child: const Icon(Icons.play_arrow_rounded,
+                                  color: Colors.black87, size: 20),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

@@ -324,7 +324,7 @@ async def search_tracks(
             "/search",
             params={
                 "q": q,
-                "limit": min(limit * 3, 50),
+                "limit": min(limit, 100),
             },
         )
 

@@ -295,9 +295,17 @@ async def _parse_profile_update_request(request: Request) -> tuple[dict[str, obj
 
         avatar_candidate = form.get("avatar")
         banner_candidate = form.get("banner")
-        if isinstance(avatar_candidate, UploadFile) and avatar_candidate.filename:
+        if (
+            hasattr(avatar_candidate, "filename")
+            and hasattr(avatar_candidate, "read")
+            and avatar_candidate.filename
+        ):
             avatar_file = avatar_candidate
-        if isinstance(banner_candidate, UploadFile) and banner_candidate.filename:
+        if (
+            hasattr(banner_candidate, "filename")
+            and hasattr(banner_candidate, "read")
+            and banner_candidate.filename
+        ):
             banner_file = banner_candidate
 
         for bool_key in ("is_public", "show_activity", "show_followers", "show_recently_played", "hide_music_taste", "matching_enabled", "show_match_city", "hide_forward_profile"):
@@ -1990,11 +1998,13 @@ class PrivacySettingsRequest(BaseModel):
     description="Updates the current user's privacy settings.",
 )
 async def update_privacy_settings(
+    request: Request,
     body: PrivacySettingsRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     data = body.model_dump(exclude_none=True)
+    changed_keys = set(data.keys())
     if {
         "hide_forward_profile",
         "matching_enabled",
@@ -2011,6 +2021,16 @@ async def update_privacy_settings(
     for key, value in data.items():
         setattr(current_user, key, value)
     await db.commit()
+    if changed_keys & {"is_public", "matching_enabled", "show_match_city", "hide_music_taste"}:
+        try:
+            await cache_svc.invalidate_all_match_candidates(request.app.state.redis)
+        except Exception:
+            pass
+    if changed_keys & {"is_public"}:
+        try:
+            await cache_svc.invalidate_all_search_results(request.app.state.redis)
+        except Exception:
+            pass
     settings = getattr(current_user, "notif_settings_json", None) or {}
     return {
         "is_public": current_user.is_public,

@@ -1,26 +1,26 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../providers/player_provider.dart';
 import '../../services/api_service.dart';
 import '../../widgets/bottom_nav_bar.dart';
-import '../../widgets/mini_player.dart';
+import 'package:moodwave/widgets/mini_player.dart';
 import 'home_tab.dart';
 import 'library_tab.dart';
 import 'search_tab.dart';
 import 'social_tab.dart';
 
 class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+  final int initialIndex;
+
+  const MainScreen({super.key, this.initialIndex = 0});
   @override
   State<MainScreen> createState() => _MainScreenState();
 }
 
 class _MainScreenState extends State<MainScreen> {
-  int _currentIndex = 0;
+  late int _currentIndex;
   int _socialBadge = 0;
   Timer? _badgePollTimer;
   Timer? _presenceTimer;
@@ -33,6 +33,12 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
+    _currentIndex = widget.initialIndex.clamp(0, 3);
+    MiniPlayerOverlayController.forceVisible();
+    MiniPlayerOverlayController.setBottomOffset(74);
+    GlobalBottomNavController.hide();
+    GlobalBottomNavController.setIndex(_currentIndex);
+    GlobalBottomNavController.registerTapHandler(_onTabTap);
     // Delay badge + presence so home tab critical content loads first
     Future.delayed(const Duration(seconds: 4), () {
       if (!mounted) return;
@@ -49,6 +55,8 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   void dispose() {
+    MiniPlayerOverlayController.setBottomOffset(0);
+    GlobalBottomNavController.unregisterTapHandler();
     _badgePollTimer?.cancel();
     _presenceTimer?.cancel();
     super.dispose();
@@ -83,7 +91,10 @@ class _MainScreenState extends State<MainScreen> {
           ? <String, int>{}
           : await ApiService().getUnreadCounts(requests);
       final total = counts.values.fold<int>(0, (sum, item) => sum + item);
-      if (mounted) setState(() => _socialBadge = total);
+      if (mounted) {
+        setState(() => _socialBadge = total);
+        GlobalBottomNavController.setSocialBadge(total);
+      }
     } catch (_) {}
   }
 
@@ -99,6 +110,7 @@ class _MainScreenState extends State<MainScreen> {
   void _onTabTap(int i) {
     _tabs[i] ??= _buildTab(i);
     setState(() => _currentIndex = i);
+    GlobalBottomNavController.setIndex(i);
     if (i == 2) {
       Future.delayed(const Duration(milliseconds: 500), _pollBadge);
     }
@@ -118,8 +130,6 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     _tabs[_currentIndex] ??= _buildTab(_currentIndex);
 
-    final hasTrack = context.select<PlayerProvider, bool>((p) => p.hasTrack);
-
     return Scaffold(
       backgroundColor: const Color(0xFF08080f),
       body: IndexedStack(
@@ -129,16 +139,10 @@ class _MainScreenState extends State<MainScreen> {
           (index) => _tabs[index] ?? const SizedBox.shrink(),
         ),
       ),
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (hasTrack) const MiniPlayer(),
-          BottomNavBar(
-            currentIndex: _currentIndex,
-            onTap: _onTabTap,
-            socialBadge: _socialBadge,
-          ),
-        ],
+      bottomNavigationBar: BottomNavBar(
+        currentIndex: _currentIndex,
+        onTap: _onTabTap,
+        socialBadge: _socialBadge,
       ),
     );
   }
