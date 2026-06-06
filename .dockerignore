@@ -1,0 +1,14 @@
+.git
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.dart_tool
+**/build
+**/node_modules
+**/.env
+**/.env.*
+!moodwave-backend/.env.production.example
+**/firebase-credentials.json
+logs
+*.log
