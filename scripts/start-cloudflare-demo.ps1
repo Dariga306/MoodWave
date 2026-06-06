@@ -47,6 +47,16 @@ function Wait-ForHttp([string]$Url, [int]$TimeoutSeconds = 90) {
   throw "Timed out waiting for $Url"
 }
 
+function Test-HttpSoft([string]$Url, [int]$TimeoutSeconds = 120) {
+  try {
+    Wait-ForHttp $Url $TimeoutSeconds
+    return $true
+  } catch {
+    Write-Warning $_.Exception.Message
+    return $false
+  }
+}
+
 function Start-Tunnel([string]$Name, [string]$TargetUrl) {
   $log = Join-Path $RuntimeDir "cloudflared-$Name.log"
   $err = Join-Path $RuntimeDir "cloudflared-$Name.err.log"
@@ -54,7 +64,7 @@ function Start-Tunnel([string]$Name, [string]$TargetUrl) {
   Remove-Item -Force $log, $err, $out -ErrorAction SilentlyContinue
 
   Start-Process -FilePath $Cloudflared `
-    -ArgumentList @("tunnel", "--url", $TargetUrl, "--logfile", $log) `
+    -ArgumentList @("tunnel", "--protocol", "http2", "--url", $TargetUrl, "--logfile", $log) `
     -WorkingDirectory $RuntimeDir `
     -WindowStyle Hidden `
     -RedirectStandardOutput $out `
@@ -120,7 +130,7 @@ Wait-ForHttp "http://127.0.0.1:$BackendPort/health" 120
 
 Write-Host "Opening backend tunnel..."
 $backendPublicUrl = Start-Tunnel "backend" "http://127.0.0.1:$BackendPort"
-Wait-ForHttp "$backendPublicUrl/health" 60
+Test-HttpSoft "$backendPublicUrl/health" 30 | Out-Null
 
 Write-Host "Starting Flutter web on port $FrontendPort..."
 $frontendLog = Join-Path $RuntimeDir "flutter-web.log"
@@ -136,7 +146,7 @@ Wait-ForHttp "http://127.0.0.1:$FrontendPort" 180
 
 Write-Host "Opening frontend tunnel..."
 $frontendPublicUrl = Start-Tunnel "frontend" "http://127.0.0.1:$FrontendPort"
-Wait-ForHttp $frontendPublicUrl 60
+Test-HttpSoft $frontendPublicUrl 30 | Out-Null
 
 $qrPath = New-Qr $frontendPublicUrl
 
@@ -158,4 +168,3 @@ To stop everything later, run:
 .\scripts\stop-cloudflare-demo.ps1
 
 "@ | Tee-Object -FilePath (Join-Path $RuntimeDir "demo-links.txt")
-
