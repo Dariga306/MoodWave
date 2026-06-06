@@ -16,6 +16,7 @@ class PlayerProvider extends ChangeNotifier {
   StreamSubscription<Duration?>? _audioDurationSubscription;
   StreamSubscription<PlayerState>? _audioStateSubscription;
   Timer? _progressTimer;
+  DateTime? _lastWeatherHeartbeatAt;
 
   Map<String, dynamic>? _track;
   List<Map<String, dynamic>> _queue = [];
@@ -120,6 +121,11 @@ class PlayerProvider extends ChangeNotifier {
 
   void toggleShuffle() {
     _shuffleOn = !_shuffleOn;
+    if (_shuffleOn && _queue.length > _queueIndex + 2) {
+      final head = _queue.take(_queueIndex + 1).toList();
+      final tail = _queue.skip(_queueIndex + 1).toList()..shuffle();
+      _queue = [...head, ...tail];
+    }
     notifyListeners();
   }
 
@@ -337,6 +343,7 @@ class PlayerProvider extends ChangeNotifier {
 
     _startProgressHeartbeat();
     await _initPlayer();
+    _sendWeatherListeningHeartbeat(force: true);
 
     _loadingTrack = false;
     notifyListeners();
@@ -536,15 +543,50 @@ class PlayerProvider extends ChangeNotifier {
           coverUrl: coverUrl,
         );
       }
+      if (isPlaying) {
+        _sendWeatherListeningHeartbeat();
+      }
     });
+  }
+
+  void _sendWeatherListeningHeartbeat({bool force = false}) {
+    final current = _track;
+    if (current == null) return;
+    final city = (current['weather_city'] ?? '').toString();
+    final playlistId = (current['weather_playlist_id'] ?? '').toString();
+    if (city.isEmpty || playlistId.isEmpty) return;
+    final now = DateTime.now();
+    if (!force &&
+        _lastWeatherHeartbeatAt != null &&
+        now.difference(_lastWeatherHeartbeatAt!) < const Duration(seconds: 60)) {
+      return;
+    }
+    _lastWeatherHeartbeatAt = now;
+    unawaited(() async {
+      try {
+        await ApiService().markWeatherListening(city, playlistId: playlistId);
+      } catch (_) {}
+    }());
   }
 
   List<Map<String, dynamic>> _extractQueue(Map<String, dynamic> seedTrack) {
     final rawQueue = seedTrack['queue'] ?? seedTrack['tracks'];
     if (rawQueue is List) {
+      final weatherCity = (seedTrack['weather_city'] ?? '').toString();
+      final weatherPlaylistId =
+          (seedTrack['weather_playlist_id'] ?? '').toString();
       final items = rawQueue
           .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
+          .map((item) {
+            final next = Map<String, dynamic>.from(item);
+            if (weatherCity.isNotEmpty) {
+              next.putIfAbsent('weather_city', () => weatherCity);
+            }
+            if (weatherPlaylistId.isNotEmpty) {
+              next.putIfAbsent('weather_playlist_id', () => weatherPlaylistId);
+            }
+            return next;
+          })
           .toList();
       if (items.isNotEmpty) return items;
     }

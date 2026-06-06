@@ -78,6 +78,26 @@ async def send_push_notification(
     return firebase_service.send_fcm_push(token, title, body, data)
 
 
+async def send_push_notification_to_user(
+    user,
+    setting_key: str,
+    title: str,
+    body: str,
+    data: Optional[dict] = None,
+) -> bool:
+    if not user:
+        return False
+    settings = getattr(user, "notif_settings_json", None) or {}
+    if settings.get(setting_key, True) is False:
+        return False
+    return firebase_service.send_fcm_push(
+        getattr(user, "fcm_token", None),
+        title,
+        body,
+        data,
+    )
+
+
 async def get_last_message(firebase_chat_id: str) -> Optional[dict]:
     return firebase_service.get_last_message(firebase_chat_id)
 

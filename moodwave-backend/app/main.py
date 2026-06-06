@@ -267,14 +267,24 @@ app.add_exception_handler(RateLimitExceeded, lambda r, e: JSONResponse(
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+def _cors_origins() -> list[str]:
+    defaults = [
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost",
         "http://127.0.0.1",
-    ],
+    ]
+    configured = [
+        item.strip()
+        for item in (settings.CORS_ORIGINS or settings.FRONTEND_URL).split(",")
+        if item.strip()
+    ]
+    return [*defaults, *[item for item in configured if item not in defaults]]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=False,
     allow_methods=["*"],

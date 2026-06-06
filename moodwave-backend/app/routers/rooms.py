@@ -1714,13 +1714,7 @@ async def unpin_room_message(
     participant = await _get_participant(db, room_id, current_user.id)
     if not participant:
         raise HTTPException(status_code=403, detail="Join the room first")
-    can_control = await _is_room_controller(
-        request.app.state.redis, room, participant, current_user.id
-    )
     pins = await _load_pinned(request.app.state.redis, room_id)
-    target = next((pin for pin in pins if pin.get("message_id") == message_id), None)
-    if target and not can_control and target.get("pinned_by") != current_user.id:
-        raise HTTPException(status_code=403, detail="Only moderators or pin author can unpin")
     pins = [pin for pin in pins if pin.get("message_id") != message_id]
     await _save_pinned(request.app.state.redis, room_id, pins)
     await manager.broadcast(room_id, {"event": "pinned_updated", "pinned": pins})

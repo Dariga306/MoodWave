@@ -1204,7 +1204,12 @@ class _ThisIsScreenState extends State<ThisIsScreen> {
 
   void _playAll(List<Map<String, dynamic>> queue) {
     if (queue.isEmpty) return;
-    final first = Map<String, dynamic>.from(queue.first)..['queue'] = queue;
+    final nextQueue = List<Map<String, dynamic>>.from(queue);
+    if (context.read<PlayerProvider>().shuffleOn) {
+      nextQueue.shuffle();
+    }
+    final first = Map<String, dynamic>.from(nextQueue.first)
+      ..['queue'] = nextQueue;
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => PlayerScreen(track: first)),

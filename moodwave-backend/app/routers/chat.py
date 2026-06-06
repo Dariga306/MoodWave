@@ -374,6 +374,23 @@ async def _assert_chat_access_by_firebase_id(
     raise HTTPException(status_code=404, detail="Chat not found")
 
 
+async def _can_manage_pin_by_firebase_id(
+    firebase_chat_id: str,
+    current_user: User,
+    db: AsyncSession,
+) -> bool:
+    group = await db.scalar(
+        select(GroupChat).where(
+            GroupChat.firebase_chat_id == firebase_chat_id,
+            GroupChat.is_active == True,
+        )
+    )
+    if not group:
+        return False
+    membership = await _get_group_membership(group.id, current_user.id, db)
+    return _can_manage_group(membership)
+
+
 async def _get_or_create_direct_chat(
     target_user_id: int,
     current_user: User,
@@ -640,12 +657,17 @@ async def _send_payload(
     await _show_chat_key(request, current_user.id, _chat_hidden_key_for_chat(chat))
     await _show_chat_key(request, partner.id, _chat_hidden_key_for_chat(chat))
 
-    _dispatch_push_notification(
-        token=partner.fcm_token,
-        title=push_title,
-        body=push_body,
-        data={**data, "message_id": message_id},
-    )
+    should_send_push = True
+    if payload.get("type") == "room_invite":
+        settings = getattr(partner, "notif_settings_json", None) or {}
+        should_send_push = settings.get("room_invite", True) is not False
+    if should_send_push:
+        _dispatch_push_notification(
+            token=partner.fcm_token,
+            title=push_title,
+            body=push_body,
+            data={**data, "message_id": message_id},
+        )
     return {"message_id": message_id, "sent_at": sent_at}
 
 

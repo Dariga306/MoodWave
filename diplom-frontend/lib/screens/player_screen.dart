@@ -241,7 +241,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   String? get _inlineLyricLine {
-    if (_lyricsLoading || _lrcLines.isEmpty || !_lyricsSynced) return null;
+    if (_lyricsLoading ||
+        _lrcLines.isEmpty ||
+        !_lyricsSynced ||
+        !_lyricsHasExactSync) {
+      return null;
+    }
     final index = _activeLyricIndex;
     if (index < 0 || index >= _lrcLines.length) return _lrcLines.first.text;
     final line = _lrcLines[index].text.trim();

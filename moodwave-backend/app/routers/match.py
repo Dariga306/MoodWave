@@ -343,8 +343,9 @@ async def like_user(
             [current_user.id, target_user_id],
         )
         target_user = await db.get(User, target_user_id)
-        await firebase_svc.send_push_notification(
-            token=target_user.fcm_token if target_user else None,
+        await firebase_svc.send_push_notification_to_user(
+            user=target_user,
+            setting_key="like_back",
             title="Someone liked you",
             body=f"{current_user.display_name or current_user.first_name or current_user.username} liked your music taste. Like back to start chatting together.",
             data={"event": "music_like", "user_id": current_user.id},
@@ -394,14 +395,16 @@ async def like_user(
     )
 
     target_user = await db.get(User, target_user_id)
-    await firebase_svc.send_push_notification(
-        token=current_user.fcm_token,
+    await firebase_svc.send_push_notification_to_user(
+        user=current_user,
+        setting_key="match_found",
         title="Match found",
         body=f"You matched with {target_user.username if target_user else 'someone'}",
         data={"event": "match_found", "match_id": match.id},
     )
-    await firebase_svc.send_push_notification(
-        token=target_user.fcm_token if target_user else None,
+    await firebase_svc.send_push_notification_to_user(
+        user=target_user,
+        setting_key="match_found",
         title="Match found",
         body=f"You matched with {current_user.username}",
         data={"event": "match_found", "match_id": match.id},

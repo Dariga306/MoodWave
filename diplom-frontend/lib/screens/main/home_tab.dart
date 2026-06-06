@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -57,11 +59,16 @@ class _HomeTabState extends State<HomeTab> {
 
   PlayerProvider? _playerProvider;
   String? _lastKnownTrackId;
+  Timer? _weatherListenerTimer;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _weatherListenerTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshWeatherListeners(),
+    );
   }
 
   @override
@@ -77,6 +84,7 @@ class _HomeTabState extends State<HomeTab> {
 
   @override
   void dispose() {
+    _weatherListenerTimer?.cancel();
     _playerProvider?.removeListener(_onPlayerChanged);
     super.dispose();
   }
@@ -163,6 +171,24 @@ class _HomeTabState extends State<HomeTab> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _refreshWeatherListeners() async {
+    if (!mounted) return;
+    final user = context.read<AuthProvider>().user;
+    final city = user?['city']?.toString() ?? 'Astana';
+    try {
+      final weather = await ApiService().getWeather(city);
+      if (!mounted) return;
+      setState(() {
+        _weather = {
+          ...?_weather,
+          ...weather,
+        };
+      });
+    } catch (_) {
+      // Listener refresh should stay silent; the full page can still refresh normally.
     }
   }
 
@@ -868,12 +894,6 @@ class _HomeTabState extends State<HomeTab> {
     return const Color(0xFF93C5FD);
   }
 
-  String _weatherListenersLabel(int count, String city) {
-    if (count <= 0) return 'No one listening now';
-    if (count == 1) return '1 person listening now';
-    return '$count people listening now';
-  }
-
   String _weatherMood(String desc) {
     final d = desc.toLowerCase();
     if (d.contains('rain') || d.contains('drizzle')) return 'rainy';
@@ -974,10 +994,15 @@ class _HomeTabState extends State<HomeTab> {
 
   @override
   Widget build(BuildContext context) {
-    final user = context.watch<AuthProvider>().user;
+    final auth = context.watch<AuthProvider>();
+    final user = auth.user;
     final city = user?['city'] ?? 'Astana';
     final displayName = user?['display_name'] ?? user?['username'] ?? '';
     final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U';
+    final avatarUrl = buildMediaUrl(
+      user?['avatar_url'] as String?,
+      version: auth.profileRevision,
+    );
 
     final weatherDisplayDesc =
         (_weather?['description'] ?? _weather?['condition'] ?? 'Clear')
@@ -1077,19 +1102,39 @@ class _HomeTabState extends State<HomeTab> {
                               builder: (_) => const ProfileTabScreen()),
                         ),
                         child: Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                                gradient: AppColors.gradMixed,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: AppColors.border2, width: 2)),
-                            child: Center(
-                                child: Text(initial,
-                                    style: GoogleFonts.outfit(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.white)))),
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            gradient:
+                                avatarUrl.isEmpty ? AppColors.gradMixed : null,
+                            color: avatarUrl.isNotEmpty
+                                ? AppColors.glass
+                                : null,
+                            shape: BoxShape.circle,
+                            border:
+                                Border.all(color: AppColors.border2, width: 2),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: avatarUrl.isNotEmpty
+                              ? CachedNetworkImage(
+                                  imageUrl: avatarUrl,
+                                  fit: BoxFit.cover,
+                                  errorWidget: (_, __, ___) => Center(
+                                    child: Text(initial,
+                                        style: GoogleFonts.outfit(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white)),
+                                  ),
+                                )
+                              : Center(
+                                  child: Text(initial,
+                                      style: GoogleFonts.outfit(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.white)),
+                                ),
+                        ),
                       ),
                     ]),
                   ),
@@ -1152,33 +1197,89 @@ class _HomeTabState extends State<HomeTab> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                  Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 10, vertical: 4),
-                                      decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.10),
-                                          borderRadius:
-                                              BorderRadius.circular(100),
-                                          border: Border.all(
+                                  Row(
+                                    children: [
+                                      Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 10, vertical: 4),
+                                          decoration: BoxDecoration(
                                               color: Colors.white
-                                                  .withOpacity(0.12))),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            weatherIcon,
-                                            size: 13,
-                                            color: weatherAccent,
+                                                  .withOpacity(0.10),
+                                              borderRadius:
+                                                  BorderRadius.circular(100),
+                                              border: Border.all(
+                                                  color: Colors.white
+                                                      .withOpacity(0.12))),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                weatherIcon,
+                                                size: 13,
+                                                color: weatherAccent,
+                                              ),
+                                              const SizedBox(width: 5),
+                                              Text('Live Weather',
+                                                  style: GoogleFonts.outfit(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: weatherAccent,
+                                                      letterSpacing: 0.05)),
+                                            ],
+                                          )),
+                                      if (listenersCount > 0) ...[
+                                        const SizedBox(width: 8),
+                                        Flexible(
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 9, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF22C55E)
+                                                  .withOpacity(0.16),
+                                              borderRadius:
+                                                  BorderRadius.circular(100),
+                                              border: Border.all(
+                                                color: const Color(0xFF22C55E)
+                                                    .withOpacity(0.32),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Container(
+                                                  width: 6,
+                                                  height: 6,
+                                                  decoration: const BoxDecoration(
+                                                    color: Color(0xFF22C55E),
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 5),
+                                                Flexible(
+                                                  child: Text(
+                                                    listenersCount == 1
+                                                        ? '1 listening'
+                                                        : '$listenersCount listening',
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: GoogleFonts.outfit(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color:
+                                                          const Color(0xFFBBF7D0),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
                                           ),
-                                          const SizedBox(width: 5),
-                                          Text('Live Weather',
-                                              style: GoogleFonts.outfit(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: weatherAccent,
-                                                  letterSpacing: 0.05)),
-                                        ],
-                                      )),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
                                   const SizedBox(height: 10),
                                   Text(
                                       weatherTemp != null
@@ -1195,38 +1296,6 @@ class _HomeTabState extends State<HomeTab> {
                                           fontSize: 14,
                                           color:
                                               Colors.white.withOpacity(0.78))),
-                                  const SizedBox(height: 6),
-                                  Row(
-                                    children: [
-                                      Container(
-                                        width: 7,
-                                        height: 7,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: const Color(0xFF22C55E),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: const Color(0xFF22C55E)
-                                                  .withOpacity(0.4),
-                                              blurRadius: 6,
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Expanded(
-                                        child: Text(
-                                            _weatherListenersLabel(
-                                                listenersCount, city),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: GoogleFonts.outfit(
-                                                fontSize: 12,
-                                                color: Colors.white
-                                                    .withOpacity(0.62))),
-                                      ),
-                                    ],
-                                  ),
                                 ])),
                             const SizedBox(width: 16),
                             GestureDetector(
@@ -4092,10 +4161,8 @@ class _FriendListeningCard extends StatelessWidget {
               height: 60,
               clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                color: AppColors.glass,
-                border: Border.all(
-                    color: AppColors.purpleLight.withOpacity(0.4), width: 2),
+                shape: BoxShape.circle,
+                color: Colors.transparent,
               ),
               child: cover.isNotEmpty
                   ? CachedNetworkImage(

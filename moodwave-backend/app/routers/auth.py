@@ -2046,8 +2046,15 @@ async def update_privacy_settings(
 _DEFAULT_NOTIF_SETTINGS = {
     "new_follower": True,
     "friend_request": True,
+    "friend_accepted": True,
     "match_found": True,
+    "like_back": True,
+    "new_release": True,
+    "artist_activity": False,
+    "playlist_saved": True,
+    "playlist_collaboration": True,
     "room_invite": True,
+    "room_started": False,
     "promotions": False,
 }
 
@@ -2067,8 +2074,15 @@ async def get_notification_settings(
 class NotificationSettingsRequest(BaseModel):
     new_follower: Optional[bool] = None
     friend_request: Optional[bool] = None
+    friend_accepted: Optional[bool] = None
     match_found: Optional[bool] = None
+    like_back: Optional[bool] = None
+    new_release: Optional[bool] = None
+    artist_activity: Optional[bool] = None
+    playlist_saved: Optional[bool] = None
+    playlist_collaboration: Optional[bool] = None
     room_invite: Optional[bool] = None
+    room_started: Optional[bool] = None
     promotions: Optional[bool] = None
 
 

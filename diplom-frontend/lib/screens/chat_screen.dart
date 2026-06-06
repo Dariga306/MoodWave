@@ -206,9 +206,21 @@ class _ChatScreenState extends State<ChatScreen> {
       .map((pin) => [
             (pin['message_id'] ?? '').toString(),
             (pin['pinned_at'] ?? '').toString(),
+            (pin['pinned_by'] ?? '').toString(),
             (pin['preview'] ?? '').toString(),
           ].join('|'))
       .join('||');
+
+  Map<String, dynamic>? _pinForMessage(String messageId) {
+    for (final pin in _pinnedMessages) {
+      if ((pin['message_id'] ?? '').toString() == messageId) return pin;
+    }
+    return null;
+  }
+
+  bool _canUnpinPin(Map<String, dynamic>? pin) {
+    return pin != null;
+  }
 
   String _groupSignature({
     required List<Map<String, dynamic>> members,
@@ -1573,8 +1585,9 @@ class _ChatScreenState extends State<ChatScreen> {
             const SizedBox(height: 4),
             const Divider(color: AppColors.border, height: 1),
             Builder(builder: (ctx) {
-              final isPinned =
-                  _pinnedMessages.any((p) => p['message_id'] == messageId);
+              final pin = _pinForMessage(messageId);
+              final isPinned = pin != null;
+              final canUnpin = _canUnpinPin(pin);
               return ListTile(
                 dense: true,
                 leading: Icon(
@@ -1587,14 +1600,17 @@ class _ChatScreenState extends State<ChatScreen> {
                   style:
                       GoogleFonts.outfit(fontSize: 13, color: AppColors.text),
                 ),
-                onTap: () {
-                  Navigator.pop(context);
-                  if (isPinned) {
-                    _unpinMessage(messageId);
-                  } else {
-                    _pinMessage(messageId, preview);
-                  }
-                },
+                enabled: !isPinned || canUnpin,
+                onTap: isPinned && !canUnpin
+                    ? null
+                    : () {
+                        Navigator.pop(context);
+                        if (isPinned) {
+                          _unpinMessage(messageId);
+                        } else {
+                          _pinMessage(messageId, preview);
+                        }
+                      },
               );
             }),
             ListTile(
@@ -2686,6 +2702,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 final pin = _pinnedMessages[i];
                 final msgId = pin['message_id'] as String? ?? '';
                 final prev = (pin['preview'] as String? ?? '').trim();
+                final canUnpin = _canUnpinPin(pin);
                 return ListTile(
                   leading: const Icon(Icons.push_pin_rounded,
                       size: 16, color: AppColors.purpleLight),
@@ -2701,14 +2718,16 @@ class _ChatScreenState extends State<ChatScreen> {
                     style: GoogleFonts.outfit(
                         fontSize: 11, color: AppColors.text3),
                   ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.push_pin_outlined,
-                        size: 16, color: AppColors.text3),
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      _unpinMessage(msgId);
-                    },
-                  ),
+                  trailing: canUnpin
+                      ? IconButton(
+                          icon: const Icon(Icons.push_pin_outlined,
+                              size: 16, color: AppColors.text3),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            _unpinMessage(msgId);
+                          },
+                        )
+                      : null,
                   onTap: () {
                     Navigator.pop(ctx);
                     _scrollToMessage(msgId);

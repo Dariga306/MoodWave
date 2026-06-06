@@ -401,6 +401,24 @@ async def create_playlist(
     db.add(playlist)
     await db.commit()
     await db.refresh(playlist)
+    if (
+        playlist.visibility == PlaylistVisibility.saved
+        and playlist.source_playlist_id
+    ):
+        source_playlist = await db.get(Playlist, playlist.source_playlist_id)
+        if source_playlist and source_playlist.owner_id != current_user.id:
+            owner = await db.get(User, source_playlist.owner_id)
+            await firebase_svc.send_push_notification_to_user(
+                user=owner,
+                setting_key="playlist_saved",
+                title="Playlist saved",
+                body=f"{current_user.username} saved {source_playlist.title}",
+                data={
+                    "event": "playlist_saved",
+                    "playlist_id": source_playlist.id,
+                    "user_id": current_user.id,
+                },
+            )
     payload = _playlist_payload(playlist, track_count=0)
     payload = await _attach_owner_metadata(payload, db, playlist=playlist)
     saved_count, is_saved_by_me, saved_copy_id = await _saved_copy_metadata(
@@ -585,8 +603,9 @@ async def add_track_to_playlist(
     # Collaborative notification to partner.
     if playlist.is_collaborative and playlist.collab_user_id and playlist.collab_user_id != current_user.id:
         partner = await db.get(User, playlist.collab_user_id)
-        await firebase_svc.send_push_notification(
-            token=partner.fcm_token if partner else None,
+        await firebase_svc.send_push_notification_to_user(
+            user=partner,
+            setting_key="playlist_collaboration",
             title="Track added",
             body=f"{current_user.username} added a track to {playlist.title}",
             data={"event": "collab_track_added", "playlist_id": playlist.id},
@@ -654,8 +673,9 @@ async def set_collaborator(
     await db.commit()
     await db.refresh(playlist)
 
-    await firebase_svc.send_push_notification(
-        token=partner.fcm_token,
+    await firebase_svc.send_push_notification_to_user(
+        user=partner,
+        setting_key="playlist_collaboration",
         title="Playlist collaboration",
         body=f"{current_user.username} invited you to collaborate on {playlist.title}",
         data={"event": "playlist_collaboration", "playlist_id": playlist.id},

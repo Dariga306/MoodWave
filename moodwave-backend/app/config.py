@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     # Firebase
     FIREBASE_CREDENTIALS_PATH: str = "./firebase-credentials.json"
+    FIREBASE_CREDENTIALS_JSON: str = ""
     FIREBASE_DATABASE_URL: str = ""
 
     # Mail
@@ -52,6 +53,7 @@ class Settings(BaseSettings):
     # Spotify OAuth redirect
     SPOTIFY_REDIRECT_URI: str = "http://127.0.0.1:8000/auth/spotify/callback"
     FRONTEND_URL: str = "http://127.0.0.1:5001"
+    CORS_ORIGINS: str = ""
 
     # App
     APP_ENV: str = "development"

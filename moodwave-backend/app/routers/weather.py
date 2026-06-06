@@ -18,7 +18,7 @@ router = APIRouter()
 WEATHER_PLAYLIST_CACHE_TTL = 1800
 WEATHER_LISTENER_TTL = 1800
 # Bump version suffix whenever the cached payload schema changes, to bust stale Redis entries
-_PLAYLIST_CACHE_VER = "v11"
+_PLAYLIST_CACHE_VER = "v13"
 
 # ─── Playlist catalogue ────────────────────────────────────────────────────────
 # Tuple: (key, name, description, emoji, mood, track_count)
@@ -355,7 +355,13 @@ def _cloud_featured_index(weather: dict) -> int:
     return 0  # Cloud Nine
 
 
-def _playlist_payloads(condition: str, total_listeners: int, weather: dict | None = None) -> list[dict]:
+def _playlist_payloads(
+    condition: str,
+    total_listeners: int,
+    weather: dict | None = None,
+    playlist_counts: dict[str, int] | None = None,
+    playlist_top_listeners: dict[str, list[dict]] | None = None,
+) -> list[dict]:
     normalized = _normalize_condition(condition)
     rows = WEATHER_PLAYLISTS.get(normalized, WEATHER_PLAYLISTS["clouds"])
 
@@ -367,14 +373,11 @@ def _playlist_payloads(condition: str, total_listeners: int, weather: dict | Non
     # Build ordered list: featured first, then the rest in original order
     ordered_indices = [featured_idx] + [i for i in range(len(rows)) if i != featured_idx]
 
-    # Listener spread: weighted decay
-    weights = [1.0, 0.82, 0.68, 0.59, 0.52, 0.46, 0.40, 0.34, 0.29, 0.24]
-
     payload = []
     for rank, original_idx in enumerate(ordered_indices):
         playlist_key, name, description, emoji, mood, track_count = rows[original_idx]
         primary, secondary = _playlist_theme(normalized, original_idx)
-        listener_count = int(total_listeners * weights[rank]) if total_listeners > 0 else 0
+        listener_count = int((playlist_counts or {}).get(playlist_key, 0))
         payload.append(
             {
                 "id": playlist_key,
@@ -385,6 +388,7 @@ def _playlist_payloads(condition: str, total_listeners: int, weather: dict | Non
                 "weather_key": normalized,
                 "track_count": max(220, track_count),
                 "listeners_count": listener_count,
+                "top_listeners": (playlist_top_listeners or {}).get(playlist_key, []),
                 "accent_start": primary,
                 "accent_end": secondary,
                 "seed_query": f"{name} {description}",
@@ -398,17 +402,67 @@ def _playlist_payloads(condition: str, total_listeners: int, weather: dict | Non
 
 _LISTENER_ACTIVE_SECS = 300  # 5 minutes considered "active"
 
+
+def _listener_key(city: str) -> str:
+    return f"weather:active:{city.lower()}"
+
+
+def _playlist_listener_key(city: str, playlist_id: str) -> str:
+    return f"weather:active:{city.lower()}:playlist:{playlist_id}"
+
+
+async def _touch_listener(
+    redis,
+    city: str,
+    user_id: int,
+    playlist_id: str | None = None,
+) -> None:
+    now_ts = int(time.time())
+    key = _listener_key(city)
+    await redis.zadd(key, {str(user_id): now_ts})
+    await redis.zremrangebyscore(key, 0, now_ts - _LISTENER_ACTIVE_SECS)
+    await redis.expire(key, _LISTENER_ACTIVE_SECS * 2)
+    if playlist_id:
+        playlist_key = _playlist_listener_key(city, playlist_id)
+        await redis.zadd(playlist_key, {str(user_id): now_ts})
+        await redis.zremrangebyscore(playlist_key, 0, now_ts - _LISTENER_ACTIVE_SECS)
+        await redis.expire(playlist_key, _LISTENER_ACTIVE_SECS * 2)
+
+
 async def _listeners_count(redis, city: str) -> int:
     cutoff = int(time.time()) - _LISTENER_ACTIVE_SECS
-    return await redis.zcount(f"weather:active:{city.lower()}", cutoff, "+inf")
+    return await redis.zcount(_listener_key(city), cutoff, "+inf")
 
 
-async def _get_top_listeners(redis, db: AsyncSession, city: str, limit: int = 5) -> list[dict]:
+async def _playlist_listeners_count(redis, city: str, playlist_id: str) -> int:
+    cutoff = int(time.time()) - _LISTENER_ACTIVE_SECS
+    return await redis.zcount(_playlist_listener_key(city, playlist_id), cutoff, "+inf")
+
+
+async def _playlist_counts(redis, city: str, playlist_ids: list[str]) -> dict[str, int]:
+    return {
+        playlist_id: await _playlist_listeners_count(redis, city, playlist_id)
+        for playlist_id in playlist_ids
+    }
+
+
+async def _get_top_listeners(
+    redis,
+    db: AsyncSession,
+    city: str,
+    limit: int = 5,
+    playlist_id: str | None = None,
+) -> list[dict]:
     """Return up to `limit` listener profiles for a city from Redis + DB."""
     try:
         cutoff = int(time.time()) - _LISTENER_ACTIVE_SECS
-        member_strs = await redis.zrangebyscore(f"weather:active:{city.lower()}", cutoff, "+inf")
-        ids = [int(s) for s in member_strs if str(s).lstrip("-").isdigit()]
+        key = _playlist_listener_key(city, playlist_id) if playlist_id else _listener_key(city)
+        member_strs = await redis.zrangebyscore(key, cutoff, "+inf")
+        raw_ids = [
+            s.decode() if isinstance(s, bytes) else str(s)
+            for s in member_strs
+        ]
+        ids = [int(s) for s in raw_ids if s.lstrip("-").isdigit()]
         if not ids:
             return []
         ids = ids[:limit]
@@ -506,7 +560,9 @@ async def weather_current(
             raise HTTPException(status_code=503, detail="Weather service unavailable")
 
     listeners_count = await _listeners_count(redis, weather["city"])
-    playlists = _playlist_payloads(weather["condition"], listeners_count, weather)
+    playlist_ids = [row[0] for row in WEATHER_PLAYLISTS.get(_normalize_condition(weather["condition"]), WEATHER_PLAYLISTS["clouds"])]
+    counts = await _playlist_counts(redis, weather["city"], playlist_ids)
+    playlists = _playlist_payloads(weather["condition"], listeners_count, weather, counts)
     return {
         **weather,
         "condition_label": weather.get("condition_label") or condition_label(weather["condition"]),
@@ -564,16 +620,18 @@ async def weather_playlist(
         }
         await redis.setex(cache_key, WEATHER_PLAYLIST_CACHE_TTL, json.dumps(payload))
 
-    listener_key = f"weather:listeners:{payload['city'].lower()}"
-    now_ts = int(time.time())
-    await redis.zadd(listener_key, {str(current_user.id): now_ts})
-    await redis.zremrangebyscore(listener_key, 0, now_ts - _LISTENER_ACTIVE_SECS)
-    await redis.expire(listener_key, _LISTENER_ACTIVE_SECS * 2)
     listeners_count = await _listeners_count(redis, payload["city"])
 
     # For cloud scoring we need the raw weather snapshot
     weather_raw = payload.get("_weather_raw") or {"temp": payload.get("temp") or 20.0}
-    playlists = _playlist_payloads(payload["condition"], listeners_count, weather_raw)
+    playlist_ids = [row[0] for row in WEATHER_PLAYLISTS.get(_normalize_condition(payload["condition"]), WEATHER_PLAYLISTS["clouds"])]
+    counts = await _playlist_counts(redis, payload["city"], playlist_ids)
+    top_by_playlist = {
+        playlist_id: await _get_top_listeners(redis, db, payload["city"], playlist_id=playlist_id)
+        for playlist_id in playlist_ids
+        if counts.get(playlist_id, 0) > 0
+    }
+    playlists = _playlist_payloads(payload["condition"], listeners_count, weather_raw, counts, top_by_playlist)
 
     top_listeners = await _get_top_listeners(redis, db, payload["city"])
 
@@ -581,6 +639,53 @@ async def weather_playlist(
     return {
         **response_payload,
         "listeners_count": listeners_count,
+        "featured_playlist": playlists[0] if playlists else None,
+        "playlists": playlists,
+        "top_listeners": top_listeners,
+    }
+
+
+@router.post(
+    "/listening",
+    summary="Mark current user as listening to a weather playlist",
+    description="Refreshes the active weather-listener presence used by Home and Weather screens.",
+)
+async def mark_weather_listening(
+    city: str = Query(...),
+    playlist_id: str | None = Query(default=None),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    redis = request.app.state.redis
+    try:
+        weather = await get_weather(city, redis)
+        resolved_city = weather["city"]
+        condition = weather["condition"]
+        weather_raw = weather
+    except Exception:
+        resolved_city = city
+        condition = "clouds"
+        weather_raw = {"temp": 20.0}
+
+    await _touch_listener(redis, resolved_city, current_user.id, playlist_id)
+    listeners_count = await _listeners_count(redis, resolved_city)
+    playlist_ids = [row[0] for row in WEATHER_PLAYLISTS.get(_normalize_condition(condition), WEATHER_PLAYLISTS["clouds"])]
+    counts = await _playlist_counts(redis, resolved_city, playlist_ids)
+    top_by_playlist = {
+        item_id: await _get_top_listeners(redis, db, resolved_city, playlist_id=item_id)
+        for item_id in playlist_ids
+        if counts.get(item_id, 0) > 0
+    }
+    playlists = _playlist_payloads(condition, listeners_count, weather_raw, counts, top_by_playlist)
+    top_listeners = await _get_top_listeners(redis, db, resolved_city)
+
+    return {
+        "ok": True,
+        "city": resolved_city,
+        "playlist_id": playlist_id,
+        "listeners_count": listeners_count,
+        "playlist_listeners_count": counts.get(playlist_id or "", 0),
         "featured_playlist": playlists[0] if playlists else None,
         "playlists": playlists,
         "top_listeners": top_listeners,

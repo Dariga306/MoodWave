@@ -54,7 +54,11 @@ def _fallback_chat(payload: dict[str, Any], firebase_chat_id: str) -> dict[str, 
 def init_firebase() -> bool:
     try:
         if not firebase_admin._apps:
-            cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
+            if settings.FIREBASE_CREDENTIALS_JSON:
+                cred_payload = json.loads(settings.FIREBASE_CREDENTIALS_JSON)
+                cred = credentials.Certificate(cred_payload)
+            else:
+                cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
             firebase_admin.initialize_app(
                 cred,
                 {"databaseURL": settings.FIREBASE_DATABASE_URL},

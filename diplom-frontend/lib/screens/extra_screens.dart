@@ -5455,7 +5455,7 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
       );
     }
 
-    final activeIdx = _activeLyricIndex();
+    final activeIdx = _hasExactLyricsSync ? _activeLyricIndex() : -1;
     final canSeek = _hasJoined &&
         _lyricsSyncedTimesMs.isNotEmpty &&
         _lyricsSyncedTimesMs.length == _lyricsLines.length;
@@ -5512,10 +5512,6 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
       for (int i = 0; i < _lyricsSyncedTimesMs.length; i++) {
         if (_lyricsSyncedTimesMs[i] <= posMs) activeIdx = i;
       }
-    } else if (_lyricsApproxSync && _durationMs > 0) {
-      activeIdx = ((posMs / _durationMs) * _lyricsLines.length)
-          .floor()
-          .clamp(0, _lyricsLines.length - 1);
     }
     return activeIdx;
   }
@@ -5530,6 +5526,7 @@ class _ListeningPartyScreenState extends State<ListeningPartyScreen>
   }
 
   void _autoScrollLyrics() {
+    if (!_hasExactLyricsSync) return;
     final idx = _activeLyricIndex();
     if (idx < 0 || idx == _lastScrolledLyricIdx) return;
     _lastScrolledLyricIdx = idx;

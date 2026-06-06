@@ -412,8 +412,9 @@ async def send_friend_request(
     )
     await db.commit()
 
-    await firebase_svc.send_push_notification(
-        token=target.fcm_token,
+    await firebase_svc.send_push_notification_to_user(
+        user=target,
+        setting_key="friend_request",
         title="Friend request",
         body=f"👋 {_notification_name(current_user)} wants to be your friend on MoodWave",
         data={"event": "friend_request", "user_id": current_user.id},
@@ -454,8 +455,9 @@ async def accept_friend_request(
     await db.commit()
 
     requester = await db.get(User, user_id)
-    await firebase_svc.send_push_notification(
-        token=requester.fcm_token if requester else None,
+    await firebase_svc.send_push_notification_to_user(
+        user=requester,
+        setting_key="friend_accepted",
         title="Friend request accepted",
         body=f"🎉 {_notification_name(current_user)} accepted your friend request!",
         data={"event": "friend_accepted", "user_id": current_user.id},
@@ -786,6 +788,13 @@ async def follow_user(
     if not existing:
         db.add(UserFollow(follower_id=current_user.id, following_id=user_id))
         await db.commit()
+        await firebase_svc.send_push_notification_to_user(
+            user=target,
+            setting_key="new_follower",
+            title="New follower",
+            body=f"{_notification_name(current_user)} started following you",
+            data={"event": "new_follower", "user_id": current_user.id},
+        )
     return {"message": "Following"}
 
 

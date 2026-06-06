@@ -91,6 +91,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
   StreamSubscription<Duration>? _positionSub;
   List<String> _lyricsLines = [];
   List<SyncedLine> _syncedLines = [];
+  bool _hasExactSync = false;
   bool _loading = true;
   int _activeIndex = -1;
   int _currentPositionMs = 0;
@@ -191,6 +192,8 @@ class _LyricsScreenState extends State<LyricsScreen> {
   }
 
   void _seedInitialLyrics() {
+    _hasExactSync = false;
+    _activeIndex = -1;
     if (widget.lyricsLines.isNotEmpty) {
       _lyricsLines = List<String>.from(widget.lyricsLines);
       if (widget.syncedLineTimesMs.length == widget.lyricsLines.length &&
@@ -202,6 +205,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
             text: widget.lyricsLines[index],
           ),
         );
+        _hasExactSync = !widget.approximateSync;
       }
       _loading = false;
       _startTicker();
@@ -211,7 +215,11 @@ class _LyricsScreenState extends State<LyricsScreen> {
   }
 
   Future<void> _fetchLyrics() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _hasExactSync = false;
+      _activeIndex = -1;
+    });
 
     try {
       final queries = <Map<String, String>>[];
@@ -289,6 +297,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
         setState(() {
           _syncedLines = lines;
           _lyricsLines = lines.map((line) => line.text).toList();
+          _hasExactSync = true;
           _loading = false;
         });
         _startTicker();
@@ -310,7 +319,8 @@ class _LyricsScreenState extends State<LyricsScreen> {
         setState(() {
           _lyricsLines = lines;
           _syncedLines = approx.any((l) => l.timeMs > 0) ? approx : [];
-          _activeIndex = _syncedLines.isNotEmpty ? 0 : -1;
+          _hasExactSync = false;
+          _activeIndex = -1;
           _loading = false;
         });
         _startTicker();
@@ -338,7 +348,8 @@ class _LyricsScreenState extends State<LyricsScreen> {
         setState(() {
           _lyricsLines = lines;
           _syncedLines = approx.any((line) => line.timeMs > 0) ? approx : [];
-          _activeIndex = _syncedLines.isNotEmpty ? 0 : -1;
+          _hasExactSync = false;
+          _activeIndex = -1;
           _loading = false;
         });
         _startTicker();
@@ -392,7 +403,7 @@ class _LyricsScreenState extends State<LyricsScreen> {
   }
 
   void _updateActiveIndex() {
-    if (_syncedLines.isEmpty) return;
+    if (!_hasExactSync || _syncedLines.isEmpty) return;
 
     final posMs = _interpolatedPositionMs;
     int nextIndex = posMs < _syncedLines.first.timeMs ? 0 : -1;
@@ -492,7 +503,9 @@ class _LyricsScreenState extends State<LyricsScreen> {
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
-                                'Approximate timing — tap to seek unavailable',
+                                widget.onSeek == null
+                                    ? 'Approximate timing'
+                                    : 'Approximate timing — tap a line to seek',
                                 style: GoogleFonts.outfit(
                                   fontSize: 11,
                                   color: Colors.white54,
@@ -510,17 +523,18 @@ class _LyricsScreenState extends State<LyricsScreen> {
                             ),
                             itemCount: _lyricsLines.length,
                             itemBuilder: (context, index) {
-                              final isActive = _syncedLines.isNotEmpty &&
+                              final isActive = _hasExactSync &&
+                                  _syncedLines.isNotEmpty &&
                                   index == _activeIndex &&
                                   _activeIndex >= 0;
-                              // Seek is only meaningful for exact (non-approximate) sync
                               final canSeek = _syncedLines.isNotEmpty &&
                                   widget.onSeek != null &&
-                                  !widget.approximateSync;
+                                  index < _syncedLines.length;
 
                               return GestureDetector(
                                 key: isActive ? _activeKey : null,
-                                onTap: canSeek ? () => _seekToLine(index) : null,
+                                onTap:
+                                    canSeek ? () => _seekToLine(index) : null,
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 20,

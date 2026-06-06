@@ -2872,16 +2872,11 @@ class _LiveMiniCard extends StatelessWidget {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  gradient: AppColors.gradMixed,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: AppColors.purpleLight.withOpacity(0.5),
-                    width: 1.5,
-                  ),
+                  shape: BoxShape.circle,
+                  color: Colors.transparent,
                 ),
                 child: coverUrl.isNotEmpty
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
+                    ? ClipOval(
                         child: CachedNetworkImage(
                           imageUrl: coverUrl,
                           fit: BoxFit.cover,

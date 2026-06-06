@@ -26,6 +26,8 @@ class _NotificationSettingsScreenState
   // Music
   bool _newRelease = true;
   bool _artistActivity = false;
+  bool _playlistSaved = true;
+  bool _playlistCollaboration = true;
 
   // Rooms
   bool _roomInvite = true;
@@ -55,6 +57,9 @@ class _NotificationSettingsScreenState
         _likeBack = data['like_back'] as bool? ?? true;
         _newRelease = data['new_release'] as bool? ?? true;
         _artistActivity = data['artist_activity'] as bool? ?? false;
+        _playlistSaved = data['playlist_saved'] as bool? ?? true;
+        _playlistCollaboration =
+            data['playlist_collaboration'] as bool? ?? true;
         _roomInvite = data['room_invite'] as bool? ?? true;
         _roomStarted = data['room_started'] as bool? ?? false;
         _promotions = data['promotions'] as bool? ?? false;
@@ -193,6 +198,30 @@ class _NotificationSettingsScreenState
                   onChanged: (v) {
                     setState(() => _artistActivity = v);
                     _save('artist_activity', v);
+                  },
+                ),
+                _NotifTile(
+                  icon: Icons.playlist_add_check_rounded,
+                  iconColor: const Color(0xFF22C55E),
+                  title: 'Playlist Saves',
+                  subtitle: 'When someone saves your playlist',
+                  value: _playlistSaved,
+                  saving: _saving,
+                  onChanged: (v) {
+                    setState(() => _playlistSaved = v);
+                    _save('playlist_saved', v);
+                  },
+                ),
+                _NotifTile(
+                  icon: Icons.queue_music_rounded,
+                  iconColor: const Color(0xFFEC4899),
+                  title: 'Playlist Collaboration',
+                  subtitle: 'Invites and updates in collaborative playlists',
+                  value: _playlistCollaboration,
+                  saving: _saving,
+                  onChanged: (v) {
+                    setState(() => _playlistCollaboration = v);
+                    _save('playlist_collaboration', v);
                   },
                 ),
                 const SizedBox(height: 20),

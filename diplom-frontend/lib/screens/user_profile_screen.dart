@@ -1279,8 +1279,7 @@ class _NowPlayingBadgeState extends State<_NowPlayingBadge>
         children: [
           // Cover art or music icon
           if (coverUrl.isNotEmpty)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+            ClipOval(
               child: CachedNetworkImage(
                 imageUrl: coverUrl,
                 width: 36,
@@ -1390,7 +1389,7 @@ class _NowPlayingBadgeState extends State<_NowPlayingBadge>
         color: isLive
             ? AppColors.purpleDark.withOpacity(0.4)
             : Colors.white.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(8),
+        shape: BoxShape.circle,
       ),
       child: Icon(
         Icons.music_note_rounded,

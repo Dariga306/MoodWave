@@ -1174,6 +1174,8 @@ class _WeatherScreenState extends State<WeatherScreen>
       if (!mounted) return;
       final first = Map<String, dynamic>.from(queue.first)
         ..['queue'] = queue
+        ..['weather_city'] = city
+        ..['weather_playlist_id'] = playlistId
         ..['source'] = '$city weather · ${playlist['title'] ?? 'Vibes'}';
       MiniPlayerOverlayController.forceVisible();
       await context.read<PlayerProvider>().openTrack(first);
@@ -1211,21 +1213,41 @@ class _WeatherScreenState extends State<WeatherScreen>
     final playlistId = (payload['playlist_id'] ?? '').toString();
     final playlistCount =
         (payload['playlist_listeners_count'] as num?)?.toInt();
-    if (cityCount == null && playlistCount == null) return;
+    final payloadPlaylists = (payload['playlists'] as List?)
+        ?.whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+    final payloadTopListeners = (payload['top_listeners'] as List?)
+        ?.whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+    if (cityCount == null &&
+        playlistCount == null &&
+        payloadPlaylists == null &&
+        payloadTopListeners == null) {
+      return;
+    }
     setState(() {
       final current = Map<String, dynamic>.from(_payload ?? const {});
       if (cityCount != null) current['listeners_count'] = cityCount;
-      final playlists = ((current['playlists'] as List?) ?? const [])
-          .whereType<Map>()
-          .map((item) {
-        final map = Map<String, dynamic>.from(item);
-        if (playlistCount != null &&
-            (map['id'] ?? '').toString() == playlistId) {
-          map['listeners_count'] = playlistCount;
-        }
-        return map;
-      }).toList();
-      current['playlists'] = playlists;
+      if (payloadTopListeners != null) {
+        current['top_listeners'] = payloadTopListeners;
+      }
+      if (payloadPlaylists != null) {
+        current['playlists'] = payloadPlaylists;
+      } else {
+        final playlists = ((current['playlists'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((item) {
+          final map = Map<String, dynamic>.from(item);
+          if (playlistCount != null &&
+              (map['id'] ?? '').toString() == playlistId) {
+            map['listeners_count'] = playlistCount;
+          }
+          return map;
+        }).toList();
+        current['playlists'] = playlists;
+      }
       _payload = current;
     });
   }
@@ -1358,25 +1380,24 @@ class _WeatherScreenState extends State<WeatherScreen>
                             ),
                           ),
                           const SizedBox(height: 20),
-                          // Listener pill
-                          GestureDetector(
-                            onTap: topListeners.isEmpty
-                                ? null
-                                : () => _showListenersSheet(
-                                    topListeners, listeners, city),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 18, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.07),
-                                borderRadius: BorderRadius.circular(100),
-                                border: Border.all(
-                                    color: Colors.white.withOpacity(0.12)),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (listeners > 0)
+                          if (listeners > 0)
+                            GestureDetector(
+                              onTap: topListeners.isEmpty
+                                  ? null
+                                  : () => _showListenersSheet(
+                                      topListeners, listeners, city),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 18, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.07),
+                                  borderRadius: BorderRadius.circular(100),
+                                  border: Border.all(
+                                      color: Colors.white.withOpacity(0.12)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
                                     AnimatedBuilder(
                                       animation: _blinkController,
                                       builder: (_, __) => Opacity(
@@ -1398,28 +1419,25 @@ class _WeatherScreenState extends State<WeatherScreen>
                                           ),
                                         ),
                                       ),
-                                    )
-                                  else
-                                    const Icon(Icons.graphic_eq_rounded,
-                                        size: 13, color: Colors.white38),
-                                  const SizedBox(width: 7),
-                                  Text(
-                                    _listenersLabel(listeners, city),
-                                    style: GoogleFonts.outfit(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: accent.withOpacity(0.9),
                                     ),
-                                  ),
-                                  if (topListeners.isNotEmpty) ...[
-                                    const SizedBox(width: 8),
-                                    const Icon(Icons.chevron_right_rounded,
-                                        size: 14, color: Colors.white38),
+                                    const SizedBox(width: 7),
+                                    Text(
+                                      _listenersLabel(listeners, city),
+                                      style: GoogleFonts.outfit(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: accent.withOpacity(0.9),
+                                      ),
+                                    ),
+                                    if (topListeners.isNotEmpty) ...[
+                                      const SizedBox(width: 8),
+                                      const Icon(Icons.chevron_right_rounded,
+                                          size: 14, color: Colors.white38),
+                                    ],
                                   ],
-                                ],
+                                ),
                               ),
                             ),
-                          ),
                         ],
                       ],
                     ),
@@ -1871,7 +1889,7 @@ class _WeatherPlaylistDetailScreenState
   Future<void> _playAll({bool shuffle = false}) async {
     if (_tracks.isEmpty) return;
     var queue = List<Map<String, dynamic>>.from(_tracks);
-    if (shuffle) {
+    if (shuffle || context.read<PlayerProvider>().shuffleOn) {
       final rng = Random();
       for (int i = queue.length - 1; i > 0; i--) {
         final j = rng.nextInt(i + 1);
@@ -1880,14 +1898,17 @@ class _WeatherPlaylistDetailScreenState
         queue[j] = tmp;
       }
     }
+    final playlistId = (widget.playlist['id'] ?? '').toString();
     final first = Map<String, dynamic>.from(queue.first)
       ..['queue'] = queue
+      ..['weather_city'] = widget.city
+      ..['weather_playlist_id'] = playlistId
       ..['source'] =
           '${widget.city} weather · ${widget.playlist['title'] ?? 'Vibes'}';
     try {
       await ApiService().markWeatherListening(
         widget.city,
-        playlistId: (widget.playlist['id'] ?? '').toString(),
+        playlistId: playlistId,
       );
     } catch (_) {}
     if (!mounted) return;
@@ -2211,7 +2232,7 @@ class _WeatherPlaylistDetailScreenState
                           child: GestureDetector(
                             onTap: _tracks.isEmpty
                                 ? null
-                                : () => _playAll(shuffle: false),
+                                : () => _playAll(),
                             child: Container(
                               height: 52,
                               decoration: BoxDecoration(
@@ -2289,6 +2310,9 @@ class _WeatherPlaylistDetailScreenState
                   (ctx, i) {
                     final track = Map<String, dynamic>.from(_tracks[i])
                       ..['queue'] = _tracks
+                      ..['weather_city'] = widget.city
+                      ..['weather_playlist_id'] =
+                          (widget.playlist['id'] ?? '').toString()
                       ..['queue_context'] = title;
                     final trackTitle = track['title']?.toString() ?? 'Unknown';
                     final artist = track['artist']?.toString() ?? '';
