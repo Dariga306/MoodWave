@@ -125,7 +125,14 @@ class _LoginScreenState extends State<LoginScreen>
     } catch (e) {
       if (mounted) {
         setState(() => _googleLoading = false);
-        showErrorSnackBar(context, 'Google sign in failed');
+        final host = Uri.base.host;
+        final isTunnel = kIsWeb && host.endsWith('trycloudflare.com');
+        showErrorSnackBar(
+          context,
+          isTunnel
+              ? 'Google sign-in is blocked on this temporary demo link. Use email/password or add this domain in Firebase Authorized domains.'
+              : 'Google sign in failed',
+        );
       }
     }
   }

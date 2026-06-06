@@ -157,12 +157,13 @@ class _PageLayout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final screenH = MediaQuery.of(context).size.height;
+    final compact = screenH < 760;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          height: screenH * 0.42,
+          height: compact ? screenH * 0.36 : screenH * 0.42,
           width: double.infinity,
           child: card,
         ),
@@ -367,8 +368,10 @@ class _WeatherCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final h = MediaQuery.of(context).size.height;
+    final compact = h < 760;
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 44, 16, 0),
+      margin: EdgeInsets.fromLTRB(16, compact ? 34 : 44, 16, 0),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(32),
         gradient: const LinearGradient(
@@ -392,7 +395,10 @@ class _WeatherCard extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 18 : 24,
+              vertical: compact ? 18 : 28,
+            ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -401,9 +407,10 @@ class _WeatherCard extends StatelessWidget {
                   clipBehavior: Clip.none,
                   alignment: Alignment.center,
                   children: [
-                    const Icon(Icons.cloud, size: 80, color: Colors.white),
+                    Icon(Icons.cloud,
+                        size: compact ? 58 : 80, color: Colors.white),
                     Positioned(
-                      bottom: -8,
+                      bottom: compact ? -5 : -8,
                       child: Row(
                         children: const [
                           Text('❄️', style: TextStyle(fontSize: 16)),
@@ -416,12 +423,12 @@ class _WeatherCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                SizedBox(height: compact ? 4 : 8),
                 // Info card
                 Container(
                   width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  padding: EdgeInsets.symmetric(
+                      horizontal: 20, vertical: compact ? 12 : 16),
                   decoration: BoxDecoration(
                     color: const Color(0xFF082f49).withOpacity(0.85),
                     borderRadius: BorderRadius.circular(20),
@@ -431,24 +438,25 @@ class _WeatherCard extends StatelessWidget {
                     children: [
                       Text('−4°C',
                           style: GoogleFonts.outfit(
-                              fontSize: 38,
+                              fontSize: compact ? 30 : 38,
                               fontWeight: FontWeight.w800,
                               color: Colors.white,
                               height: 1)),
                       const SizedBox(height: 4),
                       Text('Snow · Astana',
                           style: GoogleFonts.outfit(
-                              fontSize: 15,
+                              fontSize: compact ? 13 : 15,
                               fontWeight: FontWeight.w600,
                               color: Colors.white70)),
                       const SizedBox(height: 2),
                       Text('28 people listening',
                           style: GoogleFonts.outfit(
-                              fontSize: 13, color: Colors.white38)),
+                              fontSize: compact ? 11 : 13,
+                              color: Colors.white38)),
                     ],
                   ),
                 ),
-                const SizedBox(height: 8),
+                SizedBox(height: compact ? 4 : 8),
                 // Weather chips
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -477,15 +485,16 @@ class _WeatherChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.of(context).size.height < 760;
     return Container(
-      width: 50,
-      height: 50,
+      width: compact ? 42 : 50,
+      height: compact ? 42 : 50,
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.12),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.white.withOpacity(0.16)),
       ),
-      child: Icon(icon, size: 24, color: Colors.white70),
+      child: Icon(icon, size: compact ? 21 : 24, color: Colors.white70),
     );
   }
 }

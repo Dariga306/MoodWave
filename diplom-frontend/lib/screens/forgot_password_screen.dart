@@ -108,7 +108,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         MaterialPageRoute(builder: (_) => const LoginScreen()),
         (_) => false,
       );
-      showSuccessSnackBar(context, 'Password reset successfully! Please sign in.');
+      showSuccessSnackBar(
+          context, 'Password reset successfully! Please sign in.');
     } on DioException catch (e) {
       if (!mounted) return;
       showErrorSnackBar(context, ErrorHelper.parseError(e));
@@ -200,10 +201,13 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                               onVerify: _verifyCode,
                               onResend: () async {
                                 try {
-                                  final code = await ApiService().forgotPassword(_email);
+                                  final code =
+                                      await ApiService().forgotPassword(_email);
                                   if (mounted) {
-                                    if (code != null) setState(() => _devCode = code);
-                                    showSuccessSnackBar(context, 'Code resent!');
+                                    if (code != null)
+                                      setState(() => _devCode = code);
+                                    showSuccessSnackBar(
+                                        context, 'Code resent!');
                                   }
                                 } catch (_) {}
                               },
@@ -273,8 +277,7 @@ class _StepEmail extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
               "Enter your email and we'll send you a code to reset your password.",
-              style:
-                  GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+              style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
           const SizedBox(height: 32),
           Text('EMAIL',
               style: GoogleFonts.outfit(
@@ -298,16 +301,14 @@ class _StepEmail extends StatelessWidget {
                 child: TextField(
                   controller: emailCtrl,
                   keyboardType: TextInputType.emailAddress,
-                  style: GoogleFonts.outfit(
-                      fontSize: 15, color: Colors.white),
+                  style: GoogleFonts.outfit(fontSize: 15, color: Colors.white),
                   decoration: InputDecoration(
                     hintText: 'your@email.com',
                     hintStyle: GoogleFonts.outfit(
                         fontSize: 15, color: AppColors.text3),
                     border: InputBorder.none,
                     isDense: true,
-                    contentPadding:
-                        const EdgeInsets.symmetric(vertical: 16),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                 ),
               ),
@@ -401,8 +402,7 @@ class _StepCode extends StatelessWidget {
           const SizedBox(height: 8),
           RichText(
             text: TextSpan(
-              style: GoogleFonts.outfit(
-                  fontSize: 14, color: AppColors.text2),
+              style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2),
               children: [
                 const TextSpan(text: 'We sent a 6-digit code to '),
                 TextSpan(
@@ -421,27 +421,34 @@ class _StepCode extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: const Color(0xFF1a1a2e),
-                border: Border.all(color: AppColors.purpleLight.withOpacity(0.5)),
+                border:
+                    Border.all(color: AppColors.purpleLight.withOpacity(0.5)),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Email not delivered — use this code:',
-                    style: GoogleFonts.outfit(fontSize: 12, color: AppColors.text2)),
-                const SizedBox(height: 4),
-                GestureDetector(
-                  onTap: () {
-                    for (int i = 0; i < 6 && i < devCode!.length; i++) {
-                      codeCtrl[i].text = devCode![i];
-                    }
-                  },
-                  child: Text(devCode!,
-                      style: GoogleFonts.outfit(
-                          fontSize: 28, fontWeight: FontWeight.w800,
-                          letterSpacing: 8, color: AppColors.purpleLight)),
-                ),
-                Text('Tap the code to fill automatically',
-                    style: GoogleFonts.outfit(fontSize: 11, color: AppColors.text3)),
-              ]),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Email not delivered — use this code:',
+                        style: GoogleFonts.outfit(
+                            fontSize: 12, color: AppColors.text2)),
+                    const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: () {
+                        for (int i = 0; i < 6 && i < devCode!.length; i++) {
+                          codeCtrl[i].text = devCode![i];
+                        }
+                      },
+                      child: Text(devCode!,
+                          style: GoogleFonts.outfit(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 8,
+                              color: AppColors.purpleLight)),
+                    ),
+                    Text('Tap the code to fill automatically',
+                        style: GoogleFonts.outfit(
+                            fontSize: 11, color: AppColors.text3)),
+                  ]),
             ),
             const SizedBox(height: 16),
           ],
@@ -526,8 +533,8 @@ class _StepCode extends StatelessWidget {
               onTap: onResend,
               child: RichText(
                 text: TextSpan(
-                  style: GoogleFonts.outfit(
-                      fontSize: 14, color: AppColors.text2),
+                  style:
+                      GoogleFonts.outfit(fontSize: 14, color: AppColors.text2),
                   children: [
                     const TextSpan(text: "Didn't receive it? "),
                     TextSpan(
@@ -576,6 +583,7 @@ class _StepNewPassword extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final colors = [
       const Color(0xFFef4444),
       const Color(0xFFf59e0b),
@@ -584,8 +592,9 @@ class _StepNewPassword extends StatelessWidget {
     ];
     final labels = ['Weak', 'Fair', 'Good', 'Strong'];
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 28),
+    return SingleChildScrollView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: EdgeInsets.fromLTRB(28, 0, 28, 28 + bottomInset),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -608,11 +617,10 @@ class _StepNewPassword extends StatelessWidget {
                   color: Colors.white)),
           const SizedBox(height: 8),
           Text('Create a strong password for your account.',
-              style:
-                  GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
+              style: GoogleFonts.outfit(fontSize: 14, color: AppColors.text2)),
           const SizedBox(height: 32),
-          _buildPasswordField(
-              context, 'NEW PASSWORD', newCtrl, showNew, onToggleNew, onChanged),
+          _buildPasswordField(context, 'NEW PASSWORD', newCtrl, showNew,
+              onToggleNew, onChanged),
           if (newCtrl.text.isNotEmpty) ...[
             const SizedBox(height: 8),
             Row(children: [
@@ -707,12 +715,10 @@ class _StepNewPassword extends StatelessWidget {
           controller: ctrl,
           obscureText: !visible,
           onChanged: (_) => onChange(),
-          style:
-              GoogleFonts.outfit(fontSize: 15, color: Colors.white),
+          style: GoogleFonts.outfit(fontSize: 15, color: Colors.white),
           decoration: InputDecoration(
             hintText: '••••••••',
-            hintStyle: GoogleFonts.outfit(
-                color: AppColors.text3, fontSize: 15),
+            hintStyle: GoogleFonts.outfit(color: AppColors.text3, fontSize: 15),
             prefixIcon: const Icon(Icons.lock_outline_rounded,
                 size: 18, color: AppColors.text3),
             suffixIcon: GestureDetector(
