@@ -43,6 +43,8 @@ Thumbs.db
 desktop.ini
 
 # ── Runtime / generated data ─────────────────────────────────────────
+runtime/demo/*
+!runtime/demo/.gitkeep
 moodwave-backend/dump.rdb
 moodwave-backend/tmp/
 moodwave-backend/uploads/audio/
